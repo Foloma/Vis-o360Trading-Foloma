@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foloma Trading System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+        body {
+            background: #0a0e1a;
+            color: #fff;
+            min-height: 100vh;
+        }
+        .top-bar {
+            background: #1a1f2f;
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #2a3342;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .logo {
+            font-size: 20px;
+            font-weight: bold;
+            color: #00f0b5;
+        }
+        .menu-btn {
+            background: #2a3342;
+            border: none;
+            color: #fff;
+            font-size: 24px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .side-menu {
+            position: fixed;
+            top: 0;
+            left: -280px;
+            width: 280px;
+            height: 100%;
+            background: #1a1f2f;
+            z-index: 1000;
+            transition: left 0.3s ease;
+            padding: 20px;
+            border-right: 1px solid #2a3342;
+        }
+        .side-menu.open {
+            left: 0;
+        }
+        .menu-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #2a3342;
+        }
+        .menu-close {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        .menu-item {
+            padding: 12px 0;
+            color: #fff;
+            text-decoration: none;
+            display: block;
+            border-bottom: 1px solid #2a3342;
+            cursor: pointer;
+        }
+        .menu-item:hover {
+            color: #00f0b5;
+        }
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+            display: none;
+        }
+        .overlay.show {
+            display: block;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 16px;
+        }
+        .card {
+            background: #1a1f2f;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border: 1px solid #2a3342;
+        }
+        .card-title {
+            color: #00f0b5;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #2a3342;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .mode-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .mode-btn {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+            background: #2a3342;
+            color: #fff;
+            border: none;
+        }
+        .mode-btn.active {
+            background: #00f0b5;
+            color: #0b0e14;
+        }
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .balance {
+            font-size: 24px;
+            font-weight: bold;
+            color: #00f0b5;
+        }
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4d4d;
+            display: inline-block;
+        }
+        .dot.connected {
+            background: #00f0b5;
+            box-shadow: 0 0 8px #00f0b5;
+        }
+        .price-area {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            background: #0b0e14;
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+        }
+        .price {
+            font-size: 28px;
+            font-weight: bold;
+            color: #00f0b5;
+        }
+        .signal-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 40px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .signal-badge.buy {
+            background: #00f0b5;
+            color: #0a0e1a;
+        }
+        .signal-badge.sell {
+            background: #ff4d4d;
+            color: #fff;
+        }
+        .signal-badge.neutral {
+            background: #62748c;
+            color: #fff;
+        }
+        .signal-confidence {
+            font-size: 20px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .indicators-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .indicator {
+            background: #0b0e14;
+            padding: 8px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .indicator .label {
+            font-size: 9px;
+            color: #62748c;
+        }
+        .indicator .value {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .indicator .desc {
+            font-size: 8px;
+            color: #00f0b5;
+        }
+        .symbol-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .symbol-btn {
+            background: #0b0e14;
+            border: 1px solid #2a3342;
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .symbol-btn.active {
+            background: #00f0b5;
+            color: #0a0e1a;
+            border-color: #00f0b5;
+        }
+        .amount-input {
+            width: 100%;
+            padding: 12px;
+            background: #0b0e14;
+            border: 1px solid #2a3342;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 16px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        .trade-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .btn-buy {
+            background: #00f0b5;
+            color: #0a0e1a;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .btn-buy:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-sell {
+            background: #ff4d4d;
+            color: #fff;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .btn-sell:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .digits-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .last-digit {
+            font-size: 32px;
+            font-weight: bold;
+            color: #00f0b5;
+        }
+        .digits-history {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin: 12px 0;
+        }
+        .digit-box {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            background: #0b0e14;
+        }
+        .digit-box.odd {
+            color: #00f0b5;
+            border: 1px solid #00f0b5;
+        }
+        .digit-box.even {
+            color: #ff4d4d;
+            border: 1px solid #ff4d4d;
+        }
+        .percent-stats {
+            background: #0b0e14;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 12px 0;
+        }
+        .percent-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .percent-odd-value {
+            color: #00f0b5;
+        }
+        .percent-even-value {
+            color: #ff4d4d;
+        }
+        .percent-bar {
+            display: flex;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .percent-odd-bar {
+            background: #00f0b5;
+            transition: width 0.3s;
+        }
+        .percent-even-bar {
+            background: #ff4d4d;
+            transition: width 0.3s;
+        }
+        .alert-box {
+            background: linear-gradient(135deg, #ffaa00, #ff8800);
+            border-radius: 10px;
+            padding: 12px;
+            margin: 12px 0;
+            text-align: center;
+            display: none;
+            animation: pulse 1s infinite;
+        }
+        .alert-box.show {
+            display: block;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
+        }
+        .digit-countdown {
+            text-align: center;
+            font-size: 12px;
+            color: #ffaa00;
+            margin: 8px 0;
+        }
+        .hybrid-status {
+            background: #0b0e14;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 12px;
+            text-align: center;
+            font-size: 12px;
+        }
+        .martingale-status {
+            background: #0b0e14;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+        .btn-martingale {
+            background: #ffaa00;
+            color: #0a0e1a;
+            border: none;
+            padding: 8px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            flex: 1;
+        }
+        .btn-martingale-reset {
+            background: #2a3342;
+            color: #fff;
+            border: none;
+            padding: 8px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            flex: 1;
+        }
+        .trade-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #2a3342;
+            font-size: 12px;
+        }
+        .win { color: #00f0b5; }
+        .loss { color: #ff4d4d; }
+        .pending { color: #ffaa00; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .stat-label {
+            font-size: 10px;
+            color: #62748c;
+        }
+        .btn-primary {
+            background: #00f0b5;
+            color: #0a0e14;
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .btn-secondary {
+            background: #2a3342;
+            color: #fff;
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .btn-small {
+            background: #2a3342;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            color: #fff;
+            cursor: pointer;
+        }
+        .hidden {
+            display: none;
+        }
+        .link-copy {
+            display: flex;
+            gap: 8px;
+        }
+        .link-copy input {
+            flex: 1;
+            padding: 8px;
+            background: #0b0e14;
+            border: 1px solid #2a3342;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 12px;
+        }
+        .account-selector {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .account-btn {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+            background: #2a3342;
+            color: #fff;
+            border: none;
+        }
+        .account-btn.active {
+            background: #00f0b5;
+            color: #0b0e14;
+        }
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 1100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background: #1a1f2f;
+            padding: 24px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 350px;
+        }
+        .modal input {
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            background: #0b0e14;
+            border: 1px solid #2a3342;
+            border-radius: 8px;
+            color: #fff;
+        }
+        .text-center { text-align: center; }
+        .mt-2 { margin-top: 8px; }
+        .mb-2 { margin-bottom: 8px; }
+        .flex { display: flex; gap: 8px; }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <button class="menu-btn" onclick="toggleMenu()">☰</button>
+        <div class="logo">FOLOMA</div>
+        <div></div>
+    </div>
+    <div class="side-menu" id="sideMenu">
+        <div class="menu-header">
+            <span style="color:#00f0b5; font-weight:bold;">MENU</span>
+            <button class="menu-close" onclick="toggleMenu()">✕</button>
+        </div>
+        <div class="menu-item" onclick="showSection('dashboard')">📊 Dashboard</div>
+        <div class="menu-item" onclick="showSection('affiliate')">🔗 Afiliado</div>
+        <div class="menu-item" onclick="showSection('payment')">💰 Depósito/Saque</div>
+        <div class="menu-item" onclick="showSection('settings')">⚙️ Configurações</div>
+        <div class="menu-item" onclick="logout()">🚪 Sair</div>
+    </div>
+    <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
+    <div class="container" id="mainContent" style="display:none;">
+        <div id="dashboard-section">
+            <!-- Status -->
+            <div class="card">
+                <div class="card-title">📡 STATUS</div>
+                <div class="status-row">
+                    <div><span class="dot" id="statusDot"></span> <span id="statusText">Desconectado</span></div>
+                    <div class="balance"><span id="balance">0.00</span> <span id="currency">USD</span></div>
+                </div>
+                <button class="btn-primary" id="connectBtn" onclick="conectar()">🔌 CONECTAR</button>
+                <div id="connectStatus" class="text-center mt-2" style="font-size:11px; color:#ffaa00;"></div>
+            </div>
+            <!-- Modo de operação (3 modos) -->
+            <div class="card">
+                <div class="card-title">🎮 MODO DE OPERAÇÃO</div>
+                <div class="mode-selector">
+                    <button id="modeAtivos" class="mode-btn active" onclick="setModo('ativos')">📈 ATIVOS</button>
+                    <button id="modeDigitos" class="mode-btn" onclick="setModo('digitos')">🎲 DÍGITOS</button>
+                    <button id="modeHybrid" class="mode-btn" onclick="setModo('hybrid')">🔗 HÍBRIDO</button>
+                </div>
+            </div>
+            <!-- Painel Ativos -->
+            <div id="modoAtivosPanel">
+                <div class="card">
+                    <div class="card-title">📊 ATIVOS</div>
+                    <div class="symbol-row" id="symbol-selector"></div>
+                </div>
+                <div class="card">
+                    <div class="price-area">
+                        <div class="price" id="price">0.0000</div>
+                        <div><span id="signalBadge" class="signal-badge neutral">NEUTRAL</span><span id="signalConfidence" class="signal-confidence">0%</span></div>
+                    </div>
+                    <div class="indicators-row">
+                        <div class="indicator"><div class="label">TENDÊNCIA</div><div class="value" id="trendScore">-</div><div class="desc" id="trendDesc">---</div></div>
+                        <div class="indicator"><div class="label">RSI</div><div class="value" id="rsiScore">-</div><div class="desc" id="rsiDesc">---</div></div>
+                        <div class="indicator"><div class="label">MACD</div><div class="value" id="macdScore">-</div><div class="desc" id="macdDesc">---</div></div>
+                        <div class="indicator"><div class="label">BB</div><div class="value" id="bbScore">-</div><div class="desc" id="bbDesc">---</div></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Painel Dígitos -->
+            <div id="modoDigitosPanel" class="hidden">
+                <div class="card">
+                    <div class="card-title">🎲 ANÁLISE DE DÍGITOS</div>
+                    <div class="digits-header">
+                        <div><div style="font-size:11px;">ÚLTIMO DÍGITO</div><span class="last-digit" id="lastDigit">-</span></div>
+                        <div><div style="font-size:11px;">SEQUÊNCIA</div><span id="streakCounter">0</span> <span id="streakType">---</span></div>
+                    </div>
+                    <div class="digit-countdown">Próximo tick em: <span id="digitCountdown">5s</span></div>
+                    <div class="digits-history" id="digitsHistory"></div>
+                    <div class="percent-stats">
+                        <div class="percent-row">
+                            <span>🎲 ÍMPAR</span>
+                            <span class="percent-odd-value" id="oddPercent">0%</span>
+                        </div>
+                        <div class="percent-bar">
+                            <div class="percent-odd-bar" id="oddBar" style="width: 0%"></div>
+                            <div class="percent-even-bar" id="evenBar" style="width: 0%"></div>
+                        </div>
+                        <div class="percent-row mt-2">
+                            <span>🎯 PAR</span>
+                            <span class="percent-even-value" id="evenPercent">0%</span>
+                        </div>
+                    </div>
+                    <div id="alertBox" class="alert-box">
+                        <div id="alertMessage"></div>
+                        <div class="flex" style="justify-content: center; margin-top: 8px;">
+                            <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
+                            <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
+                        </div>
+                        <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
+                    </div>
+                    <div class="stats-grid" style="margin-top: 12px;">
+                        <div><div class="stat-value" id="totalDigits">0</div><div class="stat-label">Total</div></div>
+                        <div><div class="stat-value" id="oddCount">0</div><div class="stat-label">ÍMPARES</div></div>
+                        <div><div class="stat-value" id="evenCount">0</div><div class="stat-label">PARES</div></div>
+                        <div><div class="stat-value" id="accuracy">0%</div><div class="stat-label">Acertividade</div></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Trading panel -->
+            <div class="card">
+                <div class="card-title">🎯 EXECUTAR TRADE</div>
+                <input type="number" id="amount" class="amount-input" value="0.35" step="0.01" min="0.35" max="100">
+                
+                <!-- Status híbrido (aparece apenas no modo híbrido) -->
+                <div id="hybridStatus" class="hybrid-status hidden">
+                    <div id="hybridSignal"></div>
+                    <div id="hybridConfidence"></div>
+                </div>
+                
+                <div id="ativosButtons">
+                    <div class="trade-buttons">
+                        <button class="btn-buy" id="hybridBuyBtn" onclick="executeTrade('BUY')">📈 COMPRAR</button>
+                        <button class="btn-sell" id="hybridSellBtn" onclick="executeTrade('SELL')">📉 VENDER</button>
+                    </div>
+                </div>
+                <div id="digitosButtons" class="hidden">
+                    <div class="trade-buttons">
+                        <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR</button>
+                        <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR</button>
+                    </div>
+                </div>
+                <div class="flex">
+                    <button class="btn-martingale" onclick="aplicarMartingale()">🎲 MARTINGALE</button>
+                    <button class="btn-martingale-reset" onclick="resetarMartingale()">🔄 RESETAR</button>
+                </div>
+                <div class="martingale-status">
+                    <div>Martingale: <span id="martingaleActive">DESATIVADO</span></div>
+                    <div>Próximo valor: <span id="martingaleNext">$0.35</span></div>
+                </div>
+                <button class="btn-small" style="width:100%; margin-top:8px;" onclick="togglePause()" id="pauseBtn">⏸️ PAUSAR</button>
+            </div>
+        </div>
+        <!-- Afiliado -->
+        <div id="affiliate-section" class="hidden">
+            <div class="card">
+                <div class="card-title">🔗 SEU LINK</div>
+                <div class="link-copy">
+                    <input type="text" id="referralLink" readonly value="Carregando...">
+                    <button class="btn-small" onclick="copiarLink()">📋</button>
+                </div>
+                <div class="stats-grid" style="margin-top:15px;">
+                    <div><div class="stat-value" id="refCount">0</div><div class="stat-label">Indicações</div></div>
+                    <div><div class="stat-value" id="refCommission">$0</div><div class="stat-label">Comissão</div></div>
+                </div>
+            </div>
+        </div>
+        <!-- Pagamento -->
+        <div id="payment-section" class="hidden">
+            <div class="card">
+                <div class="card-title">💰 DEPOSITAR</div>
+                <input type="number" id="depositAmount" placeholder="Valor" min="10" class="amount-input">
+                <select id="depositMethod" class="btn-small" style="width:100%;">
+                    <option value="cryptocurrency">💎 Criptomoedas</option>
+                    <option value="bank_transfer">🏦 Transferência</option>
+                </select>
+                <button class="btn-primary mt-2" onclick="realizarDeposito()">DEPOSITAR</button>
+            </div>
+            <div class="card">
+                <div class="card-title">💸 SACAR</div>
+                <input type="number" id="withdrawAmount" placeholder="Valor" min="10" class="amount-input">
+                <select id="withdrawMethod" class="btn-small" style="width:100%;">
+                    <option value="cryptocurrency">💎 Criptomoedas</option>
+                    <option value="bank_transfer">🏦 Transferência</option>
+                </select>
+                <button class="btn-primary mt-2" onclick="realizarSaque()">SACAR</button>
+            </div>
+        </div>
+        <!-- Configurações -->
+        <div id="settings-section" class="hidden">
+            <div class="card">
+                <div class="card-title">🏦 CONTA</div>
+                <div class="account-selector">
+                    <button id="btnDemo" class="account-btn active" onclick="selectAccount('demo')">🎮 DEMO</button>
+                    <button id="btnReal" class="account-btn" onclick="selectAccount('real')">💰 REAL</button>
+                </div>
+                <div id="accountInfo" class="text-center mt-2" style="font-size:11px; color:#62748c;"></div>
+            </div>
+            <div class="card">
+                <div class="card-title">🔑 TOKEN DERIV</div>
+                <input type="password" id="tokenInput" placeholder="Cole seu token aqui" class="amount-input">
+                <button class="btn-primary" onclick="saveToken()">💾 SALVAR</button>
+                <div id="tokenStatus" style="font-size:11px; color:#ffaa00; margin-top:8px;"></div>
+            </div>
+            <div class="card">
+                <div class="card-title">📊 ESTATÍSTICAS</div>
+                <div class="stats-grid">
+                    <div><div class="stat-value" id="totalTrades">0</div><div class="stat-label">Trades</div></div>
+                    <div><div class="stat-value" id="winRate">0%</div><div class="stat-label">Win Rate</div></div>
+                    <div><div class="stat-value" id="profitLoss">$0</div><div class="stat-label">P/L</div></div>
+                    <div><div class="stat-value" id="totalReturn">0%</div><div class="stat-label">Retorno</div></div>
+                </div>
+            </div>
+        </div>
+        <!-- Últimos trades -->
+        <div class="card">
+            <div class="card-title">📋 ÚLTIMOS TRADES</div>
+            <div id="tradesList">
+                <div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>
+            </div>
+        </div>
+    </div>
+    <!-- Modal de login -->
+    <div id="authModal" class="modal">
+        <div class="modal-content">
+            <h2 style="color:#00f0b5; text-align:center;">FOLOMA</h2>
+            <div style="display:flex; gap:10px; margin:15px 0;">
+                <button class="btn-small" style="flex:1;" onclick="showAuthTab('login')">ENTRAR</button>
+                <button class="btn-small" style="flex:1;" onclick="showAuthTab('register')">REGISTAR</button>
+            </div>
+            <div id="loginForm">
+                <input type="email" id="loginEmail" placeholder="Email">
+                <input type="password" id="loginPassword" placeholder="Senha">
+                <button class="btn-primary" onclick="login()">ENTRAR</button>
+            </div>
+            <div id="registerForm" style="display:none;">
+                <input type="text" id="regName" placeholder="Nome">
+                <input type="email" id="regEmail" placeholder="Email">
+                <input type="password" id="regPassword" placeholder="Senha (min 6)">
+                <input type="text" id="regReferral" placeholder="Código de indicação">
+                <button class="btn-primary" onclick="register()">CRIAR CONTA</button>
+            </div>
+            <div id="authError" class="text-center mt-2" style="color:#ff4d4d; font-size:12px;"></div>
+        </div>
+    </div>
+    <script>
+        // ========== VARIÁVEIS GLOBAIS ==========
+        let currentSection = 'dashboard';
+        let selectedAccount = 'demo';
+        let paused = false;
+        let isConnected = false;
+        let currentSymbol = 'R_100';
+        let modoAtual = 'ativos';
+        let digitCountdown = 5;
+        let digitTimer = null;
+        let lastKnownDigit = null;
+        let currentAlertTimeout = null;
+        const symbols = { 'R_100': 'Volatility 100', 'R_75': 'Volatility 75', 'R_50': 'Volatility 50' };
+
+        // ========== MENU ==========
+        function toggleMenu() {
+            document.getElementById('sideMenu').classList.toggle('open');
+            document.getElementById('overlay').classList.toggle('show');
+        }
+        function showSection(section) {
+            document.getElementById('dashboard-section').classList.remove('hidden');
+            document.getElementById('affiliate-section').classList.add('hidden');
+            document.getElementById('payment-section').classList.add('hidden');
+            document.getElementById('settings-section').classList.add('hidden');
+            if (section === 'affiliate') {
+                document.getElementById('dashboard-section').classList.add('hidden');
+                document.getElementById('affiliate-section').classList.remove('hidden');
+                carregarLinkAfiliado();
+            } else if (section === 'payment') {
+                document.getElementById('dashboard-section').classList.add('hidden');
+                document.getElementById('payment-section').classList.remove('hidden');
+            } else if (section === 'settings') {
+                document.getElementById('dashboard-section').classList.add('hidden');
+                document.getElementById('settings-section').classList.remove('hidden');
+            }
+            currentSection = section;
+            toggleMenu();
+        }
+
+        // ========== MODO (3 modos) ==========
+        function setModo(modo) {
+            modoAtual = modo;
+            const btnAtivos = document.getElementById('modeAtivos');
+            const btnDigitos = document.getElementById('modeDigitos');
+            const btnHybrid = document.getElementById('modeHybrid');
+            const panelAtivos = document.getElementById('modoAtivosPanel');
+            const panelDigitos = document.getElementById('modoDigitosPanel');
+            const ativosButtons = document.getElementById('ativosButtons');
+            const digitosButtons = document.getElementById('digitosButtons');
+            const hybridStatus = document.getElementById('hybridStatus');
+            
+            btnAtivos.classList.remove('active');
+            btnDigitos.classList.remove('active');
+            btnHybrid.classList.remove('active');
+            if (modo === 'ativos') btnAtivos.classList.add('active');
+            else if (modo === 'digitos') btnDigitos.classList.add('active');
+            else btnHybrid.classList.add('active');
+            
+            panelAtivos.classList.toggle('hidden', modo !== 'ativos');
+            panelDigitos.classList.toggle('hidden', modo !== 'digitos');
+            
+            if (modo === 'hybrid') {
+                ativosButtons.classList.remove('hidden');
+                digitosButtons.classList.add('hidden');
+                hybridStatus.classList.remove('hidden');
+            } else {
+                ativosButtons.classList.remove('hidden');
+                digitosButtons.classList.add('hidden');
+                hybridStatus.classList.add('hidden');
+                // Reabilita os botões quando sair do híbrido
+                const buyBtn = document.getElementById('hybridBuyBtn');
+                const sellBtn = document.getElementById('hybridSellBtn');
+                if (buyBtn && sellBtn) {
+                    buyBtn.disabled = false;
+                    sellBtn.disabled = false;
+                    buyBtn.style.opacity = '1';
+                    sellBtn.style.opacity = '1';
+                }
+            }
+            
+            if (modo === 'digitos') {
+                ativosButtons.classList.add('hidden');
+                digitosButtons.classList.remove('hidden');
+            }
+        }
+
+        // ========== ALERTA ==========
+        function hideCurrentAlert() {
+            const alertBox = document.getElementById('alertBox');
+            if (alertBox && alertBox.classList.contains('show')) {
+                alertBox.classList.remove('show');
+                if (currentAlertTimeout) {
+                    clearTimeout(currentAlertTimeout);
+                    currentAlertTimeout = null;
+                }
+            }
+        }
+        function showDigitAlert(message, confidence, recommended) {
+            const alertBox = document.getElementById('alertBox');
+            const alertMessage = document.getElementById('alertMessage');
+            const alertConfidence = document.getElementById('alertConfidence');
+            const alertOddBtn = document.getElementById('alertOddBtn');
+            const alertEvenBtn = document.getElementById('alertEvenBtn');
+            hideCurrentAlert();
+            alertMessage.innerHTML = message;
+            alertConfidence.innerHTML = `Confiança: ${confidence}%`;
+            if (recommended === 'odd') {
+                alertOddBtn.style.display = 'inline-block';
+                alertEvenBtn.style.display = 'none';
+            } else if (recommended === 'even') {
+                alertOddBtn.style.display = 'none';
+                alertEvenBtn.style.display = 'inline-block';
+            } else {
+                alertOddBtn.style.display = 'inline-block';
+                alertEvenBtn.style.display = 'inline-block';
+            }
+            alertBox.classList.add('show');
+            currentAlertTimeout = setTimeout(() => {
+                hideCurrentAlert();
+            }, 10000);
+        }
+
+        // ========== CONTADOR ==========
+        function startDigitCountdown() {
+            if (digitTimer) clearInterval(digitTimer);
+            digitTimer = setInterval(() => {
+                digitCountdown--;
+                if (digitCountdown <= 0) digitCountdown = 5;
+                const countdownSpan = document.getElementById('digitCountdown');
+                if (countdownSpan) countdownSpan.textContent = digitCountdown + 's';
+            }, 1000);
+        }
+
+        // ========== AUTENTICAÇÃO ==========
+        function showAuthTab(tab) {
+            if (tab === 'login') {
+                document.getElementById('loginForm').style.display = 'block';
+                document.getElementById('registerForm').style.display = 'none';
+            } else {
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('registerForm').style.display = 'block';
+            }
+        }
+        function register() {
+            const data = {
+                name: document.getElementById('regName').value,
+                email: document.getElementById('regEmail').value,
+                password: document.getElementById('regPassword').value,
+                referral_code: document.getElementById('regReferral').value
+            };
+            fetch('/api/auth/register', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            }).then(r => r.json()).then(data => {
+                if (data.error) document.getElementById('authError').textContent = data.error;
+                else { alert('✅ Conta criada! Faça login.'); showAuthTab('login'); }
+            }).catch(err => console.error(err));
+        }
+        function login() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            fetch('/api/auth/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({email, password})
+            }).then(r => r.json()).then(data => {
+                if (data.error) document.getElementById('authError').textContent = data.error;
+                else {
+                    document.getElementById('authModal').style.display = 'none';
+                    document.getElementById('mainContent').style.display = 'block';
+                    initPlatform();
+                }
+            }).catch(err => console.error(err));
+        }
+        function logout() { fetch('/api/auth/logout', {method: 'POST'}).then(() => location.reload()); }
+
+        // ========== PLATAFORMA ==========
+        function initPlatform() {
+            initSymbolSelector();
+            selectAccount('demo');
+            setModo('ativos');
+            startDigitCountdown();
+            updateAll();
+            setInterval(updateAll, 2000);
+            setInterval(carregarHistorico, 3000);
+            setInterval(atualizarMartingale, 5000);
+            carregarLinkAfiliado();
+        }
+        function initSymbolSelector() {
+            let html = '';
+            for (let [key, value] of Object.entries(symbols)) {
+                html += `<button class="symbol-btn ${key === currentSymbol ? 'active' : ''}" onclick="changeSymbol('${key}')">${value}</button>`;
+            }
+            document.getElementById('symbol-selector').innerHTML = html;
+        }
+        function changeSymbol(symbol) {
+            currentSymbol = symbol;
+            fetch('/api/symbol/change', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({symbol: symbol})
+            });
+            document.querySelectorAll('.symbol-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+        function selectAccount(account) {
+            selectedAccount = account;
+            const btnDemo = document.getElementById('btnDemo');
+            const btnReal = document.getElementById('btnReal');
+            const info = document.getElementById('accountInfo');
+            if (account === 'demo') {
+                btnDemo.classList.add('active');
+                btnReal.classList.remove('active');
+                info.innerHTML = '🎮 Conta Demo - Saldo virtual, sem risco';
+            } else {
+                btnDemo.classList.remove('active');
+                btnReal.classList.add('active');
+                info.innerHTML = '💰 Conta Real - Ganhe comissão de 0.5% por trade';
+            }
+        }
+        function saveToken() {
+            const token = document.getElementById('tokenInput').value;
+            if (!token) { alert('Insira o token'); return; }
+            fetch('/api/auth/save_token', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({token: token, account_type: selectedAccount})
+            }).then(r => r.json()).then(data => {
+                if (data.error) alert('❌ ' + data.error);
+                else { alert('✅ Token guardado!'); document.getElementById('tokenStatus').innerHTML = '✅ Token configurado'; document.getElementById('tokenStatus').style.color = '#00f0b5'; }
+            });
+        }
+        function conectar() {
+            if (isConnected) { alert('Já conectado!'); return; }
+            const btn = document.getElementById('connectBtn');
+            const statusDiv = document.getElementById('connectStatus');
+            btn.disabled = true;
+            btn.textContent = '🔄 CONECTANDO...';
+            statusDiv.innerHTML = '⏳ Conectando à Deriv...';
+            fetch('/api/connect', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({account_type: selectedAccount, symbol: currentSymbol})
+            }).then(r => r.json()).then(data => {
+                if (data.error) {
+                    statusDiv.innerHTML = '❌ ' + data.error;
+                    btn.disabled = false;
+                    btn.textContent = '🔌 CONECTAR';
+                } else {
+                    statusDiv.innerHTML = '✅ Conectado!';
+                    setTimeout(() => statusDiv.innerHTML = '', 3000);
+                    btn.disabled = false;
+                    btn.textContent = '✅ CONECTADO';
+                    btn.style.background = '#2a3342';
+                    isConnected = true;
+                }
+            });
+        }
+
+        // ========== TRADES ==========
+        function executeTrade(action) {
+            const amount = parseFloat(document.getElementById('amount').value);
+            if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
+            let url = '/api/trade';
+            if (modoAtual === 'hybrid') {
+                url = '/api/trade/hybrid';
+            }
+            fetch(url, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: action, amount: amount})
+            }).then(r => r.json()).then(data => {
+                if (data.error) alert('❌ ' + data.error);
+                else alert(data.message || '✅ Trade executado!');
+            });
+        }
+        function executeDigitTrade(prediction) {
+            const amount = parseFloat(document.getElementById('amount').value);
+            if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
+            fetch('/api/trade/digit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({prediction: prediction, amount: amount})
+            }).then(r => r.json()).then(data => {
+                if (data.error) alert('❌ ' + data.error);
+                else alert('✅ Aposta enviada!');
+            });
+        }
+        function executarAlerta(prediction) {
+            const amount = parseFloat(document.getElementById('amount').value);
+            if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
+            if (confirm(`Confirmar aposta em ${prediction === 'odd' ? 'ÍMPAR' : 'PAR'}?`)) executeDigitTrade(prediction);
+        }
+
+        function togglePause() {
+            paused = !paused;
+            fetch('/api/pause', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({paused: paused})});
+            document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
+        }
+        function aplicarMartingale() {
+            fetch('/api/report').then(r => r.json()).then(data => {
+                const historico = data.historico || [];
+                if (historico.length === 0) { alert('⚠️ Nenhum trade anterior'); return; }
+                const ultimo = historico[historico.length - 1];
+                if (ultimo.result === 'win') { alert('✅ Último trade foi GANHO. Martingale só após perda.'); return; }
+                if (confirm(`⚠️ Último trade PERDA de $${ultimo.amount}\nAplicar Martingale (2x)?`)) {
+                    fetch('/api/martingale/apply', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({last_amount: ultimo.amount})
+                    }).then(r => r.json()).then(data => {
+                        if (data.error) alert('❌ ' + data.error);
+                        else { alert(data.martingale.message); document.getElementById('amount').value = data.martingale.next_amount.toFixed(2); atualizarMartingale(); }
+                    });
+                }
+            });
+        }
+        function resetarMartingale() {
+            if (confirm('Resetar Martingale?')) {
+                fetch('/api/martingale/reset', {method: 'POST'}).then(() => { alert('✅ Martingale resetado!'); document.getElementById('amount').value = '0.35'; atualizarMartingale(); });
+            }
+        }
+        function atualizarMartingale() {
+            fetch('/api/martingale/status').then(r => r.json()).then(data => {
+                const activeSpan = document.getElementById('martingaleActive');
+                const nextSpan = document.getElementById('martingaleNext');
+                if (data.active) { activeSpan.textContent = `ATIVO (PASSO ${data.step}/${data.max_steps})`; activeSpan.style.color = '#00f0b5'; }
+                else { activeSpan.textContent = 'DESATIVADO'; activeSpan.style.color = '#ffaa00'; }
+                nextSpan.textContent = '$' + data.next_amount.toFixed(2);
+            });
+        }
+
+        // ========== ATUALIZAÇÃO EM TEMPO REAL ==========
+        function updateAll() {
+            fetch('/api/status').then(r => r.json()).then(data => {
+                if (data.error) return;
+                const bot = data.bot;
+                if (!bot) return;
+                // Status
+                const dot = document.getElementById('statusDot');
+                const text = document.getElementById('statusText');
+                const btn = document.getElementById('connectBtn');
+                if (bot.connected && bot.authorized) {
+                    dot.className = 'dot connected';
+                    text.textContent = 'Conectado';
+                    if (btn.textContent !== '✅ CONECTADO') { btn.textContent = '✅ CONECTADO'; btn.style.background = '#2a3342'; }
+                    isConnected = true;
+                } else {
+                    dot.className = 'dot';
+                    text.textContent = 'Desconectado';
+                    if (isConnected) { btn.textContent = '🔌 CONECTAR'; btn.style.background = '#00f0b5'; }
+                    isConnected = false;
+                }
+                // Saldo e preço
+                document.getElementById('balance').textContent = (bot.balance || 0).toFixed(2);
+                document.getElementById('currency').textContent = bot.currency || 'USD';
+                document.getElementById('price').textContent = (bot.price || 0).toFixed(4);
+                const signal = bot.signal || 'NEUTRAL';
+                const badge = document.getElementById('signalBadge');
+                badge.textContent = signal;
+                badge.className = 'signal-badge ' + signal.toLowerCase();
+                document.getElementById('signalConfidence').textContent = (bot.confidence || 0) + '%';
+                if (bot.analysis) {
+                    document.getElementById('trendScore').textContent = (bot.analysis.trend?.score || 0).toFixed(1);
+                    document.getElementById('trendDesc').textContent = bot.analysis.trend?.desc || '---';
+                    document.getElementById('rsiScore').textContent = (bot.analysis.rsi?.score || 0).toFixed(1);
+                    document.getElementById('rsiDesc').textContent = bot.analysis.rsi?.desc || '---';
+                    document.getElementById('macdScore').textContent = (bot.analysis.macd?.score || 0).toFixed(1);
+                    document.getElementById('macdDesc').textContent = bot.analysis.macd?.desc || '---';
+                    document.getElementById('bbScore').textContent = (bot.analysis.bollinger?.score || 0).toFixed(1);
+                    document.getElementById('bbDesc').textContent = bot.analysis.bollinger?.desc || '---';
+                }
+                document.getElementById('totalTrades').textContent = bot.stats?.total || 0;
+                document.getElementById('winRate').textContent = (bot.stats?.win_rate || 0).toFixed(1) + '%';
+                const pl = bot.stats?.profit_loss || 0;
+                const plElem = document.getElementById('profitLoss');
+                plElem.textContent = (pl >= 0 ? '+' : '') + '$' + pl.toFixed(2);
+                plElem.style.color = pl >= 0 ? '#00f0b5' : '#ff4d4d';
+                document.getElementById('totalReturn').textContent = (bot.stats?.total_return || 0).toFixed(1) + '%';
+                paused = bot.paused || false;
+                document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
+                
+                // Dígitos
+                if (data.digits) {
+                    const d = data.digits;
+                    const newDigit = d.last;
+                    if (newDigit !== undefined && newDigit !== lastKnownDigit) {
+                        hideCurrentAlert();
+                        lastKnownDigit = newDigit;
+                    }
+                    document.getElementById('lastDigit').textContent = newDigit ?? '-';
+                    document.getElementById('streakCounter').textContent = d.stats?.current_streak || 0;
+                    document.getElementById('streakType').textContent = d.stats?.streak_parity || '---';
+                    if (d.countdown) digitCountdown = d.countdown;
+                    const countdownSpan = document.getElementById('digitCountdown');
+                    if (countdownSpan) countdownSpan.textContent = digitCountdown + 's';
+                    if (d.recent) {
+                        let html = '';
+                        d.recent.forEach(digit => {
+                            const isOdd = digit % 2 !== 0;
+                            html += `<div class="digit-box ${isOdd ? 'odd' : 'even'}">${digit}</div>`;
+                        });
+                        document.getElementById('digitsHistory').innerHTML = html;
+                    }
+                    const analysis = d.analysis;
+                    if (analysis) {
+                        const oddPct = analysis.odd_pct || 0;
+                        const evenPct = analysis.even_pct || 0;
+                        document.getElementById('oddPercent').textContent = oddPct + '%';
+                        document.getElementById('evenPercent').textContent = evenPct + '%';
+                        document.getElementById('oddBar').style.width = oddPct + '%';
+                        document.getElementById('evenBar').style.width = evenPct + '%';
+                        document.getElementById('totalDigits').textContent = d.stats?.total || 0;
+                        document.getElementById('oddCount').textContent = d.stats?.odd || 0;
+                        document.getElementById('evenCount').textContent = d.stats?.even || 0;
+                        document.getElementById('accuracy').textContent = d.stats?.accuracy || 0;
+                        if (analysis.alert === 'RECOMENDADO' && analysis.confidence >= 65) {
+                            showDigitAlert(analysis.reason, analysis.confidence, analysis.recommended_action === 'BUY' ? 'odd' : (analysis.recommended_action === 'SELL' ? 'even' : null));
+                        }
+                    }
+                }
+                
+                // Modo híbrido: atualizar status e controlar botões
+                if (modoAtual === 'hybrid') {
+                    const hybridDiv = document.getElementById('hybridStatus');
+                    hybridDiv.classList.remove('hidden');
+                    
+                    const ativoSignal = bot.signal;
+                    const ativoConf = bot.confidence;
+                    
+                    const digitAnalysis = data.digits.analysis;
+                    const digitRecommend = digitAnalysis ? digitAnalysis.recommended_action : null;
+                    const digitConf = digitAnalysis ? digitAnalysis.confidence : 0;
+                    
+                    let hybridMessage = '';
+                    let hybridColor = '#ffaa00';
+                    let canTrade = false;
+                    let combinedConf = 0;
+                    
+                    if (ativoSignal === 'BUY' && digitRecommend === 'BUY') {
+                        combinedConf = (ativoConf + digitConf) / 2;
+                        hybridMessage = `✅ SINAIS CONVERGENTES (COMPRA) – Confiança combinada: ${combinedConf.toFixed(1)}%`;
+                        hybridColor = '#00f0b5';
+                        canTrade = true;
+                    } else if (ativoSignal === 'SELL' && digitRecommend === 'SELL') {
+                        combinedConf = (ativoConf + digitConf) / 2;
+                        hybridMessage = `✅ SINAIS CONVERGENTES (VENDA) – Confiança combinada: ${combinedConf.toFixed(1)}%`;
+                        hybridColor = '#00f0b5';
+                        canTrade = true;
+                    } else {
+                        hybridMessage = `⚠️ SINAIS DIVERGENTES (Ativo: ${ativoSignal}, Dígitos: ${digitRecommend || 'NEUTRO'}) – Aguarde convergência`;
+                        hybridColor = '#ff4d4d';
+                        canTrade = false;
+                    }
+                    
+                    document.getElementById('hybridSignal').innerHTML = hybridMessage;
+                    document.getElementById('hybridSignal').style.color = hybridColor;
+                    document.getElementById('hybridConfidence').innerHTML = canTrade ? `Pronto para trade!` : `Confiança combinada: ${combinedConf.toFixed(1)}% (mínimo 70%)`;
+                    
+                    // Controlar botões
+                    const buyBtn = document.getElementById('hybridBuyBtn');
+                    const sellBtn = document.getElementById('hybridSellBtn');
+                    if (buyBtn && sellBtn) {
+                        buyBtn.disabled = !canTrade;
+                        sellBtn.disabled = !canTrade;
+                        buyBtn.style.opacity = canTrade ? '1' : '0.5';
+                        sellBtn.style.opacity = canTrade ? '1' : '0.5';
+                    }
+                }
+            });
+        }
+
+        function carregarHistorico() {
+            fetch('/api/report').then(r => r.json()).then(data => {
+                const historico = data.historico || [];
+                const tradesList = document.getElementById('tradesList');
+                if (historico.length === 0) {
+                    tradesList.innerHTML = '<div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>';
+                    return;
+                }
+                let html = '';
+                historico.slice(-10).reverse().forEach(trade => {
+                    const isWin = trade.result === 'win';
+                    const isLoss = trade.result === 'loss';
+                    let profitAmount = 0;
+                    let displayAmount = trade.amount || 0;
+                    if (isWin) {
+                        profitAmount = trade.profit || (displayAmount * 0.85);
+                    } else if (isLoss) {
+                        profitAmount = -displayAmount;
+                    }
+                    const resultColor = isWin ? '#00f0b5' : (isLoss ? '#ff4d4d' : '#ffaa00');
+                    let resultText = '';
+                    if (isWin) {
+                        resultText = `✅ +$${profitAmount.toFixed(2)}`;
+                    } else if (isLoss) {
+                        resultText = `❌ -$${displayAmount.toFixed(2)}`;
+                    } else {
+                        resultText = '⏳ PENDENTE';
+                    }
+                    let action = trade.action || '';
+                    if (action === 'BUY') action = '📈 COMPRA';
+                    else if (action === 'SELL') action = '📉 VENDA';
+                    else if (action === 'DIGIT_ODD') action = '🎲 ÍMPAR';
+                    else if (action === 'DIGIT_EVEN') action = '🎲 PAR';
+                    html += `<div class="trade-item">
+                        <div>${trade.time?.slice(5, 16) || '---'}</div>
+                        <div>${action}</div>
+                        <div>$${displayAmount.toFixed(2)}</div>
+                        <div class="${isWin ? 'win' : (isLoss ? 'loss' : 'pending')}">${resultText}</div>
+                    </div>`;
+                });
+                tradesList.innerHTML = html;
+            });
+        }
+
+        function carregarLinkAfiliado() {
+            fetch('/api/affiliate/link').then(r => r.json()).then(data => {
+                if (data.link) document.getElementById('referralLink').value = data.link;
+            }).catch(() => document.getElementById('referralLink').value = 'https://foloma.com/ref/seu_codigo');
+            fetch('/api/affiliate/stats').then(r => r.json()).then(data => {
+                document.getElementById('refCount').textContent = data.total_referrals || 0;
+                document.getElementById('refCommission').textContent = '$' + (data.total_commission || 0);
+            });
+        }
+        function copiarLink() {
+            const link = document.getElementById('referralLink');
+            link.select();
+            document.execCommand('copy');
+            alert('✅ Link copiado!');
+        }
+        function realizarDeposito() {
+            const amount = parseFloat(document.getElementById('depositAmount').value);
+            const method = document.getElementById('depositMethod').value;
+            if (!amount || amount < 10) { alert('Valor mínimo $10'); return; }
+            fetch('/api/payment/deposit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({amount: amount, currency: 'USD', method: method})
+            }).then(r => r.json()).then(data => {
+                if (data.error) alert('❌ ' + data.error);
+                else { alert('✅ ' + (data.message || 'Depósito solicitado!')); document.getElementById('depositAmount').value = ''; }
+            });
+        }
+        function realizarSaque() {
+            const amount = parseFloat(document.getElementById('withdrawAmount').value);
+            const method = document.getElementById('withdrawMethod').value;
+            if (!amount || amount < 10) { alert('Valor mínimo $10'); return; }
+            const balance = parseFloat(document.getElementById('balance').textContent);
+            if (amount > balance) { alert('❌ Saldo insuficiente!'); return; }
+            fetch('/api/payment/withdraw', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({amount: amount, currency: 'USD', method: method})
+            }).then(r => r.json()).then(data => {
+                if (data.error) alert('❌ ' + data.error);
+                else { alert('✅ ' + (data.message || 'Saque solicitado!')); document.getElementById('withdrawAmount').value = ''; }
+            });
+        }
+
+        // Verificar autenticação
+        fetch('/api/auth/status').then(r => r.json()).then(data => {
+            if (data.authenticated) {
+                document.getElementById('authModal').style.display = 'none';
+                document.getElementById('mainContent').style.display = 'block';
+                initPlatform();
+            }
+        });
+    </script>
+</body>
+</html>
