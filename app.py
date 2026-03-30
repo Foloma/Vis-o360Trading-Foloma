@@ -24,25 +24,22 @@ deriv_client = None
 payment_system = None
 
 # ========== SISTEMA DE UTILIZADORES ==========
-USERS_FILE = 'users.json'
+# O caminho para os dados persistentes (disco montado no Render)
+DATA_DIR = os.environ.get('DATA_PATH', '.')  # se não existir, usa a pasta atual
+USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 
 def load_users():
-    if not os.path.exists(USERS_FILE):
-        # Cria o ficheiro vazio se não existir
-        with open(USERS_FILE, 'w') as f:
-            json.dump({}, f)
-        return {}
-    
-    try:
-        with open(USERS_FILE, 'r') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        # Se o ficheiro estiver corrompido, recria
-        with open(USERS_FILE, 'w') as f:
-            json.dump({}, f)
-        return {}
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
 
 def save_users(users):
+    # Garante que a pasta existe
+    os.makedirs(DATA_DIR, exist_ok=True)
     with open(USERS_FILE, 'w') as f:
         json.dump(users, f, indent=2)
 
