@@ -1,169 +1,170 @@
-import numpy as np
+import math
 from collections import deque
-import logging
-from datetime import datetime
-
-logger = logging.getLogger(__name__)
 
 class TechnicalIndicators:
     def __init__(self, max_length=100):
         self.prices = deque(maxlen=max_length)
-        self.timestamps = deque(maxlen=max_length)
-        
-    def add_price(self, price, timestamp=None):
+        self.trend_score = 0
+        self.rsi_score = 0
+        self.macd_score = 0
+        self.bollinger_score = 0
+        self.trend_desc = '---'
+        self.rsi_desc = '---'
+        self.macd_desc = '---'
+        self.bollinger_desc = '---'
+
+    def add_price(self, price):
         self.prices.append(price)
-        if timestamp:
-            self.timestamps.append(timestamp)
-        else:
-            self.timestamps.append(datetime.now())
-        
-    def get_price_array(self):
-        return np.array(list(self.prices))
-    
-    def calculate_sma(self, period):
-        """Média Móvel Simples"""
-        if len(self.prices) < period:
+
+    def _sma(self, data, period):
+        if len(data) < period:
             return None
-        return float(np.mean(list(self.prices)[-period:]))
-    
-    def calculate_ema(self, period):
-        """Média Móvel Exponencial (simplificada)"""
-        if len(self.prices) < period:
+        return sum(data[-period:]) / period
+
+    def _ema(self, data, period):
+        if len(data) < period:
             return None
-        prices = list(self.prices)[-period:]
-        return float(np.mean(prices))
-    
-    def calculate_trend(self):
-        """Análise de tendência melhorada com Golden/Death Cross"""
-        if len(self.prices) < 20:
-            return 0, 'AGUARDANDO DADOS'
-        
-        sma9 = self.calculate_sma(9)
-        sma21 = self.calculate_sma(21)
-        sma50 = self.calculate_sma(50)
-        current = list(self.prices)[-1]
-        
-        if sma9 is None or sma21 is None:
-            return 0, 'AGUARDANDO'
-        
-        # Força da tendência (distância percentual)
-        strength = abs(current - sma21) / sma21 * 100
-        
-        # Golden Cross (médias) - SINAL FORTE DE ALTA
-        golden_cross = sma9 > sma21 and sma21 > sma50 if sma50 else False
-        # Death Cross (médias) - SINAL FORTE DE BAIXA
-        death_cross = sma9 < sma21 and sma21 < sma50 if sma50 else False
-        
-        # Determina direção com confirmação de médias
-        if golden_cross:
-            return min(strength * 2, 100), 'ALTA FORTE (GOLDEN CROSS)'
-        elif death_cross:
-            return min(strength * 2, 100), 'BAIXA FORTE (DEATH CROSS)'
-        elif sma9 > sma21 and current > sma9:
-            return strength, 'ALTA CONFIRMADA'
-        elif sma9 > sma21:
-            return strength, 'ALTA FRACA'
-        elif sma9 < sma21 and current < sma9:
-            return strength, 'BAIXA CONFIRMADA'
-        elif sma9 < sma21:
-            return strength, 'BAIXA FRACA'
-        else:
-            return 0, 'LATERAL'
-    
-    def calculate_rsi(self, period=14):
-        """RSI completo"""
+        k = 2 / (period + 1)
+        ema = data[-period]  # primeiro valor é a média simples
+        for i in range(-period+1, 0):
+            ema = (data[i] - ema) * k + ema
+        return ema
+
+    def _rsi(self, period=14):
         if len(self.prices) < period + 1:
-            return 50, 'AGUARDANDO'
-        
+            return None
+        gains = []
+        losses = []
         prices = list(self.prices)
-        deltas = [prices[i] - prices[i-1] for i in range(-period, 0)]
-        
-        gains = [d if d > 0 else 0 for d in deltas]
-        losses = [-d if d < 0 else 0 for d in deltas]
-        
-        avg_gain = np.mean(gains) if gains else 0
-        avg_loss = np.mean(losses) if losses else 0
-        
+        for i in range(1, period+1):
+            diff = prices[-i] - prices[-i-1]
+            if diff >= 0:
+                gains.append(diff)
+                losses.append(0)
+            else:
+                gains.append(0)
+                losses.append(-diff)
+        avg_gain = sum(gains) / period
+        avg_loss = sum(losses) / period
         if avg_loss == 0:
-            return 100, 'SOBRECOMPRADO'
-        
+            return 100
         rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
-        
-        if rsi > 70:
-            return rsi, 'SOBRECOMPRADO'
-        elif rsi < 30:
-            return rsi, 'SOBREVENDIDO'
-        else:
-            return rsi, 'NEUTRO'
-    
-    def calculate_macd(self):
-        """MACD completo"""
-        if len(self.prices) < 26:
-            return 0, 'AGUARDANDO'
-        
+        return rsi
+
+    def _macd(self, fast=12, slow=26, signal=9):
+        if len(self.prices) < slow + signal:
+            return None, None
         prices = list(self.prices)
-        ema12 = np.mean(prices[-12:])
-        ema26 = np.mean(prices[-26:])
-        
-        macd = ema12 - ema26
-        signal = macd * 0.9  # Simplificado mas funcional
-        
-        if macd > signal and macd > 0:
-            return abs(macd) * 100, 'COMPRA'
-        elif macd < signal and macd < 0:
-            return abs(macd) * 100, 'VENDA'
-        else:
-            return abs(macd) * 50, 'NEUTRO'
-    
-    def calculate_bollinger(self, period=20):
-        """Bandas de Bollinger completas"""
+        ema_fast = self._ema(prices, fast)
+        ema_slow = self._ema(prices, slow)
+        if ema_fast is None or ema_slow is None:
+            return None, None
+        macd_line = ema_fast - ema_slow
+        # Signal line = EMA de 9 períodos da macd_line
+        macd_history = []
+        for i in range(len(prices)-slow, len(prices)):
+            ema_f = self._ema(prices[:i+1], fast)
+            ema_s = self._ema(prices[:i+1], slow)
+            if ema_f is None or ema_s is None:
+                macd_history.append(None)
+            else:
+                macd_history.append(ema_f - ema_s)
+        # Últimos 'signal' valores não nulos
+        valid = [x for x in macd_history if x is not None]
+        if len(valid) < signal:
+            return macd_line, None
+        signal_line = self._ema(valid, signal)
+        return macd_line, signal_line
+
+    def _bollinger_bands(self, period=20, std_dev=2):
         if len(self.prices) < period:
-            return 0, 'AGUARDANDO'
-        
-        prices = list(self.prices)
-        recent = prices[-period:]
-        current = prices[-1]
-        
-        sma = np.mean(recent)
-        std = np.std(recent)
-        
-        upper = sma + (std * 2)
-        lower = sma - (std * 2)
-        
-        if current <= lower:
-            return 100, 'COMPRA (FUNDO)'
-        elif current >= upper:
-            return 100, 'VENDA (TOPO)'
-        elif current < sma:
-            return 50, 'LEVE COMPRA'
-        elif current > sma:
-            return 50, 'LEVE VENDA'
-        else:
-            return 0, 'NEUTRO'
-    
+            return None, None, None
+        prices = list(self.prices)[-period:]
+        sma = sum(prices) / period
+        variance = sum((p - sma) ** 2 for p in prices) / period
+        std = math.sqrt(variance)
+        upper = sma + std_dev * std
+        lower = sma - std_dev * std
+        return upper, sma, lower
+
     def get_all_indicators(self):
-        """Retorna todos os indicadores"""
-        trend_score, trend_desc = self.calculate_trend()
-        rsi_score, rsi_desc = self.calculate_rsi()
-        macd_score, macd_desc = self.calculate_macd()
-        bb_score, bb_desc = self.calculate_bollinger()
-        
-        # Médias móveis para exibição
-        sma9 = self.calculate_sma(9)
-        sma21 = self.calculate_sma(21)
-        sma50 = self.calculate_sma(50)
-        ema12 = self.calculate_ema(12)
-        ema26 = self.calculate_ema(26)
-        
+        # 1. Tendência (usando inclinação da média móvel de 9 períodos)
+        sma9 = self._sma(list(self.prices), 9)
+        sma21 = self._sma(list(self.prices), 21)
+        if sma9 is not None and sma21 is not None:
+            if sma9 > sma21:
+                self.trend_desc = 'ALTA'
+                self.trend_score = 80
+            elif sma9 < sma21:
+                self.trend_desc = 'BAIXA'
+                self.trend_score = 80
+            else:
+                self.trend_desc = 'LATERAL'
+                self.trend_score = 50
+        else:
+            self.trend_desc = '---'
+            self.trend_score = 0
+
+        # 2. RSI
+        rsi = self._rsi()
+        if rsi is not None:
+            self.rsi_score = rsi
+            if rsi < 30:
+                self.rsi_desc = 'SOBREVENDIDO'
+            elif rsi > 70:
+                self.rsi_desc = 'SOBRECOMPRADO'
+            elif rsi < 45:
+                self.rsi_desc = 'NEUTRO (baixo)'
+            elif rsi > 55:
+                self.rsi_desc = 'NEUTRO (alto)'
+            else:
+                self.rsi_desc = 'NEUTRO'
+        else:
+            self.rsi_score = 0
+            self.rsi_desc = '---'
+
+        # 3. MACD
+        macd_line, signal_line = self._macd()
+        if macd_line is not None and signal_line is not None:
+            if macd_line > signal_line:
+                self.macd_desc = 'COMPRA'
+                self.macd_score = 80
+            elif macd_line < signal_line:
+                self.macd_desc = 'VENDA'
+                self.macd_score = 80
+            else:
+                self.macd_desc = 'NEUTRO'
+                self.macd_score = 50
+        else:
+            self.macd_desc = '---'
+            self.macd_score = 0
+
+        # 4. Bollinger Bands
+        upper, middle, lower = self._bollinger_bands()
+        if upper is not None and len(self.prices) > 0:
+            last_price = self.prices[-1]
+            if last_price > upper:
+                self.bollinger_desc = 'VENDA (sobrecomprado)'
+                self.bollinger_score = 80
+            elif last_price < lower:
+                self.bollinger_desc = 'COMPRA (sobrevendido)'
+                self.bollinger_score = 80
+            else:
+                self.bollinger_desc = 'NEUTRO'
+                self.bollinger_score = 50
+        else:
+            self.bollinger_desc = '---'
+            self.bollinger_score = 0
+
         return {
-            'trend': {'score': trend_score, 'desc': trend_desc},
-            'rsi': {'score': rsi_score, 'desc': rsi_desc},
-            'macd': {'score': macd_score, 'desc': macd_desc},
-            'bollinger': {'score': bb_score, 'desc': bb_desc},
-            'sma9': sma9,
-            'sma21': sma21,
-            'sma50': sma50,
-            'ema12': ema12,
-            'ema26': ema26
-      }
+            'trend': {'score': self.trend_score, 'desc': self.trend_desc},
+            'rsi': {'score': self.rsi_score, 'desc': self.rsi_desc},
+            'macd': {'score': self.macd_score, 'desc': self.macd_desc},
+            'bollinger': {'score': self.bollinger_score, 'desc': self.bollinger_desc},
+            'sma9': self._sma(list(self.prices), 9),
+            'sma21': self._sma(list(self.prices), 21),
+            'sma50': self._sma(list(self.prices), 50),
+            'ema12': self._ema(list(self.prices), 12),
+            'ema26': self._ema(list(self.prices), 26)
+        }
