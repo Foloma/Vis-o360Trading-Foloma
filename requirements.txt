@@ -4,6 +4,6 @@ python-dotenv==1.0.0
 gunicorn==21.2.0
 Flask-SQLAlchemy==3.0.5
 psycopg2-binary==2.9.9
-numpy==1.24.3
-pandas==2.0.3
+numpy==1.26.4
+pandas==2.1.4
 setuptools>=65.0.0
