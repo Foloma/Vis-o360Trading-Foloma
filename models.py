@@ -11,7 +11,7 @@ class Base(DeclarativeBase):
 
 db = SQLAlchemy(model_class=Base)
 
-# Definir a classe User dentro de um try/except para evitar erro de mapper duplicado
+# Definir a classe User dentro de try/except para evitar erro de mapper duplicado
 try:
     class User(db.Model):
         __tablename__ = "users"
