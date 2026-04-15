@@ -7,6 +7,10 @@ import base64
 import json
 import os
 from collections import deque
+from datetime import datetime
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import String, DateTime, Text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,53 +24,57 @@ from payment_system import PaymentSystem
 app = Flask(__name__)
 app.secret_key = 'foloma_trading_secret_key_2024'
 
-deriv_client = None
-payment_system = None
+# ========== CONFIGURAÇÃO DA BASE DE DADOS ==========
+app.config['SQLALCHEMY_DATABASE_URI'] = config.DATABASE_URL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# ========== SISTEMA DE UTILIZADORES ==========
-# O caminho para os dados persistentes (disco montado no Render)
-DATA_DIR = os.environ.get('DATA_PATH', '.')  # se não existir, usa a pasta atual
-USERS_FILE = os.path.join(DATA_DIR, 'users.json')
+class Base(DeclarativeBase):
+    pass
 
-def load_users():
-    if os.path.exists(USERS_FILE):
-        try:
-            with open(USERS_FILE, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return {}
-    return {}
+db = SQLAlchemy(model_class=Base)
+db.init_app(app)
 
-def save_users(users):
-    # Garante que a pasta existe
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=2)
+# ========== MODELO DE UTILIZADOR ==========
+class User(db.Model):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    deriv_token: Mapped[str] = mapped_column(String(256), nullable=True)
+    deriv_account_type: Mapped[str] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_login: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    referral_code: Mapped[str] = mapped_column(String(50), nullable=True)
+    referral_link_code: Mapped[str] = mapped_column(String(50), nullable=True)
+    referrals: Mapped[str] = mapped_column(Text, default='[]')  # JSON string
 
-users = load_users()
+# Criar tabelas (se não existirem)
+with app.app_context():
+    db.create_all()
 
-# ========== SISTEMA DE AFILIADO ==========
+# ========== SISTEMA DE AFILIADO (em memória, para estatísticas) ==========
 class AffiliateSystem:
     def __init__(self):
         self.referrals = deque(maxlen=1000)
         self.commissions = {'total': 0, 'pending': 0, 'paid': 0, 'history': deque(maxlen=100)}
-        
+
     def generate_referral_link(self, user_id):
         code = base64.b64encode(hashlib.md5(str(user_id).encode()).digest())[:8].decode()
         return f"https://foloma.com/ref/{code}"
-    
+
     def track_referral(self, referrer_id, new_user_id):
         referral = {'referrer_id': referrer_id, 'new_user_id': new_user_id,
                     'timestamp': time.time(), 'status': 'pending', 'commission': 0}
         self.referrals.append(referral)
         return referral
-    
+
     def calculate_commission(self, trade_amount, markup_percentage):
         commission = trade_amount * (markup_percentage / 100)
         self.commissions['total'] += commission
         self.commissions['pending'] += commission
         return commission
-    
+
     def get_affiliate_stats(self):
         return {
             'total_referrals': len(self.referrals),
@@ -76,6 +84,9 @@ class AffiliateSystem:
         }
 
 affiliate = AffiliateSystem()
+
+deriv_client = None
+payment_system = None
 
 def on_tick_callback(tick):
     trading_bot.on_tick(tick)
@@ -96,8 +107,14 @@ def index():
 @app.route('/api/auth/status')
 def api_auth_status():
     if 'user_id' in session:
-        return jsonify({'authenticated': True, 'user': {'id': session['user_id'],
-                        'name': session.get('user_name'), 'email': session.get('user_email')}})
+        user = User.query.get(session['user_id'])
+        if user:
+            return jsonify({'authenticated': True, 'user': {
+                'id': user.id,
+                'name': user.name,
+                'email': user.email,
+                'has_deriv_token': bool(user.deriv_token)
+            }})
     return jsonify({'authenticated': False})
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -108,28 +125,29 @@ def api_register():
         email = data.get('email', '').strip().lower()
         password = data.get('password', '')
         referral_code = data.get('referral_code', '')
+        
         if not name or not email or not password:
             return jsonify({'error': 'Todos os campos são obrigatórios'}), 400
         if len(password) < 6:
             return jsonify({'error': 'Senha deve ter pelo menos 6 caracteres'}), 400
-        if email in users:
+        
+        if User.query.filter_by(email=email).first():
             return jsonify({'error': 'Email já registado'}), 400
-        user_id = str(int(time.time() * 1000))
+        
         password_hash = hashlib.sha256(password.encode()).hexdigest()
-        users[email] = {
-            'id': user_id, 'name': name, 'email': email, 'password': password_hash,
-            'deriv_token': None, 'deriv_account_type': None,
-            'created_at': time.time(), 'last_login': None,
-            'referral_code': referral_code, 'referrals': []
-        }
-        save_users(users)
+        new_user = User(email=email, name=name, password_hash=password_hash)
+        db.session.add(new_user)
+        db.session.commit()
+        
         if referral_code:
-            for u_email, u_data in users.items():
-                if u_data.get('referral_link_code') == referral_code:
-                    affiliate.track_referral(u_data['id'], user_id)
-                    break
+            # Procura referenciador pelo código de link
+            referrer = User.query.filter_by(referral_link_code=referral_code).first()
+            if referrer:
+                affiliate.track_referral(referrer.id, new_user.id)
+        
         return jsonify({'status': 'ok', 'message': 'Conta criada com sucesso!'})
     except Exception as e:
+        logger.error(f"Erro no registo: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -138,21 +156,26 @@ def api_login():
         data = request.json
         email = data.get('email', '').strip().lower()
         password = data.get('password', '')
-        if not email or not password:
-            return jsonify({'error': 'Email e senha são obrigatórios'}), 400
-        user = users.get(email)
+        user = User.query.filter_by(email=email).first()
         if not user:
             return jsonify({'error': 'Utilizador não encontrado'}), 400
         password_hash = hashlib.sha256(password.encode()).hexdigest()
-        if user['password'] != password_hash:
+        if user.password_hash != password_hash:
             return jsonify({'error': 'Senha incorreta'}), 400
-        users[email]['last_login'] = time.time()
-        save_users(users)
-        session['user_id'] = user['id']
-        session['user_name'] = user['name']
-        session['user_email'] = user['email']
-        return jsonify({'status': 'ok', 'user': {'id': user['id'], 'name': user['name'],
-                        'email': user['email'], 'has_deriv_token': bool(user.get('deriv_token'))}})
+        
+        user.last_login = datetime.utcnow()
+        db.session.commit()
+        
+        session['user_id'] = user.id
+        session['user_name'] = user.name
+        session['user_email'] = user.email
+        
+        return jsonify({'status': 'ok', 'user': {
+            'id': user.id,
+            'name': user.name,
+            'email': user.email,
+            'has_deriv_token': bool(user.deriv_token)
+        }})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -170,16 +193,32 @@ def api_save_token():
         account_type = data.get('account_type', 'demo')
         if not token:
             return jsonify({'error': 'Token necessário'}), 400
-        email = session.get('user_email')
-        if email not in users:
+        user = User.query.get(session['user_id'])
+        if not user:
             return jsonify({'error': 'Utilizador não encontrado'}), 404
-        users[email]['deriv_token'] = token
-        users[email]['deriv_account_type'] = account_type
-        save_users(users)
+        user.deriv_token = token
+        user.deriv_account_type = account_type
+        db.session.commit()
         return jsonify({'status': 'ok'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/auth/generate_referral_link', methods=['GET'])
+@require_auth
+def api_generate_referral_link():
+    try:
+        user = User.query.get(session['user_id'])
+        if not user:
+            return jsonify({'error': 'Utilizador não encontrado'}), 404
+        code = base64.b64encode(hashlib.md5(str(user.id).encode()).digest())[:8].decode()
+        user.referral_link_code = code
+        db.session.commit()
+        link = f"https://foloma.com/?ref={code}"
+        return jsonify({'link': link, 'code': code})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ========== ROTAS DA PLATAFORMA ==========
 @app.route('/api/connect', methods=['POST'])
 @require_auth
 def api_connect():
@@ -188,18 +227,19 @@ def api_connect():
         data = request.json
         account_type = data.get('account_type', 'demo')
         symbol = data.get('symbol', 'R_100')
-        email = session.get('user_email')
-        user = users.get(email)
+        user = User.query.get(session['user_id'])
         if not user:
             return jsonify({'error': 'Utilizador não encontrado'}), 404
-        token = user.get('deriv_token')
+        token = user.deriv_token
         if not token:
-            return jsonify({'error': 'Token não configurado.'}), 400
+            return jsonify({'error': 'Token não configurado. Configure o token nas definições.'}), 400
+        
         if account_type == 'real':
             config.REAL_API_TOKEN = token
             config.MARKUP_PERCENTAGE = 0.5
         else:
             config.DEMO_API_TOKEN = token
+        
         deriv_client = DerivWebSocketClient(config, on_tick_callback)
         deriv_client.set_user_token(token)
         deriv_client.set_trading_bot(trading_bot)
@@ -233,6 +273,20 @@ def api_status():
         return jsonify({'bot': status, 'digits': digits, 'symbols': config.AVAILABLE_SYMBOLS})
     except Exception as e:
         logger.error(f"Erro: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/display_digit')
+@require_auth
+def api_display_digit():
+    try:
+        digit, parity, countdown = digit_analyzer.get_next_display_digit()
+        return jsonify({
+            'digit': digit,
+            'parity': parity,
+            'countdown': countdown,
+            'timestamp': time.time()
+        })
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/symbol/change', methods=['POST'])
@@ -290,16 +344,13 @@ def api_trade_digit():
             return jsonify({'error': 'Valor inválido'}), 400
         analysis = digit_analyzer.get_analysis()
         confidence = analysis.get('confidence', 0)
-        min_confidence = config.RISK_LIMITS.get('min_confidence', 70)
-        warning = None
+        min_confidence = config.RISK_LIMITS.get('min_confidence_digits', 65)
         if confidence < min_confidence:
-            warning = f"Confiança baixa: {confidence}%"
+            return jsonify({'error': f'Confiança baixa: {confidence}% (mínimo {min_confidence}%)'}), 400
         contract_type = 'CALL' if prediction == 'odd' else 'PUT'
         success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=True)
         if success:
             response = {'status': 'ok', 'message': f'Aposta em {prediction.upper()} enviada!', 'confidence': confidence}
-            if warning:
-                response['warning'] = warning
             if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
                 affiliate.calculate_commission(amount, deriv_client.markup_percentage)
             return jsonify(response)
@@ -336,7 +387,7 @@ def api_trade_hybrid():
         else:
             return jsonify({'error': '⚠️ Sinais divergentes. Aguarde convergência.'}), 400
 
-        min_hybrid = config.ADVANCED_STRATEGY.get('hybrid_min_confidence', 70)
+        min_hybrid = config.ADVANCED_STRATEGY.get('hybrid_min_confidence', 75)
         if combined_conf < min_hybrid:
             return jsonify({'error': f'Confiança combinada baixa ({combined_conf:.1f}%)'}), 400
 
