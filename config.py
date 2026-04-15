@@ -8,13 +8,16 @@ class Config:
     # Deriv API
     DERIV_APP_ID = os.getenv('DERIV_APP_ID', '1089')
     
-    # Tokens
+    # Tokens (guardados no servidor, não partilhados)
     DEMO_API_TOKEN = os.getenv('DEMO_API_TOKEN', '')
     REAL_API_TOKEN = os.getenv('REAL_API_TOKEN', '')
     
-    # WebSocket
+    # WebSocket – usa o domínio normal (no Render o DNS funciona)
     WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
     DERIV_WS_URL = WS_URL
+    
+    # Base de Dados (PostgreSQL no Render, ou SQLite local)
+    DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
     
     # Tipos de conta
     ACCOUNT_TYPES = {
@@ -32,10 +35,11 @@ class Config:
     # Configurações de trading
     DEFAULT_STAKE = 0.35
     MIN_STAKE = 0.35
-    MAX_STAKE = 100
+    MAX_STAKE = 1000
     CONTRACT_DURATION = 5
+    CONTRACT_DURATION_SECONDS = 10
     
-    # Markup
+    # Markup para conta REAL
     MARKUP_PERCENTAGE = 0.5
     
     # Martingale
@@ -50,19 +54,20 @@ class Config:
     RISK_LIMITS = {
         'max_daily_loss_percent': 5,
         'max_consecutive_losses': 2,
-        'min_confidence': 70,
+        'min_confidence': 70,               # ativos
+        'min_confidence_digits': 65,        # dígitos
         'max_stake_percent': 5,
         'stop_loss_enabled': True,
         'take_profit_enabled': True,
         'daily_target_percent': 10
     }
     
-    # ========== ESTRATÉGIA AVANÇADA ==========
+    # Estratégia Avançada
     ADVANCED_STRATEGY = {
-        'momentum_threshold': 0.1,          # % mínimo de momentum para reforçar
-        'digit_diff_threshold': 20,          # diferença mínima entre % para alerta
-        'hybrid_min_confidence': 70,         # confiança mínima combinada
-        'hybrid_mode_enabled': True          # ativar modo híbrido
+        'momentum_threshold': 0.1,
+        'digit_diff_threshold': 20,
+        'hybrid_min_confidence': 75,
+        'hybrid_mode_enabled': True
     }
     
     LOG_LEVEL = logging.INFO
