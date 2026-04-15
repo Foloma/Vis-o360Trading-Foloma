@@ -18,6 +18,14 @@ class DigitAnalyzer:
         self.countdown = analysis_interval
         self.analysis_in_progress = False
         
+        # Para exibição com atraso (10 segundos entre cada dígito mostrado)
+        self.display_digits = deque(maxlen=20)      # buffer de dígitos para exibição
+        self.last_display_time = time.time()
+        self.display_interval = 10                  # segundos entre cada dígito exibido
+        self.current_display_digit = None
+        self.current_display_parity = '---'
+        self.next_display_time = 0
+        
         self.last_analysis_data = {
             'streak': 0, 'streak_parity': '---',
             'recommended_action': None, 'confidence': 0,
@@ -52,10 +60,71 @@ class DigitAnalyzer:
             self.timestamps.append(datetime.now())
             self.current_digit = last_digit
             self.current_parity = parity
+            
+            # Adiciona ao buffer de exibição (para ser mostrado com atraso)
+            self.display_digits.append(last_digit)
+            
+            # Verifica padrões imediatamente (alerta rápido)
+            self._check_immediate_pattern()
             return True, self.current_digit
         except Exception as e:
             logger.error(f"Erro ao processar tick: {e}")
             return False, None
+
+    def get_next_display_digit(self):
+        """Retorna o próximo dígito a ser exibido (com atraso de display_interval segundos)"""
+        now = time.time()
+        
+        # Se ainda não atingiu o intervalo, retorna o mesmo dígito
+        if now < self.next_display_time and self.current_display_digit is not None:
+            remaining = int(self.next_display_time - now)
+            return self.current_display_digit, self.current_display_parity, remaining
+        
+        # Se há dígitos no buffer para exibir, mostra o próximo
+        if self.display_digits:
+            digit = self.display_digits.popleft()
+            self.current_display_digit = digit
+            self.current_display_parity = 'IMPAR' if digit % 2 != 0 else 'PAR'
+            self.next_display_time = now + self.display_interval
+            return self.current_display_digit, self.current_display_parity, self.display_interval
+        
+        # Se não há dígitos, retorna o último conhecido (ou None)
+        return self.current_display_digit, self.current_display_parity, 0
+
+    def _check_immediate_pattern(self):
+        """Verifica sequência logo após cada tick (alerta rápido)"""
+        if len(self.digits) < 3:
+            return
+        streak, streak_parity = self.get_streak_info()
+        if streak >= 3:
+            confidence = 65 + min((streak - 3) * 5, 20)
+            if streak_parity == 'PAR':
+                recommended_action = 'BUY'
+                alert = 'RECOMENDADO'
+                reason = f'⚠️ {streak} PARES consecutivos! Próximo ÍMPAR (confiança {confidence}%)'
+                pattern_desc = f'{streak} PARES consecutivos'
+            else:
+                recommended_action = 'SELL'
+                alert = 'RECOMENDADO'
+                reason = f'⚠️ {streak} ÍMPARES consecutivos! Próximo PAR (confiança {confidence}%)'
+                pattern_desc = f'{streak} ÍMPARES consecutivos'
+            self._update_analysis(recommended_action, confidence, alert, reason, pattern_desc, streak, streak_parity)
+            logger.info(f"⚡ Alerta: {reason}")
+
+    def _update_analysis(self, action, confidence, alert, reason, pattern, streak, streak_parity):
+        self.last_analysis_data.update({
+            'streak': streak,
+            'streak_parity': streak_parity,
+            'recommended_action': action,
+            'confidence': confidence,
+            'pattern': pattern,
+            'alert': alert,
+            'reason': reason,
+            'last_digit': self.current_digit,
+            'last_parity': self.current_parity,
+            'recent_parity': self.get_recent_parity_sequence()[-20:],
+            'countdown': self.countdown
+        })
     
     def get_recent_parity_sequence(self):
         recent = list(self.digits)[-20:]
@@ -81,15 +150,13 @@ class DigitAnalyzer:
         odd_count = sum(1 for d in recent if d % 2 != 0)
         odd_pct = (odd_count / 20) * 100
         even_pct = 100 - odd_pct
-        if odd_pct >= 65:
-            return {'trend': 'IMPAR', 'strength': odd_pct, 'message': f'Fortemente tendendo para ÍMPAR ({odd_pct:.0f}%)'}
-        if even_pct >= 65:
-            return {'trend': 'PAR', 'strength': even_pct, 'message': f'Fortemente tendendo para PAR ({even_pct:.0f}%)'}
-        if odd_pct >= 55:
-            return {'trend': 'IMPAR', 'strength': odd_pct, 'message': f'Levemente tendendo para ÍMPAR ({odd_pct:.0f}%)'}
-        if even_pct >= 55:
-            return {'trend': 'PAR', 'strength': even_pct, 'message': f'Levemente tendendo para PAR ({even_pct:.0f}%)'}
-        return {'trend': 'NEUTRO', 'strength': 50, 'message': f'Sem tendência clara ({odd_pct:.0f}% ÍMPAR / {even_pct:.0f}% PAR)'}
+        diff = abs(odd_pct - even_pct)
+        if diff >= 20:
+            if odd_pct > even_pct:
+                return {'trend': 'IMPAR', 'strength': odd_pct, 'message': f'Tendência ÍMPAR ({odd_pct:.0f}% vs {even_pct:.0f}%)'}
+            else:
+                return {'trend': 'PAR', 'strength': even_pct, 'message': f'Tendência PAR ({even_pct:.0f}% vs {odd_pct:.0f}%)'}
+        return None
     
     def trigger_analysis(self):
         if self.analysis_in_progress:
@@ -98,9 +165,9 @@ class DigitAnalyzer:
         self.last_analysis = time.time()
         try:
             analysis = self._perform_analysis()
-            self.last_analysis_data = analysis
+            self.last_analysis_data.update(analysis)
             self.last_analysis_data['countdown'] = self.analysis_interval
-            logger.info(f"📊 ANÁLISE COMPLETADA: {analysis}")
+            logger.info(f"📊 ANÁLISE PERIÓDICA: {analysis}")
         except Exception as e:
             logger.error(f"Erro na análise: {e}")
         self.analysis_in_progress = False
@@ -126,99 +193,48 @@ class DigitAnalyzer:
         odd_pct = round((odd_count / 20) * 100, 1)
         even_pct = round(100 - odd_pct, 1)
         
-        # ========== FILTRO DE DIFERENÇA ==========
-        diff = abs(odd_pct - even_pct)
-        diff_threshold = getattr(__import__('config'), 'config', None)
-        if diff_threshold:
-            diff_threshold = diff_threshold.ADVANCED_STRATEGY.get('digit_diff_threshold', 20)
-        else:
-            diff_threshold = 20
-        
-        # Aplica filtro se não houver sequência longa
-        if diff < diff_threshold and streak < 3:
-            # Sem recomendação
-            return {
-                'streak': streak,
-                'streak_parity': streak_parity,
-                'recommended_action': None,
-                'confidence': 0,
-                'pattern': 'Diferença pequena',
-                'alert': 'NEUTRO',
-                'reason': f'📊 Diferença entre ÍMPAR e PAR é pequena ({diff:.1f}%) → sem recomendação clara',
-                'odd_pct': odd_pct,
-                'even_pct': even_pct,
-                'last_digit': self.current_digit,
-                'last_parity': self.current_parity,
-                'recent_parity': recent_parity[-20:],
-                'trend_analysis': trend,
-                'countdown': self.analysis_interval
-            }
-        
-        # Se passou no filtro, aplica regras
         recommended_action = None
         confidence = 0
         alert = None
         reason = ''
         pattern_desc = ''
 
-        # 1. Sequência longa (>=3)
         if streak >= 3:
+            confidence = 65 + min((streak - 3) * 5, 20)
             if streak_parity == 'PAR':
-                recommended_action = 'BUY'   # próximo ÍMPAR
-                confidence = min(65 + (streak - 3) * 10, 95)
+                recommended_action = 'BUY'
                 alert = 'RECOMENDADO'
-                reason = f'⚠️ {streak} PARES consecutivos! Próximo provavelmente ÍMPAR'
+                reason = f'⚠️ {streak} PARES consecutivos! Próximo ÍMPAR'
                 pattern_desc = f'{streak} PARES consecutivos'
             else:
-                recommended_action = 'SELL'  # próximo PAR
-                confidence = min(65 + (streak - 3) * 10, 95)
+                recommended_action = 'SELL'
                 alert = 'RECOMENDADO'
-                reason = f'⚠️ {streak} ÍMPARES consecutivos! Próximo provavelmente PAR'
+                reason = f'⚠️ {streak} ÍMPARES consecutivos! Próximo PAR'
                 pattern_desc = f'{streak} ÍMPARES consecutivos'
-
-        # 2. Padrão de reversão (ex: I I P P)
         elif len(self.digits) >= 4:
             last4 = [d % 2 for d in list(self.digits)[-4:]]
             if last4[0] == last4[1] and last4[2] == last4[3] and last4[0] != last4[2]:
                 recommended_action = 'BUY' if last4[3] == 1 else 'SELL'
                 confidence = 70
                 alert = 'RECOMENDADO'
-                reason = '🔄 Reversão após dois pares/ímpares consecutivos'
-                pattern_desc = 'Padrão de reversão'
-
-        # 3. Tendência forte
-        elif trend and trend['strength'] >= 65:
-            confidence = 70
+                reason = '🔄 Padrão de reversão (2 iguais + 2 opostos)'
+                pattern_desc = 'Reversão'
+        elif trend:
+            confidence = 65
             if trend['trend'] == 'IMPAR':
                 recommended_action = 'BUY'
                 alert = 'SUGESTÃO'
                 reason = trend['message']
-                pattern_desc = f'Tendência para ÍMPAR ({trend["strength"]:.0f}%)'
+                pattern_desc = 'Tendência estatística'
             else:
                 recommended_action = 'SELL'
                 alert = 'SUGESTÃO'
                 reason = trend['message']
-                pattern_desc = f'Tendência para PAR ({trend["strength"]:.0f}%)'
-
-        # 4. Tendência leve
-        elif trend and trend['strength'] >= 55:
-            confidence = 60
-            if trend['trend'] == 'IMPAR':
-                recommended_action = 'BUY'
-                alert = 'LEVE'
-                reason = trend['message']
-                pattern_desc = 'Leve tendência para ÍMPAR'
-            else:
-                recommended_action = 'SELL'
-                alert = 'LEVE'
-                reason = trend['message']
-                pattern_desc = 'Leve tendência para PAR'
-
-        # 5. Neutro
+                pattern_desc = 'Tendência estatística'
         else:
             alert = 'NEUTRO'
-            reason = f'📊 Últimos 20: {odd_pct}% ÍMPAR / {even_pct}% PAR → Sem tendência clara'
-            pattern_desc = 'Sem padrão claro'
+            reason = f'📊 Últimos 20: {odd_pct}% ÍMPAR / {even_pct}% PAR → sem padrão'
+            pattern_desc = 'Aguardando'
 
         return {
             'streak': streak,
