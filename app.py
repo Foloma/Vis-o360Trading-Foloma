@@ -35,29 +35,25 @@ db = SQLAlchemy(model_class=Base)
 db.init_app(app)
 
 # ========== MODELO DE UTILIZADOR ==========
-class User(db.Model):
-    __tablename__ = "users"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
-    name: Mapped[str] = mapped_column(String(80), nullable=False)
-    password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-    deriv_token: Mapped[str] = mapped_column(String(256), nullable=True)
-    deriv_account_type: Mapped[str] = mapped_column(String(20), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    last_login: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-    referral_code: Mapped[str] = mapped_column(String(50), nullable=True)
-    referral_link_code: Mapped[str] = mapped_column(String(50), nullable=True)
-    referrals: Mapped[str] = mapped_column(Text, default='[]')  # JSON string
-
-# Criar tabelas (se não existirem) – evita erro de mapper duplicado
-with app.app_context():
-    try:
-        db.create_all()
-    except Exception as e:
-        if "already has a primary mapper" in str(e):
-            logger.warning("Modelo User já mapeado. Ignorando.")
-        else:
-            raise e
+try:
+    class User(db.Model):
+        __tablename__ = "users"
+        id: Mapped[int] = mapped_column(primary_key=True)
+        email: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+        name: Mapped[str] = mapped_column(String(80), nullable=False)
+        password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+        deriv_token: Mapped[str] = mapped_column(String(256), nullable=True)
+        deriv_account_type: Mapped[str] = mapped_column(String(20), nullable=True)
+        created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+        last_login: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+        referral_code: Mapped[str] = mapped_column(String(50), nullable=True)
+        referral_link_code: Mapped[str] = mapped_column(String(50), nullable=True)
+        referrals: Mapped[str] = mapped_column(Text, default='[]')
+except Exception as e:
+    if "already has a primary mapper" in str(e):
+        logger.warning("Modelo User já mapeado. Ignorando.")
+    else:
+        raise e
 
 # ========== SISTEMA DE AFILIADO (em memória, para estatísticas) ==========
 class AffiliateSystem:
