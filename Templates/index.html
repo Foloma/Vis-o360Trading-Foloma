@@ -266,10 +266,6 @@
             font-size: 16px;
             cursor: pointer;
         }
-        .btn-buy:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
         .btn-sell {
             background: #ff4d4d;
             color: #fff;
@@ -279,10 +275,6 @@
             font-weight: bold;
             font-size: 16px;
             cursor: pointer;
-        }
-        .btn-sell:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
         }
         .digits-header {
             display: flex;
@@ -376,13 +368,53 @@
             color: #ffaa00;
             margin: 8px 0;
         }
-        .hybrid-status {
+        .display-digit-container {
             background: #0b0e14;
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 12px;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
             text-align: center;
+            border: 1px solid #2a3342;
+        }
+        .display-digit-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            color: #62748c;
             font-size: 12px;
+        }
+        .countdown {
+            color: #ffaa00;
+            font-weight: bold;
+        }
+        .display-digit-value {
+            display: flex;
+            justify-content: center;
+            align-items: baseline;
+            gap: 15px;
+            margin: 10px 0;
+        }
+        .display-digit {
+            font-size: 48px;
+            font-weight: bold;
+            color: #00f0b5;
+        }
+        .display-parity {
+            font-size: 18px;
+            color: #62748c;
+        }
+        .pulse {
+            animation: pulse-digit 0.5s ease-in-out;
+        }
+        @keyframes pulse-digit {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); text-shadow: 0 0 10px #00f0b5; }
+            100% { transform: scale(1); }
+        }
+        .display-note {
+            font-size: 10px;
+            color: #62748c;
+            margin-top: 8px;
         }
         .martingale-status {
             background: #0b0e14;
@@ -595,8 +627,24 @@
             <div id="modoDigitosPanel" class="hidden">
                 <div class="card">
                     <div class="card-title">🎲 ANÁLISE DE DÍGITOS</div>
+                    
+                    <!-- NOVO: Dígito com exibição lenta (a cada 10s) -->
+                    <div class="display-digit-container">
+                        <div class="display-digit-header">
+                            <span>📺 DÍGITO EM EXIBIÇÃO</span>
+                            <span id="display-countdown" class="countdown">10s</span>
+                        </div>
+                        <div class="display-digit-value">
+                            <span id="display-digit" class="display-digit">-</span>
+                            <span id="display-parity" class="display-parity">---</span>
+                        </div>
+                        <div class="display-note">
+                            <small>✅ Novo dígito a cada 10 segundos</small>
+                        </div>
+                    </div>
+                    
                     <div class="digits-header">
-                        <div><div style="font-size:11px;">ÚLTIMO DÍGITO</div><span class="last-digit" id="lastDigit">-</span></div>
+                        <div><div style="font-size:11px;">ÚLTIMO DÍGITO (real)</div><span class="last-digit" id="lastDigit">-</span></div>
                         <div><div style="font-size:11px;">SEQUÊNCIA</div><span id="streakCounter">0</span> <span id="streakType">---</span></div>
                     </div>
                     <div class="digit-countdown">Próximo tick em: <span id="digitCountdown">5s</span></div>
@@ -635,13 +683,6 @@
             <div class="card">
                 <div class="card-title">🎯 EXECUTAR TRADE</div>
                 <input type="number" id="amount" class="amount-input" value="0.35" step="0.01" min="0.35" max="100">
-                
-                <!-- Status híbrido (aparece apenas no modo híbrido) -->
-                <div id="hybridStatus" class="hybrid-status hidden">
-                    <div id="hybridSignal"></div>
-                    <div id="hybridConfidence"></div>
-                </div>
-                
                 <div id="ativosButtons">
                     <div class="trade-buttons">
                         <button class="btn-buy" id="hybridBuyBtn" onclick="executeTrade('BUY')">📈 COMPRAR</button>
@@ -769,6 +810,8 @@
         let digitTimer = null;
         let lastKnownDigit = null;
         let currentAlertTimeout = null;
+        let displayCountdown = 10;
+        let displayDigit = null;
         const symbols = { 'R_100': 'Volatility 100', 'R_75': 'Volatility 75', 'R_50': 'Volatility 50' };
 
         // ========== MENU ==========
@@ -796,7 +839,7 @@
             toggleMenu();
         }
 
-        // ========== MODO (3 modos) ==========
+        // ========== MODO ==========
         function setModo(modo) {
             modoAtual = modo;
             const btnAtivos = document.getElementById('modeAtivos');
@@ -821,12 +864,11 @@
             if (modo === 'hybrid') {
                 ativosButtons.classList.remove('hidden');
                 digitosButtons.classList.add('hidden');
-                hybridStatus.classList.remove('hidden');
+                if (hybridStatus) hybridStatus.classList.remove('hidden');
             } else {
                 ativosButtons.classList.remove('hidden');
                 digitosButtons.classList.add('hidden');
-                hybridStatus.classList.add('hidden');
-                // Reabilita os botões quando sair do híbrido
+                if (hybridStatus) hybridStatus.classList.add('hidden');
                 const buyBtn = document.getElementById('hybridBuyBtn');
                 const sellBtn = document.getElementById('hybridSellBtn');
                 if (buyBtn && sellBtn) {
@@ -836,7 +878,6 @@
                     sellBtn.style.opacity = '1';
                 }
             }
-            
             if (modo === 'digitos') {
                 ativosButtons.classList.add('hidden');
                 digitosButtons.classList.remove('hidden');
@@ -890,6 +931,27 @@
             }, 1000);
         }
 
+        // ========== EXIBIÇÃO LENTA DE DÍGITOS ==========
+        function fetchDisplayDigit() {
+            fetch('/api/display_digit')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) return;
+                    if (data.digit !== null && data.digit !== displayDigit) {
+                        displayDigit = data.digit;
+                        document.getElementById('display-digit').textContent = displayDigit;
+                        document.getElementById('display-parity').textContent = data.parity || '---';
+                        const digitElement = document.getElementById('display-digit');
+                        digitElement.classList.add('pulse');
+                        setTimeout(() => digitElement.classList.remove('pulse'), 500);
+                    }
+                    if (data.countdown !== undefined) {
+                        displayCountdown = data.countdown;
+                        document.getElementById('display-countdown').textContent = displayCountdown + 's';
+                    }
+                });
+        }
+
         // ========== AUTENTICAÇÃO ==========
         function showAuthTab(tab) {
             if (tab === 'login') {
@@ -940,6 +1002,7 @@
             selectAccount('demo');
             setModo('ativos');
             startDigitCountdown();
+            setInterval(fetchDisplayDigit, 1000);
             updateAll();
             setInterval(updateAll, 2000);
             setInterval(carregarHistorico, 3000);
@@ -1177,54 +1240,6 @@
                         if (analysis.alert === 'RECOMENDADO' && analysis.confidence >= 65) {
                             showDigitAlert(analysis.reason, analysis.confidence, analysis.recommended_action === 'BUY' ? 'odd' : (analysis.recommended_action === 'SELL' ? 'even' : null));
                         }
-                    }
-                }
-                
-                // Modo híbrido: atualizar status e controlar botões
-                if (modoAtual === 'hybrid') {
-                    const hybridDiv = document.getElementById('hybridStatus');
-                    hybridDiv.classList.remove('hidden');
-                    
-                    const ativoSignal = bot.signal;
-                    const ativoConf = bot.confidence;
-                    
-                    const digitAnalysis = data.digits.analysis;
-                    const digitRecommend = digitAnalysis ? digitAnalysis.recommended_action : null;
-                    const digitConf = digitAnalysis ? digitAnalysis.confidence : 0;
-                    
-                    let hybridMessage = '';
-                    let hybridColor = '#ffaa00';
-                    let canTrade = false;
-                    let combinedConf = 0;
-                    
-                    if (ativoSignal === 'BUY' && digitRecommend === 'BUY') {
-                        combinedConf = (ativoConf + digitConf) / 2;
-                        hybridMessage = `✅ SINAIS CONVERGENTES (COMPRA) – Confiança combinada: ${combinedConf.toFixed(1)}%`;
-                        hybridColor = '#00f0b5';
-                        canTrade = true;
-                    } else if (ativoSignal === 'SELL' && digitRecommend === 'SELL') {
-                        combinedConf = (ativoConf + digitConf) / 2;
-                        hybridMessage = `✅ SINAIS CONVERGENTES (VENDA) – Confiança combinada: ${combinedConf.toFixed(1)}%`;
-                        hybridColor = '#00f0b5';
-                        canTrade = true;
-                    } else {
-                        hybridMessage = `⚠️ SINAIS DIVERGENTES (Ativo: ${ativoSignal}, Dígitos: ${digitRecommend || 'NEUTRO'}) – Aguarde convergência`;
-                        hybridColor = '#ff4d4d';
-                        canTrade = false;
-                    }
-                    
-                    document.getElementById('hybridSignal').innerHTML = hybridMessage;
-                    document.getElementById('hybridSignal').style.color = hybridColor;
-                    document.getElementById('hybridConfidence').innerHTML = canTrade ? `Pronto para trade!` : `Confiança combinada: ${combinedConf.toFixed(1)}% (mínimo 70%)`;
-                    
-                    // Controlar botões
-                    const buyBtn = document.getElementById('hybridBuyBtn');
-                    const sellBtn = document.getElementById('hybridSellBtn');
-                    if (buyBtn && sellBtn) {
-                        buyBtn.disabled = !canTrade;
-                        sellBtn.disabled = !canTrade;
-                        buyBtn.style.opacity = canTrade ? '1' : '0.5';
-                        sellBtn.style.opacity = canTrade ? '1' : '0.5';
                     }
                 }
             });
