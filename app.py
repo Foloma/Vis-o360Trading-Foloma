@@ -8,9 +8,6 @@ import json
 import os
 from collections import deque
 from datetime import datetime
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, DateTime, Text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,6 +17,7 @@ from deriv_client import DerivWebSocketClient
 from trading_bot import trading_bot
 from synthetics import digit_analyzer
 from payment_system import PaymentSystem
+from models import db, User   # <-- NOVO IMPORT
 
 app = Flask(__name__)
 app.secret_key = 'foloma_trading_secret_key_2024'
@@ -28,11 +26,11 @@ app.secret_key = 'foloma_trading_secret_key_2024'
 app.config['SQLALCHEMY_DATABASE_URI'] = config.DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-class Base(DeclarativeBase):
-    pass
-
-db = SQLAlchemy(model_class=Base)
 db.init_app(app)
+
+# Criar tabelas (se não existirem)
+with app.app_context():
+    db.create_all()
 
 # ========== MODELO DE UTILIZADOR ==========
 try:
