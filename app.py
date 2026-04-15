@@ -49,9 +49,15 @@ class User(db.Model):
     referral_link_code: Mapped[str] = mapped_column(String(50), nullable=True)
     referrals: Mapped[str] = mapped_column(Text, default='[]')  # JSON string
 
-# Criar tabelas (se não existirem)
+# Criar tabelas (se não existirem) – evita erro de mapper duplicado
 with app.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+    except Exception as e:
+        if "already has a primary mapper" in str(e):
+            logger.warning("Modelo User já mapeado. Ignorando.")
+        else:
+            raise e
 
 # ========== SISTEMA DE AFILIADO (em memória, para estatísticas) ==========
 class AffiliateSystem:
