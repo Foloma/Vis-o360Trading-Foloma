@@ -106,13 +106,11 @@ class TradingBot:
         buy_score = 0
         sell_score = 0
 
-        # 1. Tendência
         if 'ALTA' in analysis['trend']['desc']:
             buy_score += analysis['trend']['score'] * weights['trend']
         elif 'BAIXA' in analysis['trend']['desc']:
             sell_score += analysis['trend']['score'] * weights['trend']
 
-        # 2. RSI
         rsi = analysis['rsi']['score']
         if rsi < 30:
             buy_score += (30 - rsi) * weights['rsi']
@@ -123,13 +121,11 @@ class TradingBot:
         elif rsi > 60:
             sell_score += (rsi - 60) * weights['rsi'] * 0.5
 
-        # 3. MACD
         if 'COMPRA' in analysis['macd']['desc']:
             buy_score += analysis['macd']['score'] * weights['macd']
         elif 'VENDA' in analysis['macd']['desc']:
             sell_score += analysis['macd']['score'] * weights['macd']
 
-        # 4. Bollinger Bands
         if 'COMPRA' in analysis['bollinger']['desc']:
             buy_score += analysis['bollinger']['score'] * weights['bollinger']
         elif 'VENDA' in analysis['bollinger']['desc']:
@@ -150,20 +146,19 @@ class TradingBot:
             signal = 'SELL'
             confidence = (sell_score / total) * 100
 
-        # Ajuste pelo momentum (mais conservador)
-momentum = self.get_momentum()
-threshold = config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1)
+        momentum = self.get_momentum()
+        threshold = config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1)
 
-if signal == 'BUY':
-    if momentum > threshold:
-        confidence = min(confidence + 5, 85)   # bónus reduzido e limite 85%
-    elif momentum < -threshold:
-        confidence = max(confidence - 10, 0)
-elif signal == 'SELL':
-    if momentum < -threshold:
-        confidence = min(confidence + 5, 85)
-    elif momentum > threshold:
-        confidence = max(confidence - 10, 0)
+        if signal == 'BUY':
+            if momentum > threshold:
+                confidence = min(confidence + 5, 85)
+            elif momentum < -threshold:
+                confidence = max(confidence - 10, 0)
+        elif signal == 'SELL':
+            if momentum < -threshold:
+                confidence = min(confidence + 5, 85)
+            elif momentum > threshold:
+                confidence = max(confidence - 10, 0)
 
         return signal, min(confidence, 98)
     
