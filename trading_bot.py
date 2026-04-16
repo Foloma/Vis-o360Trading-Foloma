@@ -187,6 +187,20 @@ class TradingBot:
         self.stats['profit_loss'] = profit_loss
         self.stats['total_return'] = (profit_loss / self.stats['total_invested']) * 100 if self.stats['total_invested'] > 0 else 0
     
+    def check_pending_trades(self):
+        """Verifica trades pendentes há mais de 30 segundos e marca como perda"""
+        now = datetime.now()
+        updated = False
+        for trade in self.trades:
+            if trade.get('result') == 'pending':
+                if (now - trade['timestamp']).total_seconds() > 30:
+                    trade['result'] = 'loss'
+                    trade['profit'] = 0
+                    updated = True
+                    logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')}")
+        if updated:
+            self.update_stats()
+    
     def on_trade_result(self, result):
         try:
             logger.info(f"📊 [BOT] Processando resultado: {result}")
@@ -215,6 +229,7 @@ class TradingBot:
             logger.error(f"Erro ao processar resultado: {e}")
     
     def get_trade_report(self):
+        self.check_pending_trades()  # Limpa pendentes antes de gerar relatório
         hoje = datetime.now().date()
         trades_hoje = [t for t in self.trades if t['timestamp'].date() == hoje]
         return {
@@ -239,6 +254,7 @@ class TradingBot:
         }
     
     def get_status(self):
+        self.check_pending_trades()  # Também limpa pendentes ao obter status
         signal, confidence = self.calculate_signal()
         return {
             'connected': self.client.connected if self.client else False,
