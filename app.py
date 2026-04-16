@@ -365,7 +365,6 @@ def api_trade_hybrid():
         if amount < 0.35 or amount > 100:
             return jsonify({'error': 'Valor inválido'}), 400
 
-        # Log dos sinais recebidos
         signal, conf_ativo = trading_bot.calculate_signal()
         digit_analysis = digit_analyzer.get_analysis()
         digit_recommend = digit_analysis.get('recommended_action')
@@ -374,7 +373,6 @@ def api_trade_hybrid():
         logger.info(f"🔍 Sinal ativo: {signal}, conf: {conf_ativo}")
         logger.info(f"🔍 Recomendação dígitos: {digit_recommend}, conf: {digit_conf}")
 
-        # Verifica convergência
         if signal == 'BUY' and digit_recommend == 'BUY':
             combined_conf = (conf_ativo + digit_conf) / 2
             action = 'BUY'
@@ -387,7 +385,7 @@ def api_trade_hybrid():
             logger.info("⚠️ Sinais divergentes – nenhum trade executado")
             return jsonify({'error': '⚠️ Sinais divergentes. Aguarde convergência.'}), 400
 
-        min_hybrid = 80  # aumentado de 75 para 80
+        min_hybrid = 80
         if combined_conf < min_hybrid:
             logger.info(f"❌ Confiança combinada baixa: {combined_conf:.1f}% (mínimo {min_hybrid}%)")
             return jsonify({'error': f'Confiança combinada baixa ({combined_conf:.1f}%)'}), 400
@@ -404,7 +402,6 @@ def api_trade_hybrid():
     except Exception as e:
         logger.error(f"❌ Erro no modo híbrido: {e}")
         return jsonify({'error': str(e)}), 500
-
 # ========== OUTRAS ROTAS ==========
 @app.route('/api/report')
 @require_auth
