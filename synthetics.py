@@ -19,9 +19,8 @@ class DigitAnalyzer:
         self.analysis_in_progress = False
         
         # Para exibição com atraso (10 segundos entre cada dígito mostrado)
-        self.display_digits = deque(maxlen=20)      # buffer de dígitos para exibição
-        self.last_display_time = time.time()
-        self.display_interval = 10                  # segundos entre cada dígito exibido
+        self.display_digits = deque(maxlen=20)
+        self.display_interval = 10
         self.current_display_digit = None
         self.current_display_parity = '---'
         self.next_display_time = 0
@@ -61,10 +60,9 @@ class DigitAnalyzer:
             self.current_digit = last_digit
             self.current_parity = parity
             
-            # Adiciona ao buffer de exibição (para ser mostrado com atraso)
+            # Adiciona ao buffer de exibição lenta
             self.display_digits.append(last_digit)
             
-            # Verifica padrões imediatamente (alerta rápido)
             self._check_immediate_pattern()
             return True, self.current_digit
         except Exception as e:
@@ -72,15 +70,11 @@ class DigitAnalyzer:
             return False, None
 
     def get_next_display_digit(self):
-        """Retorna o próximo dígito a ser exibido (com atraso de display_interval segundos)"""
         now = time.time()
-        
-        # Se ainda não atingiu o intervalo, retorna o mesmo dígito
         if now < self.next_display_time and self.current_display_digit is not None:
             remaining = int(self.next_display_time - now)
             return self.current_display_digit, self.current_display_parity, remaining
         
-        # Se há dígitos no buffer para exibir, mostra o próximo
         if self.display_digits:
             digit = self.display_digits.popleft()
             self.current_display_digit = digit
@@ -88,11 +82,9 @@ class DigitAnalyzer:
             self.next_display_time = now + self.display_interval
             return self.current_display_digit, self.current_display_parity, self.display_interval
         
-        # Se não há dígitos, retorna o último conhecido (ou None)
         return self.current_display_digit, self.current_display_parity, 0
 
     def _check_immediate_pattern(self):
-        """Verifica sequência logo após cada tick (alerta rápido)"""
         if len(self.digits) < 3:
             return
         streak, streak_parity = self.get_streak_info()
