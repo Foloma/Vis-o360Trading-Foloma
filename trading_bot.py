@@ -150,20 +150,20 @@ class TradingBot:
             signal = 'SELL'
             confidence = (sell_score / total) * 100
 
-        # Ajuste pelo momentum
-        momentum = self.get_momentum()
-        threshold = config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1)
+        # Ajuste pelo momentum (mais conservador)
+momentum = self.get_momentum()
+threshold = config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1)
 
-        if signal == 'BUY':
-            if momentum > threshold:
-                confidence = min(confidence + 10, 98)
-            elif momentum < -threshold:
-                confidence = max(confidence - 15, 0)
-        elif signal == 'SELL':
-            if momentum < -threshold:
-                confidence = min(confidence + 10, 98)
-            elif momentum > threshold:
-                confidence = max(confidence - 15, 0)
+if signal == 'BUY':
+    if momentum > threshold:
+        confidence = min(confidence + 5, 85)   # bónus reduzido e limite 85%
+    elif momentum < -threshold:
+        confidence = max(confidence - 10, 0)
+elif signal == 'SELL':
+    if momentum < -threshold:
+        confidence = min(confidence + 5, 85)
+    elif momentum > threshold:
+        confidence = max(confidence - 10, 0)
 
         return signal, min(confidence, 98)
     
