@@ -166,6 +166,7 @@ class DigitAnalyzer:
     
     def _perform_analysis(self):
         if len(self.digits) < 10:
+            logger.info(f"📊 Análise final: recomendação={recommended_action}, confiança={confidence}, streak={streak}, streak_parity={streak_parity}")
             return {
                 'streak': 0, 'streak_parity': '---',
                 'recommended_action': None, 'confidence': 0,
