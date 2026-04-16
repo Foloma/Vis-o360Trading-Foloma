@@ -520,7 +520,6 @@ if __name__ == '__main__':
 @require_auth
 def api_clear_history():
     try:
-        trading_bot.trades.clear()
         trading_bot.reset_stats()
         return jsonify({'status': 'ok', 'message': 'Histórico apagado com sucesso!'})
     except Exception as e:
