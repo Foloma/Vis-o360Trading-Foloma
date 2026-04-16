@@ -41,7 +41,7 @@ def save_users(users):
 
 users = load_users()
 
-# ========== SISTEMA DE AFILIADO ==========
+# ========== SISTEMA DE AFILIADO (comissão 0.5%) ==========
 class AffiliateSystem:
     def __init__(self):
         self.referrals = deque(maxlen=1000)
@@ -86,7 +86,8 @@ def require_auth(f):
         return f(*args, **kwargs)
     decorated.__name__ = f.__name__
     return decorated
-    # ========== ROTAS DE AUTENTICAÇÃO ==========
+
+# ========== ROTAS DE AUTENTICAÇÃO ==========
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -298,7 +299,8 @@ def api_symbol_change():
         return jsonify({'status': 'ok', 'symbol': symbol})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-        # ========== TRADES ==========
+
+# ========== TRADES ==========
 @app.route('/api/trade', methods=['POST'])
 @require_auth
 def api_trade():
@@ -353,7 +355,7 @@ def api_trade_digit():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ========== MODO HÍBRIDO ==========
+# ========== MODO HÍBRIDO (COM LOGS E CONFIANÇA 80) ==========
 @app.route('/api/trade/hybrid', methods=['POST'])
 @require_auth
 def api_trade_hybrid():
@@ -402,6 +404,7 @@ def api_trade_hybrid():
     except Exception as e:
         logger.error(f"❌ Erro no modo híbrido: {e}")
         return jsonify({'error': str(e)}), 500
+
 # ========== OUTRAS ROTAS ==========
 @app.route('/api/report')
 @require_auth
