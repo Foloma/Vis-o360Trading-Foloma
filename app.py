@@ -300,13 +300,211 @@ def api_symbol_change():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ========== TRADES (APENAS AS ROTAS PRINCIPAIS – MANTENHA O RESTO IGUAL) ==========
-# (As rotas /api/trade, /api/trade/digit, /api/trade/hybrid, /api/report, etc.
-#  devem permanecer como estavam, sem alterações.)
-# Devido ao tamanho, não vou repetir todo o código aqui, mas você pode manter as mesmas
-# rotas que já tinha (desde que não usem o SQLAlchemy).
+# ========== TRADES ==========
+@app.route('/api/trade', methods=['POST'])
+@require_auth
+def api_trade():
+    try:
+        data = request.json
+        action = data.get('action')
+        amount = float(data.get('amount', 0.35))
+        if not deriv_client or not deriv_client.authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        if amount < 0.35 or amount > 100:
+            return jsonify({'error': 'Valor inválido'}), 400
+        signal, confidence = trading_bot.calculate_signal()
+        min_confidence = config.RISK_LIMITS.get('min_confidence', 70)
+        if confidence < min_confidence:
+            return jsonify({'error': f'Confiança baixa: {confidence:.1f}%'}), 400
+        contract_type = 'CALL' if action == 'BUY' else 'PUT'
+        success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=False)
+        if success:
+            if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
+                affiliate.calculate_commission(amount, deriv_client.markup_percentage)
+            return jsonify({'status': 'ok', 'message': f'Trade {action} enviado', 'confidence': confidence})
+        else:
+            return jsonify({'error': 'Falha no trade'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-# ========== FIM ==========
+@app.route('/api/trade/digit', methods=['POST'])
+@require_auth
+def api_trade_digit():
+    try:
+        data = request.json
+        prediction = data.get('prediction')
+        amount = float(data.get('amount', 0.35))
+        if not deriv_client or not deriv_client.authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        if amount < 0.35 or amount > 100:
+            return jsonify({'error': 'Valor inválido'}), 400
+        analysis = digit_analyzer.get_analysis()
+        confidence = analysis.get('confidence', 0)
+        min_confidence = config.RISK_LIMITS.get('min_confidence_digits', 65)
+        if confidence < min_confidence:
+            return jsonify({'error': f'Confiança baixa: {confidence}% (mínimo {min_confidence}%)'}), 400
+        contract_type = 'CALL' if prediction == 'odd' else 'PUT'
+        success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=True)
+        if success:
+            response = {'status': 'ok', 'message': f'Aposta em {prediction.upper()} enviada!', 'confidence': confidence}
+            if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
+                affiliate.calculate_commission(amount, deriv_client.markup_percentage)
+            return jsonify(response)
+        else:
+            return jsonify({'error': 'Falha no trade'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ========== MODO HÍBRIDO ==========
+@app.route('/api/trade/hybrid', methods=['POST'])
+@require_auth
+def api_trade_hybrid():
+    try:
+        data = request.json
+        amount = float(data.get('amount', 0.35))
+        if not deriv_client or not deriv_client.authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        if amount < 0.35 or amount > 100:
+            return jsonify({'error': 'Valor inválido'}), 400
+
+        signal, conf_ativo = trading_bot.calculate_signal()
+        digit_analysis = digit_analyzer.get_analysis()
+        digit_recommend = digit_analysis.get('recommended_action')
+        digit_conf = digit_analysis.get('confidence', 0)
+
+        if signal == 'BUY' and digit_recommend == 'BUY':
+            combined_conf = (conf_ativo + digit_conf) / 2
+            action = 'BUY'
+            message = '✅ Sinal CONFIRMADO: Ativo e Dígitos apontam para COMPRA'
+        elif signal == 'SELL' and digit_recommend == 'SELL':
+            combined_conf = (conf_ativo + digit_conf) / 2
+            action = 'SELL'
+            message = '✅ Sinal CONFIRMADO: Ativo e Dígitos apontam para VENDA'
+        else:
+            return jsonify({'error': '⚠️ Sinais divergentes. Aguarde convergência.'}), 400
+
+        min_hybrid = config.ADVANCED_STRATEGY.get('hybrid_min_confidence', 75)
+        if combined_conf < min_hybrid:
+            return jsonify({'error': f'Confiança combinada baixa ({combined_conf:.1f}%)'}), 400
+
+        contract_type = 'CALL' if action == 'BUY' else 'PUT'
+        success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=False)
+        if success:
+            if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
+                affiliate.calculate_commission(amount, deriv_client.markup_percentage)
+            return jsonify({'status': 'ok', 'message': message, 'confidence': combined_conf})
+        else:
+            return jsonify({'error': 'Falha no trade'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ========== OUTRAS ROTAS ==========
+@app.route('/api/report')
+@require_auth
+def api_report():
+    try:
+        return jsonify(trading_bot.get_trade_report())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pause', methods=['POST'])
+@require_auth
+def api_pause():
+    data = request.json
+    paused = data.get('paused', True)
+    if paused:
+        trading_bot.pause()
+    else:
+        trading_bot.resume()
+    return jsonify({'paused': paused})
+
+@app.route('/api/martingale/status', methods=['GET'])
+@require_auth
+def api_martingale_status():
+    try:
+        return jsonify(trading_bot.get_martingale_status())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/martingale/apply', methods=['POST'])
+@require_auth
+def api_martingale_apply():
+    try:
+        data = request.json
+        last_amount = float(data.get('last_amount', 0))
+        if last_amount <= 0:
+            return jsonify({'error': 'Valor inválido'}), 400
+        success, result = trading_bot.apply_martingale_after_loss(last_amount)
+        if success:
+            return jsonify({'status': 'ok', 'martingale': result})
+        else:
+            return jsonify({'error': result}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/martingale/reset', methods=['POST'])
+@require_auth
+def api_martingale_reset():
+    try:
+        trading_bot.reset_martingale()
+        return jsonify({'status': 'ok', 'message': 'Martingale resetado'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/affiliate/stats')
+@require_auth
+def api_affiliate_stats():
+    try:
+        return jsonify(affiliate.get_affiliate_stats())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/affiliate/link')
+@require_auth
+def api_affiliate_link():
+    try:
+        user_id = session.get('user_id')
+        link = affiliate.generate_referral_link(user_id)
+        return jsonify({'link': link, 'code': link.split('/')[-1]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/payment/deposit', methods=['POST'])
+@require_auth
+def api_deposit():
+    try:
+        data = request.json
+        amount = float(data.get('amount', 0))
+        currency = data.get('currency', 'USD')
+        method = data.get('method', 'cryptocurrency')
+        if amount <= 0:
+            return jsonify({'error': 'Valor inválido'}), 400
+        if not deriv_client or not deriv_client.authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        result = deriv_client.request_deposit(amount, currency, method)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/payment/withdraw', methods=['POST'])
+@require_auth
+def api_withdraw():
+    try:
+        data = request.json
+        amount = float(data.get('amount', 0))
+        currency = data.get('currency', 'USD')
+        method = data.get('method', 'cryptocurrency')
+        if amount <= 0:
+            return jsonify({'error': 'Valor inválido'}), 400
+        if not deriv_client or not deriv_client.authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        if amount > deriv_client.balance:
+            return jsonify({'error': 'Saldo insuficiente'}), 400
+        result = deriv_client.request_withdrawal(amount, currency, method)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
