@@ -85,7 +85,6 @@ class TradingBot:
         logger.info("📅 Estatísticas diárias resetadas")
     
     def get_momentum(self):
-        """Calcula o momentum (aceleração) dos últimos 5 ticks"""
         if len(self.indicators.prices) < 5:
             return 0
         recent = list(self.indicators.prices)[-5:]
@@ -97,7 +96,6 @@ class TradingBot:
             return 'NEUTRAL', 0
 
         analysis = self.last_analysis
-
         weights = {
             'trend': 0.35,
             'rsi': 0.30,
@@ -137,7 +135,6 @@ class TradingBot:
         elif 'VENDA' in analysis['bollinger']['desc']:
             sell_score += analysis['bollinger']['score'] * weights['bollinger']
 
-        # Conflito
         if buy_score > 0 and sell_score > 0:
             buy_score *= 0.5
             sell_score *= 0.5
@@ -201,10 +198,8 @@ class TradingBot:
             if len(self.trades) == 0:
                 logger.warning("Nenhum trade pendente")
                 return
-            
             last_trade = self.trades[-1]
             is_win = result.get('is_win', False)
-            
             if is_win:
                 profit = result.get('profit', last_trade['amount'] * 0.85)
                 last_trade['result'] = 'win'
@@ -218,11 +213,9 @@ class TradingBot:
                 self.daily_stats['losses'] += 1
                 self.daily_stats['profit_loss'] -= last_trade['amount']
                 logger.info(f"❌ PERDA! -${last_trade['amount']:.2f}")
-            
             self.update_stats()
             if self.client:
                 self.client.get_balance()
-                
         except Exception as e:
             logger.error(f"Erro ao processar resultado: {e}")
     
