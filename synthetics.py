@@ -18,6 +18,7 @@ class DigitAnalyzer:
         self.countdown = analysis_interval
         self.analysis_in_progress = False
         
+        # Para exibição com atraso (10 segundos entre cada dígito mostrado)
         self.display_digits = deque(maxlen=20)
         self.display_interval = 10
         self.current_display_digit = None
@@ -58,7 +59,10 @@ class DigitAnalyzer:
             self.timestamps.append(datetime.now())
             self.current_digit = last_digit
             self.current_parity = parity
+            
+            # Adiciona ao buffer de exibição lenta
             self.display_digits.append(last_digit)
+            
             self._check_immediate_pattern()
             return True, self.current_digit
         except Exception as e:
@@ -70,12 +74,14 @@ class DigitAnalyzer:
         if now < self.next_display_time and self.current_display_digit is not None:
             remaining = int(self.next_display_time - now)
             return self.current_display_digit, self.current_display_parity, remaining
+        
         if self.display_digits:
             digit = self.display_digits.popleft()
             self.current_display_digit = digit
             self.current_display_parity = 'IMPAR' if digit % 2 != 0 else 'PAR'
             self.next_display_time = now + self.display_interval
             return self.current_display_digit, self.current_display_parity, self.display_interval
+        
         return self.current_display_digit, self.current_display_parity, 0
 
     def _check_immediate_pattern(self):
@@ -222,7 +228,6 @@ class DigitAnalyzer:
             reason = f'📊 Últimos 20: {odd_pct}% ÍMPAR / {even_pct}% PAR → sem padrão'
             pattern_desc = 'Aguardando'
 
-        # Log de diagnóstico
         logger.info(f"📊 Análise final: recomendação={recommended_action}, confiança={confidence}, streak={streak}, streak_parity={streak_parity}")
 
         return {
