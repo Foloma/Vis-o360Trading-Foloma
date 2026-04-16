@@ -311,12 +311,13 @@ class TradingBot:
         self.martingale = {'active': False, 'step': 0, 'original_amount': 0, 'last_result': None}
  
    def reset_stats(self):
-        """Reseta todas as estatísticas e limpa o histórico de trades"""
-        self.stats = {
+    """Reseta todas as estatísticas e limpa o histórico de trades"""
+    self.stats = {
         'total': 0, 'wins': 0, 'losses': 0,
         'win_rate': 0, 'profit_loss': 0,
         'total_invested': 0, 'total_return': 0
     }
     self.trades.clear()
+    logger.info("📊 Estatísticas e histórico resetados pelo utilizador")
 
 trading_bot = TradingBot()
