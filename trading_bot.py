@@ -18,7 +18,7 @@ class TradingBot:
         self.currency = 'USD'
         self.paused = False
         self.last_analysis = {}
-        
+
         self.stats = {
             'total': 0,
             'wins': 0,
@@ -28,7 +28,7 @@ class TradingBot:
             'total_invested': 0,
             'total_return': 0
         }
-        
+
         self.daily_stats = {
             'date': datetime.now().date(),
             'trades': 0,
@@ -37,31 +37,31 @@ class TradingBot:
             'profit_loss': 0,
             'start_balance': 0
         }
-        
+
         self.trades = deque(maxlen=100)
         self.consecutive_losses = 0
         self.consecutive_wins = 0
-        
+
         self.martingale = {
             'active': False,
             'step': 0,
             'original_amount': 0,
             'last_result': None
         }
-        
+
     def start(self, client):
         self.client = client
         self.daily_stats['start_balance'] = self.balance
         logger.info("🚀 Bot iniciado")
-    
+
     def pause(self):
         self.paused = True
         logger.info("⏸️ Pausado")
-    
+
     def resume(self):
         self.paused = False
         logger.info("▶️ Resumido")
-    
+
     def on_tick(self, tick):
         self.current_price = tick['price']
         self.current_symbol = tick['symbol']
@@ -75,22 +75,25 @@ class TradingBot:
             today = datetime.now().date()
             if self.daily_stats['date'] != today:
                 self.reset_daily_stats()
-    
+
     def reset_daily_stats(self):
         self.daily_stats = {
             'date': datetime.now().date(),
-            'trades': 0, 'wins': 0, 'losses': 0,
-            'profit_loss': 0, 'start_balance': self.balance
+            'trades': 0,
+            'wins': 0,
+            'losses': 0,
+            'profit_loss': 0,
+            'start_balance': self.balance
         }
         logger.info("📅 Estatísticas diárias resetadas")
-    
+
     def get_momentum(self):
         if len(self.indicators.prices) < 5:
             return 0
         recent = list(self.indicators.prices)[-5:]
         momentum = (recent[-1] - recent[0]) / recent[0] * 100
         return momentum
-    
+
     def calculate_signal(self):
         if not self.last_analysis:
             return 'NEUTRAL', 0
@@ -161,7 +164,7 @@ class TradingBot:
                 confidence = max(confidence - 10, 0)
 
         return signal, min(confidence, 98)
-    
+
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
         self.trades.append(trade_data)
@@ -169,7 +172,7 @@ class TradingBot:
         self.stats['total_invested'] += trade_data['amount']
         self.daily_stats['trades'] += 1
         self.update_stats()
-    
+
     def update_stats(self):
         wins = 0
         losses = 0
@@ -186,9 +189,8 @@ class TradingBot:
         self.stats['win_rate'] = (wins / self.stats['total']) * 100 if self.stats['total'] > 0 else 0
         self.stats['profit_loss'] = profit_loss
         self.stats['total_return'] = (profit_loss / self.stats['total_invested']) * 100 if self.stats['total_invested'] > 0 else 0
-    
+
     def check_pending_trades(self):
-        """Verifica trades pendentes há mais de 30 segundos e marca como perda"""
         now = datetime.now()
         updated = False
         for trade in self.trades:
@@ -200,7 +202,7 @@ class TradingBot:
                     logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')}")
         if updated:
             self.update_stats()
-    
+
     def on_trade_result(self, result):
         try:
             logger.info(f"📊 [BOT] Processando resultado: {result}")
@@ -227,9 +229,9 @@ class TradingBot:
                 self.client.get_balance()
         except Exception as e:
             logger.error(f"Erro ao processar resultado: {e}")
-    
+
     def get_trade_report(self):
-        self.check_pending_trades()  # Limpa pendentes antes de gerar relatório
+        self.check_pending_trades()
         hoje = datetime.now().date()
         trades_hoje = [t for t in self.trades if t['timestamp'].date() == hoje]
         return {
@@ -252,9 +254,9 @@ class TradingBot:
                 'profit': t.get('profit', 0)
             } for t in list(self.trades)[-50:]]
         }
-    
+
     def get_status(self):
-        self.check_pending_trades()  # Também limpa pendentes ao obter status
+        self.check_pending_trades()
         signal, confidence = self.calculate_signal()
         return {
             'connected': self.client.connected if self.client else False,
@@ -271,7 +273,7 @@ class TradingBot:
             'martingale': self.get_martingale_status(),
             'daily_stats': self.daily_stats
         }
-    
+
     def get_martingale_status(self):
         return {
             'active': self.martingale['active'],
@@ -282,14 +284,14 @@ class TradingBot:
             'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
             'enabled': config.MARTINGALE_CONFIG.get('enabled', True)
         }
-    
+
     def get_martingale_amount(self, base_amount):
         if not self.martingale['active'] or self.martingale['step'] == 0:
             return base_amount
         multiplier = config.MARTINGALE_CONFIG.get('multiplier', 2.0)
         step = self.martingale['step']
         return base_amount * (multiplier ** step)
-    
+
     def apply_martingale_after_loss(self, last_trade_amount):
         if not config.MARTINGALE_CONFIG.get('enabled', True):
             return False, "Martingale desativado"
@@ -306,18 +308,22 @@ class TradingBot:
             'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
             'message': f"📈 Martingale ativo - Passo {self.martingale['step']}/{max_steps} | Próximo valor: ${next_amount:.2f}"
         }
-    
+
     def reset_martingale(self):
         self.martingale = {'active': False, 'step': 0, 'original_amount': 0, 'last_result': None}
- 
-   def reset_stats(self):
-    """Reseta todas as estatísticas e limpa o histórico de trades"""
-    self.stats = {
-        'total': 0, 'wins': 0, 'losses': 0,
-        'win_rate': 0, 'profit_loss': 0,
-        'total_invested': 0, 'total_return': 0
-    }
-    self.trades.clear()
-    logger.info("📊 Estatísticas e histórico resetados pelo utilizador")
+
+    def reset_stats(self):
+        """Reseta todas as estatísticas e limpa o histórico de trades"""
+        self.stats = {
+            'total': 0,
+            'wins': 0,
+            'losses': 0,
+            'win_rate': 0,
+            'profit_loss': 0,
+            'total_invested': 0,
+            'total_return': 0
+        }
+        self.trades.clear()
+        logger.info("📊 Estatísticas e histórico resetados pelo utilizador")
 
 trading_bot = TradingBot()
