@@ -276,6 +276,10 @@
             font-size: 16px;
             cursor: pointer;
         }
+        .btn-buy:disabled, .btn-sell:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         .digits-header {
             display: flex;
             justify-content: space-between;
@@ -495,6 +499,16 @@
             color: #fff;
             cursor: pointer;
         }
+        .btn-clear-history {
+            background: #2a3342;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            color: #ffaa00;
+            cursor: pointer;
+            font-size: 11px;
+            margin-left: 8px;
+        }
         .hidden {
             display: none;
         }
@@ -530,6 +544,14 @@
         .account-btn.active {
             background: #00f0b5;
             color: #0b0e14;
+        }
+        .hybrid-status {
+            background: #0b0e14;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 12px;
+            text-align: center;
+            font-size: 12px;
         }
         .modal {
             position: fixed;
@@ -627,8 +649,7 @@
             <div id="modoDigitosPanel" class="hidden">
                 <div class="card">
                     <div class="card-title">🎲 ANÁLISE DE DÍGITOS</div>
-                    
-                    <!-- NOVO: Dígito com exibição lenta (a cada 10s) -->
+                    <!-- Dígito com exibição lenta -->
                     <div class="display-digit-container">
                         <div class="display-digit-header">
                             <span>📺 DÍGITO EM EXIBIÇÃO</span>
@@ -642,7 +663,6 @@
                             <small>✅ Novo dígito a cada 10 segundos</small>
                         </div>
                     </div>
-                    
                     <div class="digits-header">
                         <div><div style="font-size:11px;">ÚLTIMO DÍGITO (real)</div><span class="last-digit" id="lastDigit">-</span></div>
                         <div><div style="font-size:11px;">SEQUÊNCIA</div><span id="streakCounter">0</span> <span id="streakType">---</span></div>
@@ -683,6 +703,10 @@
             <div class="card">
                 <div class="card-title">🎯 EXECUTAR TRADE</div>
                 <input type="number" id="amount" class="amount-input" value="0.35" step="0.01" min="0.35" max="100">
+                <div id="hybridStatus" class="hybrid-status hidden">
+                    <div id="hybridSignal"></div>
+                    <div id="hybridConfidence"></div>
+                </div>
                 <div id="ativosButtons">
                     <div class="trade-buttons">
                         <button class="btn-buy" id="hybridBuyBtn" onclick="executeTrade('BUY')">📈 COMPRAR</button>
@@ -767,9 +791,12 @@
                 </div>
             </div>
         </div>
-        <!-- Últimos trades -->
+        <!-- Últimos trades com botão de limpar -->
         <div class="card">
-            <div class="card-title">📋 ÚLTIMOS TRADES</div>
+            <div class="card-title">
+                <span>📋 ÚLTIMOS TRADES</span>
+                <button class="btn-clear-history" onclick="limparHistorico()">🗑️ LIMPAR HISTÓRICO</button>
+            </div>
             <div id="tradesList">
                 <div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>
             </div>
@@ -869,6 +896,7 @@
                 ativosButtons.classList.remove('hidden');
                 digitosButtons.classList.add('hidden');
                 if (hybridStatus) hybridStatus.classList.add('hidden');
+                // Reativa botões nos outros modos
                 const buyBtn = document.getElementById('hybridBuyBtn');
                 const sellBtn = document.getElementById('hybridSellBtn');
                 if (buyBtn && sellBtn) {
@@ -1153,140 +1181,212 @@
             });
         }
 
+        // ========== LIMPAR HISTÓRICO ==========
+        function limparHistorico() {
+            if (confirm('⚠️ Tem certeza que deseja apagar todo o histórico de trades? Esta ação não pode ser desfeita.')) {
+                fetch('/api/clear_history', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                }).then(r => r.json()).then(data => {
+                    if (data.error) alert('❌ ' + data.error);
+                    else { alert('✅ Histórico apagado!'); carregarHistorico(); updateAll(); }
+                }).catch(err => console.error(err));
+            }
+        }
+
         // ========== ATUALIZAÇÃO EM TEMPO REAL ==========
         function updateAll() {
-            fetch('/api/status').then(r => r.json()).then(data => {
-                if (data.error) return;
-                const bot = data.bot;
-                if (!bot) return;
-                // Status
-                const dot = document.getElementById('statusDot');
-                const text = document.getElementById('statusText');
-                const btn = document.getElementById('connectBtn');
-                if (bot.connected && bot.authorized) {
-                    dot.className = 'dot connected';
-                    text.textContent = 'Conectado';
-                    if (btn.textContent !== '✅ CONECTADO') { btn.textContent = '✅ CONECTADO'; btn.style.background = '#2a3342'; }
-                    isConnected = true;
-                } else {
-                    dot.className = 'dot';
-                    text.textContent = 'Desconectado';
-                    if (isConnected) { btn.textContent = '🔌 CONECTAR'; btn.style.background = '#00f0b5'; }
-                    isConnected = false;
-                }
-                // Saldo e preço
-                document.getElementById('balance').textContent = (bot.balance || 0).toFixed(2);
-                document.getElementById('currency').textContent = bot.currency || 'USD';
-                document.getElementById('price').textContent = (bot.price || 0).toFixed(4);
-                const signal = bot.signal || 'NEUTRAL';
-                const badge = document.getElementById('signalBadge');
-                badge.textContent = signal;
-                badge.className = 'signal-badge ' + signal.toLowerCase();
-                document.getElementById('signalConfidence').textContent = (bot.confidence || 0) + '%';
-                if (bot.analysis) {
-                    document.getElementById('trendScore').textContent = (bot.analysis.trend?.score || 0).toFixed(1);
-                    document.getElementById('trendDesc').textContent = bot.analysis.trend?.desc || '---';
-                    document.getElementById('rsiScore').textContent = (bot.analysis.rsi?.score || 0).toFixed(1);
-                    document.getElementById('rsiDesc').textContent = bot.analysis.rsi?.desc || '---';
-                    document.getElementById('macdScore').textContent = (bot.analysis.macd?.score || 0).toFixed(1);
-                    document.getElementById('macdDesc').textContent = bot.analysis.macd?.desc || '---';
-                    document.getElementById('bbScore').textContent = (bot.analysis.bollinger?.score || 0).toFixed(1);
-                    document.getElementById('bbDesc').textContent = bot.analysis.bollinger?.desc || '---';
-                }
-                document.getElementById('totalTrades').textContent = bot.stats?.total || 0;
-                document.getElementById('winRate').textContent = (bot.stats?.win_rate || 0).toFixed(1) + '%';
-                const pl = bot.stats?.profit_loss || 0;
-                const plElem = document.getElementById('profitLoss');
-                plElem.textContent = (pl >= 0 ? '+' : '') + '$' + pl.toFixed(2);
-                plElem.style.color = pl >= 0 ? '#00f0b5' : '#ff4d4d';
-                document.getElementById('totalReturn').textContent = (bot.stats?.total_return || 0).toFixed(1) + '%';
-                paused = bot.paused || false;
-                document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
-                
-                // Dígitos
-                if (data.digits) {
-                    const d = data.digits;
-                    const newDigit = d.last;
-                    if (newDigit !== undefined && newDigit !== lastKnownDigit) {
-                        hideCurrentAlert();
-                        lastKnownDigit = newDigit;
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) return;
+                    const bot = data.bot;
+                    if (!bot) return;
+                    // Status
+                    const dot = document.getElementById('statusDot');
+                    const text = document.getElementById('statusText');
+                    const btn = document.getElementById('connectBtn');
+                    if (bot.connected && bot.authorized) {
+                        dot.className = 'dot connected';
+                        text.textContent = 'Conectado';
+                        if (btn.textContent !== '✅ CONECTADO') { btn.textContent = '✅ CONECTADO'; btn.style.background = '#2a3342'; }
+                        isConnected = true;
+                    } else {
+                        dot.className = 'dot';
+                        text.textContent = 'Desconectado';
+                        if (isConnected) { btn.textContent = '🔌 CONECTAR'; btn.style.background = '#00f0b5'; }
+                        isConnected = false;
                     }
-                    document.getElementById('lastDigit').textContent = newDigit ?? '-';
-                    document.getElementById('streakCounter').textContent = d.stats?.current_streak || 0;
-                    document.getElementById('streakType').textContent = d.stats?.streak_parity || '---';
-                    if (d.countdown) digitCountdown = d.countdown;
-                    const countdownSpan = document.getElementById('digitCountdown');
-                    if (countdownSpan) countdownSpan.textContent = digitCountdown + 's';
-                    if (d.recent) {
-                        let html = '';
-                        d.recent.forEach(digit => {
-                            const isOdd = digit % 2 !== 0;
-                            html += `<div class="digit-box ${isOdd ? 'odd' : 'even'}">${digit}</div>`;
-                        });
-                        document.getElementById('digitsHistory').innerHTML = html;
+                    // Saldo e preço
+                    document.getElementById('balance').textContent = (bot.balance || 0).toFixed(2);
+                    document.getElementById('currency').textContent = bot.currency || 'USD';
+                    document.getElementById('price').textContent = (bot.price || 0).toFixed(4);
+                    const signal = bot.signal || 'NEUTRAL';
+                    const badge = document.getElementById('signalBadge');
+                    badge.textContent = signal;
+                    badge.className = 'signal-badge ' + signal.toLowerCase();
+                    document.getElementById('signalConfidence').textContent = (bot.confidence || 0) + '%';
+                    if (bot.analysis) {
+                        document.getElementById('trendScore').textContent = (bot.analysis.trend?.score || 0).toFixed(1);
+                        document.getElementById('trendDesc').textContent = bot.analysis.trend?.desc || '---';
+                        document.getElementById('rsiScore').textContent = (bot.analysis.rsi?.score || 0).toFixed(1);
+                        document.getElementById('rsiDesc').textContent = bot.analysis.rsi?.desc || '---';
+                        document.getElementById('macdScore').textContent = (bot.analysis.macd?.score || 0).toFixed(1);
+                        document.getElementById('macdDesc').textContent = bot.analysis.macd?.desc || '---';
+                        document.getElementById('bbScore').textContent = (bot.analysis.bollinger?.score || 0).toFixed(1);
+                        document.getElementById('bbDesc').textContent = bot.analysis.bollinger?.desc || '---';
                     }
-                    const analysis = d.analysis;
-                    if (analysis) {
-                        const oddPct = analysis.odd_pct || 0;
-                        const evenPct = analysis.even_pct || 0;
-                        document.getElementById('oddPercent').textContent = oddPct + '%';
-                        document.getElementById('evenPercent').textContent = evenPct + '%';
-                        document.getElementById('oddBar').style.width = oddPct + '%';
-                        document.getElementById('evenBar').style.width = evenPct + '%';
-                        document.getElementById('totalDigits').textContent = d.stats?.total || 0;
-                        document.getElementById('oddCount').textContent = d.stats?.odd || 0;
-                        document.getElementById('evenCount').textContent = d.stats?.even || 0;
-                        document.getElementById('accuracy').textContent = d.stats?.accuracy || 0;
-                        if (analysis.alert === 'RECOMENDADO' && analysis.confidence >= 65) {
-                            showDigitAlert(analysis.reason, analysis.confidence, analysis.recommended_action === 'BUY' ? 'odd' : (analysis.recommended_action === 'SELL' ? 'even' : null));
+                    document.getElementById('totalTrades').textContent = bot.stats?.total || 0;
+                    document.getElementById('winRate').textContent = (bot.stats?.win_rate || 0).toFixed(1) + '%';
+                    const pl = bot.stats?.profit_loss || 0;
+                    const plElem = document.getElementById('profitLoss');
+                    plElem.textContent = (pl >= 0 ? '+' : '') + '$' + pl.toFixed(2);
+                    plElem.style.color = pl >= 0 ? '#00f0b5' : '#ff4d4d';
+                    document.getElementById('totalReturn').textContent = (bot.stats?.total_return || 0).toFixed(1) + '%';
+                    paused = bot.paused || false;
+                    document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
+                    
+                    // Dígitos
+                    if (data.digits) {
+                        const d = data.digits;
+                        const newDigit = d.last;
+                        if (newDigit !== undefined && newDigit !== lastKnownDigit) {
+                            hideCurrentAlert();
+                            lastKnownDigit = newDigit;
+                        }
+                        document.getElementById('lastDigit').textContent = newDigit ?? '-';
+                        document.getElementById('streakCounter').textContent = d.stats?.current_streak || 0;
+                        document.getElementById('streakType').textContent = d.stats?.streak_parity || '---';
+                        if (d.countdown) digitCountdown = d.countdown;
+                        const countdownSpan = document.getElementById('digitCountdown');
+                        if (countdownSpan) countdownSpan.textContent = digitCountdown + 's';
+                        if (d.recent) {
+                            let html = '';
+                            d.recent.forEach(digit => {
+                                const isOdd = digit % 2 !== 0;
+                                html += `<div class="digit-box ${isOdd ? 'odd' : 'even'}">${digit}</div>`;
+                            });
+                            document.getElementById('digitsHistory').innerHTML = html;
+                        }
+                        const analysis = d.analysis;
+                        if (analysis) {
+                            const oddPct = analysis.odd_pct || 0;
+                            const evenPct = analysis.even_pct || 0;
+                            document.getElementById('oddPercent').textContent = oddPct + '%';
+                            document.getElementById('evenPercent').textContent = evenPct + '%';
+                            document.getElementById('oddBar').style.width = oddPct + '%';
+                            document.getElementById('evenBar').style.width = evenPct + '%';
+                            document.getElementById('totalDigits').textContent = d.stats?.total || 0;
+                            document.getElementById('oddCount').textContent = d.stats?.odd || 0;
+                            document.getElementById('evenCount').textContent = d.stats?.even || 0;
+                            document.getElementById('accuracy').textContent = d.stats?.accuracy || 0;
+                            if (analysis.alert === 'RECOMENDADO' && analysis.confidence >= 65) {
+                                showDigitAlert(analysis.reason, analysis.confidence, analysis.recommended_action === 'BUY' ? 'odd' : (analysis.recommended_action === 'SELL' ? 'even' : null));
+                            }
                         }
                     }
-                }
-            });
+                    
+                    // ========== MODO HÍBRIDO (desativa botões) ==========
+                    if (modoAtual === 'hybrid') {
+                        const hybridDiv = document.getElementById('hybridStatus');
+                        hybridDiv.classList.remove('hidden');
+                        const ativoSignal = bot.signal;
+                        const ativoConf = bot.confidence;
+                        const digitAnalysis = data.digits.analysis;
+                        const digitRecommend = digitAnalysis ? digitAnalysis.recommended_action : null;
+                        const digitConf = digitAnalysis ? digitAnalysis.confidence : 0;
+                        let hybridMessage = '';
+                        let hybridColor = '#ffaa00';
+                        let canTrade = false;
+                        let combinedConf = 0;
+                        if (ativoSignal === 'BUY' && digitRecommend === 'BUY') {
+                            combinedConf = (ativoConf + digitConf) / 2;
+                            hybridMessage = `✅ SINAIS CONVERGENTES (COMPRA) – Confiança combinada: ${combinedConf.toFixed(1)}%`;
+                            hybridColor = '#00f0b5';
+                            canTrade = true;
+                        } else if (ativoSignal === 'SELL' && digitRecommend === 'SELL') {
+                            combinedConf = (ativoConf + digitConf) / 2;
+                            hybridMessage = `✅ SINAIS CONVERGENTES (VENDA) – Confiança combinada: ${combinedConf.toFixed(1)}%`;
+                            hybridColor = '#00f0b5';
+                            canTrade = true;
+                        } else {
+                            hybridMessage = `⚠️ SINAIS DIVERGENTES (Ativo: ${ativoSignal}, Dígitos: ${digitRecommend || 'NEUTRO'}) – Aguarde convergência`;
+                            hybridColor = '#ff4d4d';
+                            canTrade = false;
+                        }
+                        document.getElementById('hybridSignal').innerHTML = hybridMessage;
+                        document.getElementById('hybridSignal').style.color = hybridColor;
+                        document.getElementById('hybridConfidence').innerHTML = canTrade ? `Pronto para trade!` : `Confiança combinada: ${combinedConf.toFixed(1)}% (mínimo 80%)`;
+                        // Desativar/ativar botões
+                        const buyBtn = document.getElementById('hybridBuyBtn');
+                        const sellBtn = document.getElementById('hybridSellBtn');
+                        if (buyBtn && sellBtn) {
+                            buyBtn.disabled = !canTrade;
+                            sellBtn.disabled = !canTrade;
+                            buyBtn.style.opacity = canTrade ? '1' : '0.5';
+                            sellBtn.style.opacity = canTrade ? '1' : '0.5';
+                        }
+                    } else {
+                        const hybridDiv = document.getElementById('hybridStatus');
+                        if (hybridDiv) hybridDiv.classList.add('hidden');
+                        // Reativar botões nos outros modos
+                        const buyBtn = document.getElementById('hybridBuyBtn');
+                        const sellBtn = document.getElementById('hybridSellBtn');
+                        if (buyBtn && sellBtn) {
+                            buyBtn.disabled = false;
+                            sellBtn.disabled = false;
+                            buyBtn.style.opacity = '1';
+                            sellBtn.style.opacity = '1';
+                        }
+                    }
+                });
         }
 
         function carregarHistorico() {
-            fetch('/api/report').then(r => r.json()).then(data => {
-                const historico = data.historico || [];
-                const tradesList = document.getElementById('tradesList');
-                if (historico.length === 0) {
-                    tradesList.innerHTML = '<div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>';
-                    return;
-                }
-                let html = '';
-                historico.slice(-10).reverse().forEach(trade => {
-                    const isWin = trade.result === 'win';
-                    const isLoss = trade.result === 'loss';
-                    let profitAmount = 0;
-                    let displayAmount = trade.amount || 0;
-                    if (isWin) {
-                        profitAmount = trade.profit || (displayAmount * 0.85);
-                    } else if (isLoss) {
-                        profitAmount = -displayAmount;
+            fetch('/api/report')
+                .then(r => r.json())
+                .then(data => {
+                    const historico = data.historico || [];
+                    const tradesList = document.getElementById('tradesList');
+                    if (historico.length === 0) {
+                        tradesList.innerHTML = '<div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>';
+                        return;
                     }
-                    const resultColor = isWin ? '#00f0b5' : (isLoss ? '#ff4d4d' : '#ffaa00');
-                    let resultText = '';
-                    if (isWin) {
-                        resultText = `✅ +$${profitAmount.toFixed(2)}`;
-                    } else if (isLoss) {
-                        resultText = `❌ -$${displayAmount.toFixed(2)}`;
-                    } else {
-                        resultText = '⏳ PENDENTE';
-                    }
-                    let action = trade.action || '';
-                    if (action === 'BUY') action = '📈 COMPRA';
-                    else if (action === 'SELL') action = '📉 VENDA';
-                    else if (action === 'DIGIT_ODD') action = '🎲 ÍMPAR';
-                    else if (action === 'DIGIT_EVEN') action = '🎲 PAR';
-                    html += `<div class="trade-item">
-                        <div>${trade.time?.slice(5, 16) || '---'}</div>
-                        <div>${action}</div>
-                        <div>$${displayAmount.toFixed(2)}</div>
-                        <div class="${isWin ? 'win' : (isLoss ? 'loss' : 'pending')}">${resultText}</div>
-                    </div>`;
+                    let html = '';
+                    historico.slice(-10).reverse().forEach(trade => {
+                        const isWin = trade.result === 'win';
+                        const isLoss = trade.result === 'loss';
+                        let profitAmount = 0;
+                        let displayAmount = trade.amount || 0;
+                        if (isWin) {
+                            profitAmount = trade.profit || (displayAmount * 0.85);
+                        } else if (isLoss) {
+                            profitAmount = -displayAmount;
+                        }
+                        const resultColor = isWin ? '#00f0b5' : (isLoss ? '#ff4d4d' : '#ffaa00');
+                        let resultText = '';
+                        if (isWin) {
+                            resultText = `✅ +$${profitAmount.toFixed(2)}`;
+                        } else if (isLoss) {
+                            resultText = `❌ -$${displayAmount.toFixed(2)}`;
+                        } else {
+                            resultText = '⏳ PENDENTE';
+                        }
+                        let action = trade.action || '';
+                        if (action === 'BUY') action = '📈 COMPRA';
+                        else if (action === 'SELL') action = '📉 VENDA';
+                        else if (action === 'DIGIT_ODD') action = '🎲 ÍMPAR';
+                        else if (action === 'DIGIT_EVEN') action = '🎲 PAR';
+                        html += `<div class="trade-item">
+                            <div>${trade.time?.slice(5, 16) || '---'}</div>
+                            <div>${action}</div>
+                            <div>$${displayAmount.toFixed(2)}</div>
+                            <div class="${isWin ? 'win' : (isLoss ? 'loss' : 'pending')}">${resultText}</div>
+                        </div>`;
+                    });
+                    tradesList.innerHTML = html;
                 });
-                tradesList.innerHTML = html;
-            });
         }
 
         function carregarLinkAfiliado() {
