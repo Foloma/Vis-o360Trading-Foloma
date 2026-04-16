@@ -512,6 +512,7 @@ def api_withdraw():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ========== ROTA PARA LIMPAR HISTÓRICO ==========
 @app.route('/api/clear_history', methods=['POST'])
 @require_auth
 def api_clear_history():
