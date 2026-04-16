@@ -86,8 +86,7 @@ def require_auth(f):
         return f(*args, **kwargs)
     decorated.__name__ = f.__name__
     return decorated
-
-# ========== ROTAS DE AUTENTICAÇÃO ==========
+    # ========== ROTAS DE AUTENTICAÇÃO ==========
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -299,8 +298,7 @@ def api_symbol_change():
         return jsonify({'status': 'ok', 'symbol': symbol})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-# ========== TRADES ==========
+        # ========== TRADES ==========
 @app.route('/api/trade', methods=['POST'])
 @require_auth
 def api_trade():
