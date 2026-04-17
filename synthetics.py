@@ -1,3 +1,4 @@
+# synthetics.py – versão final com análise sobre dígitos lentos
 from collections import deque
 import time
 import logging
