@@ -527,8 +527,17 @@ def api_withdraw():
         result = deriv_client.request_withdrawal(amount, currency, method)
         return jsonify(result)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return jsonify({'error': str(e)}), 500
 
+@app.route('/api/clear_history', methods=['POST'])
+@require_auth
+def api_clear_history():
+    try:
+        trading_bot.reset_stats()
+        return jsonify({'status': 'ok', 'message': 'Histórico apagado com sucesso!'})
+    except Exception as e:
+        logger.error(f"Erro ao limpar histórico: {e}")
+        return jsonify({'error': str(e)}), 500
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
