@@ -187,13 +187,15 @@ class DerivWebSocketClient:
             logger.error(f"Erro no tick: {e}")
     
     def place_trade(self, contract_type, amount, is_digit=False):
+    def place_trade(self, contract_type, amount, is_digit=False):
     try:
         if not self.authorized:
             logger.error("❌ Não autorizado")
             return False
 
+        # Define duração conforme o tipo de trade
         if is_digit:
-            # Dígitos: duração de 10 segundos (compatível com exibição lenta)
+            # Dígitos: contrato de 10 segundos (alinhado com a exibição lenta)
             duration = 10
             duration_unit = 's'
             if contract_type == 'CALL':
@@ -201,10 +203,20 @@ class DerivWebSocketClient:
             else:
                 contract_type_full = 'DIGITEVEN'
         else:
-            # Ativos: duração de 5 ticks (rápido)
+            # Ativos: contrato de 5 ticks (rápido)
             duration = 5
             duration_unit = 't'
             contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
+
+        # Guarda informação do trade pendente
+        self.pending_trade = {
+            'amount': amount,
+            'contract_type': contract_type_full,
+            'is_digit': is_digit,
+            'action': 'ÍMPAR' if (is_digit and contract_type == 'CALL') else ('PAR' if is_digit else contract_type),
+            'timestamp': time.time(),
+            'status': 'waiting_proposal'
+        }
 
         proposal_msg = {
             "proposal": 1,
@@ -218,17 +230,11 @@ class DerivWebSocketClient:
             "req_id": 100
         }
 
-        logger.info(f"📝 Enviando proposta: {contract_type_full} ${amount} (duração {duration}{duration_unit})")
+        logger.info(f"📝 Solicitando proposta: {contract_type_full} ${amount} (duração {duration}{duration_unit})")
         self.ws.send(json.dumps(proposal_msg))
 
-        self.pending_trade = {
-            'amount': amount,
-            'contract_type': contract_type_full,
-            'is_digit': is_digit,
-            'timestamp': time.time(),
-            'status': 'waiting_proposal'
-        }
         return True
+
     except Exception as e:
         logger.error(f"❌ Erro ao colocar trade: {e}")
         return False
