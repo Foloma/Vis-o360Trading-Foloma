@@ -168,13 +168,14 @@ class DerivWebSocketClient:
                 logger.error("❌ Não autorizado")
                 return False
 
-            # Define duração conforme o tipo de trade
             if is_digit:
-                # Dígitos: contrato de 10 segundos (alinhado com a exibição lenta)
-                duration = 10
-                duration_unit = 's'
-                if contract_type == 'CALL':
-                    contract_type_full = 'DIGITODD'
+    # Dígitos: duração de 10 ticks (≈10 segundos)
+    duration = 10
+    duration_unit = 't'
+    if contract_type == 'CALL':
+        contract_type_full = 'DIGITODD'
+    else:
+        contract_type_full = 'DIGITEVEN'
                 else:
                     contract_type_full = 'DIGITEVEN'
             else:
