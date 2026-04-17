@@ -187,7 +187,7 @@ class DerivWebSocketClient:
             logger.error(f"Erro no tick: {e}")
     
     def place_trade(self, contract_type, amount, is_digit=False):
-    try:
+       try:
         if not self.authorized:
             logger.error("❌ Não autorizado")
             return False
