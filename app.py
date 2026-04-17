@@ -173,7 +173,7 @@ def api_login():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/auth/logout', methods=['POST'])
+@app.route('/api/auth/logout', methods(['POST'])
 def api_logout():
     session.clear()
     return jsonify({'status': 'ok'})
@@ -313,7 +313,7 @@ def api_trade():
         if amount < 0.35 or amount > 100:
             return jsonify({'error': 'Valor inválido'}), 400
         signal, confidence = trading_bot.calculate_signal()
-        min_confidence = config.RISK_LIMITS.get('min_confidence', 70)
+        min_confidence = config.RISK_LIMITS.get('min_confidence', 50)  # reduzido
         if confidence < min_confidence:
             return jsonify({'error': f'Confiança baixa: {confidence:.1f}%'}), 400
         contract_type = 'CALL' if action == 'BUY' else 'PUT'
@@ -340,7 +340,7 @@ def api_trade_digit():
             return jsonify({'error': 'Valor inválido'}), 400
         analysis = digit_analyzer.get_analysis()
         confidence = analysis.get('confidence', 0)
-        min_confidence = config.RISK_LIMITS.get('min_confidence_digits', 65)
+        min_confidence = config.RISK_LIMITS.get('min_confidence_digits', 55)  # reduzido
         if confidence < min_confidence:
             return jsonify({'error': f'Confiança baixa: {confidence}% (mínimo {min_confidence}%)'}), 400
         contract_type = 'CALL' if prediction == 'odd' else 'PUT'
@@ -383,7 +383,7 @@ def api_trade_hybrid():
         else:
             return jsonify({'error': '⚠️ Sinais divergentes. Aguarde convergência.'}), 400
 
-        min_hybrid = 80
+        min_hybrid = 70  # reduzido de 80 para 70
         if combined_conf < min_hybrid:
             return jsonify({'error': f'Confiança combinada baixa ({combined_conf:.1f}%)'}), 400
 
@@ -398,13 +398,13 @@ def api_trade_hybrid():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ========== MODO MANUAL (IGNORA SINAIS) ==========
+# ========== MODO MANUAL ==========
 @app.route('/api/trade/manual', methods=['POST'])
 @require_auth
 def api_trade_manual():
     try:
         data = request.json
-        action = data.get('action')  # 'BUY' ou 'SELL'
+        action = data.get('action')
         amount = float(data.get('amount', 0.35))
         if not deriv_client or not deriv_client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
@@ -420,6 +420,17 @@ def api_trade_manual():
         else:
             return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ========== LIMPAR HISTÓRICO ==========
+@app.route('/api/clear_history', methods=['POST'])
+@require_auth
+def api_clear_history():
+    try:
+        trading_bot.reset_stats()
+        return jsonify({'status': 'ok', 'message': 'Histórico apagado com sucesso!'})
+    except Exception as e:
+        logger.error(f"Erro ao limpar histórico: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ========== OUTRAS ROTAS ==========
@@ -527,17 +538,8 @@ def api_withdraw():
         result = deriv_client.request_withdrawal(amount, currency, method)
         return jsonify(result)
     except Exception as e:
-    return jsonify({'error': str(e)}), 500
-
-@app.route('/api/clear_history', methods=['POST'])
-@require_auth
-def api_clear_history():
-    try:
-        trading_bot.reset_stats()
-        return jsonify({'status': 'ok', 'message': 'Histórico apagado com sucesso!'})
-    except Exception as e:
-        logger.error(f"Erro ao limpar histórico: {e}")
         return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
