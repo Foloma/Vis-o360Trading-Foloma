@@ -50,7 +50,7 @@ class Config:
         'reset_on_win': True
     }
     
-    RISK_LIMITS = {
+RISK_LIMITS = {
     'max_daily_loss_percent': 5,
     'max_consecutive_losses': 2,
     'min_confidence': 50,               # antes 70
