@@ -50,17 +50,16 @@ class Config:
         'reset_on_win': True
     }
     
-    # Risk Limits
     RISK_LIMITS = {
-        'max_daily_loss_percent': 5,
-        'max_consecutive_losses': 2,
-        'min_confidence': 55,   # antes era 70               # ativos
-        'min_confidence_digits': 65,        # dígitos
-        'max_stake_percent': 5,
-        'stop_loss_enabled': True,
-        'take_profit_enabled': True,
-        'daily_target_percent': 10
-    }
+    'max_daily_loss_percent': 5,
+    'max_consecutive_losses': 2,
+    'min_confidence': 50,               # antes 70
+    'min_confidence_digits': 55,        # antes 65
+    'max_stake_percent': 5,
+    'stop_loss_enabled': True,
+    'take_profit_enabled': True,
+    'daily_target_percent': 10
+}
     
     # Estratégia Avançada
     ADVANCED_STRATEGY = {
