@@ -95,75 +95,74 @@ class TradingBot:
         return momentum
 
     def calculate_signal(self):
-        if not self.last_analysis:
-            return 'NEUTRAL', 0
+    if not self.last_analysis:
+        return 'NEUTRAL', 0
 
-        analysis = self.last_analysis
-        weights = {
-            'trend': 0.35,
-            'rsi': 0.30,
-            'macd': 0.20,
-            'bollinger': 0.15
-        }
+    analysis = self.last_analysis
 
-        buy_score = 0
-        sell_score = 0
+    # Direcção de cada indicador: 1 = BUY, -1 = SELL, 0 = neutro
+    dir_trend = 0
+    dir_rsi = 0
+    dir_macd = 0
+    dir_bb = 0
 
-        if 'ALTA' in analysis['trend']['desc']:
-            buy_score += analysis['trend']['score'] * weights['trend']
-        elif 'BAIXA' in analysis['trend']['desc']:
-            sell_score += analysis['trend']['score'] * weights['trend']
+    # 1. Tendência
+    if 'ALTA' in analysis['trend']['desc']:
+        dir_trend = 1
+    elif 'BAIXA' in analysis['trend']['desc']:
+        dir_trend = -1
 
-        rsi = analysis['rsi']['score']
-        if rsi < 30:
-            buy_score += (30 - rsi) * weights['rsi']
-        elif rsi > 70:
-            sell_score += (rsi - 70) * weights['rsi']
-        elif rsi < 40:
-            buy_score += (40 - rsi) * weights['rsi'] * 0.5
-        elif rsi > 60:
-            sell_score += (rsi - 60) * weights['rsi'] * 0.5
+    # 2. RSI
+    rsi = analysis['rsi']['score']
+    if rsi < 30:
+        dir_rsi = 1
+    elif rsi > 70:
+        dir_rsi = -1
+    elif rsi < 40:
+        dir_rsi = 0.5
+    elif rsi > 60:
+        dir_rsi = -0.5
+    else:
+        dir_rsi = 0
 
-        if 'COMPRA' in analysis['macd']['desc']:
-            buy_score += analysis['macd']['score'] * weights['macd']
-        elif 'VENDA' in analysis['macd']['desc']:
-            sell_score += analysis['macd']['score'] * weights['macd']
+    # 3. MACD
+    if 'COMPRA' in analysis['macd']['desc']:
+        dir_macd = 1
+    elif 'VENDA' in analysis['macd']['desc']:
+        dir_macd = -1
 
-        if 'COMPRA' in analysis['bollinger']['desc']:
-            buy_score += analysis['bollinger']['score'] * weights['bollinger']
-        elif 'VENDA' in analysis['bollinger']['desc']:
-            sell_score += analysis['bollinger']['score'] * weights['bollinger']
+    # 4. Bollinger
+    if 'COMPRA' in analysis['bollinger']['desc']:
+        dir_bb = 1
+    elif 'VENDA' in analysis['bollinger']['desc']:
+        dir_bb = -1
 
-        if buy_score > 0 and sell_score > 0:
-            buy_score *= 0.5
-            sell_score *= 0.5
+    # Contagem de votos
+    buy_votes = sum(1 for d in [dir_trend, dir_rsi, dir_macd, dir_bb] if d > 0)
+    sell_votes = sum(1 for d in [dir_trend, dir_rsi, dir_macd, dir_bb] if d < 0)
 
-        total = buy_score + sell_score
-        if total == 0:
-            return 'NEUTRAL', 0
+    # Se empate ou nenhum, neutro
+    if buy_votes == sell_votes:
+        return 'NEUTRAL', 0
 
-        if buy_score > sell_score:
-            signal = 'BUY'
-            confidence = (buy_score / total) * 100
-        else:
-            signal = 'SELL'
-            confidence = (sell_score / total) * 100
+    signal = 'BUY' if buy_votes > sell_votes else 'SELL'
+    total_votes = buy_votes + sell_votes
+    confidence = (max(buy_votes, sell_votes) / 4) * 100  # sobre 4 indicadores
 
-        momentum = self.get_momentum()
-        threshold = config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1)
+    # Ajuste suave pelo momentum (apenas para não perder totalmente)
+    momentum = self.get_momentum()
+    threshold = config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1)
 
-        if signal == 'BUY':
-            if momentum > threshold:
-                confidence = min(confidence + 5, 85)
-            elif momentum < -threshold:
-                confidence = max(confidence - 10, 0)
-        elif signal == 'SELL':
-            if momentum < -threshold:
-                confidence = min(confidence + 5, 85)
-            elif momentum > threshold:
-                confidence = max(confidence - 10, 0)
+    if signal == 'BUY' and momentum > threshold:
+        confidence = min(confidence + 5, 95)
+    elif signal == 'SELL' and momentum < -threshold:
+        confidence = min(confidence + 5, 95)
+    elif signal == 'BUY' and momentum < -threshold:
+        confidence = max(confidence - 10, 0)
+    elif signal == 'SELL' and momentum > threshold:
+        confidence = max(confidence - 10, 0)
 
-        return signal, min(confidence, 98)
+    return signal, min(confidence, 98)
 
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
