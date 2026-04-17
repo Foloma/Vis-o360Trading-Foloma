@@ -509,6 +509,14 @@
             font-size: 11px;
             margin-left: 8px;
         }
+        .manual-mode-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 10px 0;
+            font-size: 12px;
+            color: #62748c;
+        }
         .hidden {
             display: none;
         }
@@ -703,6 +711,9 @@
             <div class="card">
                 <div class="card-title">🎯 EXECUTAR TRADE</div>
                 <input type="number" id="amount" class="amount-input" value="0.35" step="0.01" min="0.35" max="100">
+                <div class="manual-mode-checkbox">
+                    <input type="checkbox" id="manualMode"> <span>🔓 Modo Manual (ignorar sinais)</span>
+                </div>
                 <div id="hybridStatus" class="hybrid-status hidden">
                     <div id="hybridSignal"></div>
                     <div id="hybridConfidence"></div>
@@ -1112,7 +1123,8 @@
         function executeTrade(action) {
             const amount = parseFloat(document.getElementById('amount').value);
             if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
-            let url = '/api/trade';
+            const isManual = document.getElementById('manualMode').checked;
+            let url = isManual ? '/api/trade/manual' : '/api/trade';
             if (modoAtual === 'hybrid') {
                 url = '/api/trade/hybrid';
             }
@@ -1128,7 +1140,14 @@
         function executeDigitTrade(prediction) {
             const amount = parseFloat(document.getElementById('amount').value);
             if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
-            fetch('/api/trade/digit', {
+            const isManual = document.getElementById('manualMode').checked;
+            let url = '/api/trade/digit';
+            if (isManual) {
+                // Para dígitos manual, podemos usar a mesma rota manual? Melhor criar uma rota específica? Por simplicidade, usamos a rota normal.
+                // Mas como a rota manual é só para ativos, aqui usamos a normal.
+                url = '/api/trade/digit';
+            }
+            fetch(url, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({prediction: prediction, amount: amount})
