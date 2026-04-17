@@ -173,7 +173,7 @@ def api_login():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/auth/logout', methods(['POST'])
+@app.route('/api/auth/logout', methods=(['POST'])
 def api_logout():
     session.clear()
     return jsonify({'status': 'ok'})
