@@ -100,55 +100,63 @@ class TradingBot:
 
         analysis = self.last_analysis
 
-        # Direcção de cada indicador: 1 = BUY, -1 = SELL, 0 = neutro
-        dir_trend = 0
-        dir_rsi = 0
-        dir_macd = 0
-        dir_bb = 0
+        # Pesos ajustados: tendência mais importante
+        weights = {
+            'trend': 0.50,
+            'rsi': 0.20,
+            'macd': 0.20,
+            'bollinger': 0.10
+        }
 
-        # 1. Tendência
+        buy_score = 0
+        sell_score = 0
+
+        # Tendência
         if 'ALTA' in analysis['trend']['desc']:
-            dir_trend = 1
+            buy_score += analysis['trend']['score'] * weights['trend']
         elif 'BAIXA' in analysis['trend']['desc']:
-            dir_trend = -1
+            sell_score += analysis['trend']['score'] * weights['trend']
 
-        # 2. RSI
+        # RSI
         rsi = analysis['rsi']['score']
         if rsi < 30:
-            dir_rsi = 1
+            buy_score += (30 - rsi) * weights['rsi']
         elif rsi > 70:
-            dir_rsi = -1
+            sell_score += (rsi - 70) * weights['rsi']
         elif rsi < 40:
-            dir_rsi = 0.5
+            buy_score += (40 - rsi) * weights['rsi'] * 0.5
         elif rsi > 60:
-            dir_rsi = -0.5
-        else:
-            dir_rsi = 0
+            sell_score += (rsi - 60) * weights['rsi'] * 0.5
 
-        # 3. MACD
+        # MACD
         if 'COMPRA' in analysis['macd']['desc']:
-            dir_macd = 1
+            buy_score += analysis['macd']['score'] * weights['macd']
         elif 'VENDA' in analysis['macd']['desc']:
-            dir_macd = -1
+            sell_score += analysis['macd']['score'] * weights['macd']
 
-        # 4. Bollinger Bands
+        # Bollinger
         if 'COMPRA' in analysis['bollinger']['desc']:
-            dir_bb = 1
+            buy_score += analysis['bollinger']['score'] * weights['bollinger']
         elif 'VENDA' in analysis['bollinger']['desc']:
-            dir_bb = -1
+            sell_score += analysis['bollinger']['score'] * weights['bollinger']
 
-        # Contagem de votos (ignorando neutros)
-        buy_votes = sum(1 for d in [dir_trend, dir_rsi, dir_macd, dir_bb] if d > 0)
-        sell_votes = sum(1 for d in [dir_trend, dir_rsi, dir_macd, dir_bb] if d < 0)
+        # Se houver conflito, reduz ambos
+        if buy_score > 0 and sell_score > 0:
+            buy_score *= 0.5
+            sell_score *= 0.5
 
-        if buy_votes == sell_votes:
+        total = buy_score + sell_score
+        if total == 0:
             return 'NEUTRAL', 0
 
-        signal = 'BUY' if buy_votes > sell_votes else 'SELL'
-        total_votes = buy_votes + sell_votes
-        confidence = (max(buy_votes, sell_votes) / 4) * 100  # máximo 100% quando 4/4 concordam
+        if buy_score > sell_score:
+            signal = 'BUY'
+            confidence = (buy_score / total) * 100
+        else:
+            signal = 'SELL'
+            confidence = (sell_score / total) * 100
 
-        # Ajuste pelo momentum (apenas para reforçar quando alinhado)
+        # Ajuste pelo momentum (apenas para reforçar)
         momentum = self.get_momentum()
         threshold = config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1)
 
@@ -209,6 +217,7 @@ class TradingBot:
                 return
             last_trade = self.trades[-1]
             is_win = result.get('is_win', False)
+
             if is_win:
                 profit = result.get('profit', last_trade['amount'] * 0.85)
                 last_trade['result'] = 'win'
@@ -217,11 +226,13 @@ class TradingBot:
                 self.daily_stats['profit_loss'] += profit
                 logger.info(f"✅ GANHO! +${profit:.2f}")
             else:
+                loss = last_trade['amount']
                 last_trade['result'] = 'loss'
                 last_trade['profit'] = 0
                 self.daily_stats['losses'] += 1
-                self.daily_stats['profit_loss'] -= last_trade['amount']
-                logger.info(f"❌ PERDA! -${last_trade['amount']:.2f}")
+                self.daily_stats['profit_loss'] -= loss
+                logger.info(f"❌ PERDA! -${loss:.2f}")
+
             self.update_stats()
             if self.client:
                 self.client.get_balance()
@@ -311,6 +322,7 @@ class TradingBot:
         self.martingale = {'active': False, 'step': 0, 'original_amount': 0, 'last_result': None}
 
     def reset_stats(self):
+        """Reseta todas as estatísticas e limpa o histórico de trades"""
         self.stats = {
             'total': 0,
             'wins': 0,
@@ -321,6 +333,6 @@ class TradingBot:
             'total_return': 0
         }
         self.trades.clear()
-        logger.info("📊 Estatísticas e histórico resetados")
+        logger.info("📊 Estatísticas e histórico resetados pelo utilizador")
 
 trading_bot = TradingBot()
