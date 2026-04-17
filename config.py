@@ -54,7 +54,7 @@ class Config:
     RISK_LIMITS = {
         'max_daily_loss_percent': 5,
         'max_consecutive_losses': 2,
-        'min_confidence': 70,               # ativos
+        'min_confidence': 55,   # antes era 70               # ativos
         'min_confidence_digits': 65,        # dígitos
         'max_stake_percent': 5,
         'stop_loss_enabled': True,
