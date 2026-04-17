@@ -53,23 +53,30 @@ class DigitAnalyzer:
                     self.last_analysis_data['countdown'] = self.countdown
                     if self.countdown <= 0 and not self.analysis_in_progress:
                         self.trigger_analysis()
-        threading.Thread(target=update_countdown, daemon=True).start()
+        threading.Thread(target=update_countdown, daemon=True).start() 
 
-    def add_tick(self, price):
-        try:
-            price_str = f"{price:.2f}"
-            last_digit = int(price_str[-1])
-            parity = 'IMPAR' if last_digit % 2 != 0 else 'PAR'
-            self.digits.append(last_digit)
-            self.timestamps.append(datetime.now())
-            self.current_digit = last_digit
-            self.current_parity = parity
-            # Adiciona ao buffer de exibição lenta (fila de espera)
-            self.display_digits.append(last_digit)
-            return True, self.current_digit
-        except Exception as e:
-            logger.error(f"Erro ao processar tick: {e}")
-            return False, None
+def add_tick(self, price):
+    try:
+        price_str = f"{price:.2f}"
+        last_digit = int(price_str[-1])
+        parity = 'IMPAR' if last_digit % 2 != 0 else 'PAR'
+        self.digits.append(last_digit)
+        self.timestamps.append(datetime.now())
+        self.current_digit = last_digit
+        self.current_parity = parity
+        
+        # Adiciona ao buffer lento (apenas se passaram 10 segundos desde o último)
+        now = time.time()
+        if now >= self.next_display_time:
+            self.slow_digits.append(last_digit)
+            self.next_display_time = now + self.display_interval
+        
+        self.display_digits.append(last_digit)  # para exibição futura
+        self._check_immediate_pattern()
+        return True, self.current_digit
+    except Exception as e:
+        logger.error(f"Erro ao processar tick: {e}")
+        return False, None
 
     def get_next_display_digit(self):
         now = time.time()
