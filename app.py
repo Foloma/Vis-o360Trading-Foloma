@@ -41,7 +41,7 @@ def save_users(users):
 
 users = load_users()
 
-# ========== SISTEMA DE AFILIADO (comissão 0.5%) ==========
+# ========== SISTEMA DE AFILIADO ==========
 class AffiliateSystem:
     def __init__(self):
         self.referrals = deque(maxlen=1000)
@@ -355,7 +355,7 @@ def api_trade_digit():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ========== MODO HÍBRIDO (COM LOGS E CONFIANÇA 80) ==========
+# ========== MODO HÍBRIDO ==========
 @app.route('/api/trade/hybrid', methods=['POST'])
 @require_auth
 def api_trade_hybrid():
@@ -372,9 +372,6 @@ def api_trade_hybrid():
         digit_recommend = digit_analysis.get('recommended_action')
         digit_conf = digit_analysis.get('confidence', 0)
 
-        logger.info(f"🔍 Sinal ativo: {signal}, conf: {conf_ativo}")
-        logger.info(f"🔍 Recomendação dígitos: {digit_recommend}, conf: {digit_conf}")
-
         if signal == 'BUY' and digit_recommend == 'BUY':
             combined_conf = (conf_ativo + digit_conf) / 2
             action = 'BUY'
@@ -384,12 +381,10 @@ def api_trade_hybrid():
             action = 'SELL'
             message = '✅ Sinal CONFIRMADO: Ativo e Dígitos apontam para VENDA'
         else:
-            logger.info("⚠️ Sinais divergentes – nenhum trade executado")
             return jsonify({'error': '⚠️ Sinais divergentes. Aguarde convergência.'}), 400
 
         min_hybrid = 80
         if combined_conf < min_hybrid:
-            logger.info(f"❌ Confiança combinada baixa: {combined_conf:.1f}% (mínimo {min_hybrid}%)")
             return jsonify({'error': f'Confiança combinada baixa ({combined_conf:.1f}%)'}), 400
 
         contract_type = 'CALL' if action == 'BUY' else 'PUT'
@@ -397,12 +392,34 @@ def api_trade_hybrid():
         if success:
             if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
                 affiliate.calculate_commission(amount, deriv_client.markup_percentage)
-            logger.info(f"✅ Trade híbrido executado: {action} com confiança {combined_conf:.1f}%")
             return jsonify({'status': 'ok', 'message': message, 'confidence': combined_conf})
         else:
             return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
-        logger.error(f"❌ Erro no modo híbrido: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ========== MODO MANUAL (IGNORA SINAIS) ==========
+@app.route('/api/trade/manual', methods=['POST'])
+@require_auth
+def api_trade_manual():
+    try:
+        data = request.json
+        action = data.get('action')  # 'BUY' ou 'SELL'
+        amount = float(data.get('amount', 0.35))
+        if not deriv_client or not deriv_client.authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        if amount < 0.35 or amount > 100:
+            return jsonify({'error': 'Valor inválido'}), 400
+
+        contract_type = 'CALL' if action == 'BUY' else 'PUT'
+        success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=False)
+        if success:
+            if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
+                affiliate.calculate_commission(amount, deriv_client.markup_percentage)
+            return jsonify({'status': 'ok', 'message': f'Trade manual {action} executado!'})
+        else:
+            return jsonify({'error': 'Falha no trade'}), 500
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 # ========== OUTRAS ROTAS ==========
@@ -512,18 +529,6 @@ def api_withdraw():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ========== ROTA PARA LIMPAR HISTÓRICO ==========
-@app.route('/api/clear_history', methods=['POST'])
-@require_auth
-def api_clear_history():
-    try:
-        trading_bot.reset_stats()
-        return jsonify({'status': 'ok', 'message': 'Histórico apagado com sucesso!'})
-    except Exception as e:
-        logger.error(f"Erro ao limpar histórico: {e}")
-        return jsonify({'error': str(e)}), 500
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-   
