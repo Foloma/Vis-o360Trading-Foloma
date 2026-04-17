@@ -12,12 +12,9 @@ class Config:
     DEMO_API_TOKEN = os.getenv('DEMO_API_TOKEN', '')
     REAL_API_TOKEN = os.getenv('REAL_API_TOKEN', '')
     
-    # WebSocket – usa o domínio normal (no Render o DNS funciona)
+    # WebSocket
     WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
     DERIV_WS_URL = WS_URL
-    
-    # Base de Dados (PostgreSQL no Render, ou SQLite local)
-    DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
     
     # Tipos de conta
     ACCOUNT_TYPES = {
@@ -35,14 +32,14 @@ class Config:
     # Configurações de trading
     DEFAULT_STAKE = 0.35
     MIN_STAKE = 0.35
-    MAX_STAKE = 1000
+    MAX_STAKE = 100
     CONTRACT_DURATION = 5
     CONTRACT_DURATION_SECONDS = 10
     
     # Markup para conta REAL
     MARKUP_PERCENTAGE = 0.5
     
-    # Martingale
+    # Configurações de MARTINGALE
     MARTINGALE_CONFIG = {
         'enabled': True,
         'multiplier': 2.0,
@@ -50,22 +47,23 @@ class Config:
         'reset_on_win': True
     }
     
-RISK_LIMITS = {
-    'max_daily_loss_percent': 5,
-    'max_consecutive_losses': 2,
-    'min_confidence': 50,               # antes 70
-    'min_confidence_digits': 55,        # antes 65
-    'max_stake_percent': 5,
-    'stop_loss_enabled': True,
-    'take_profit_enabled': True,
-    'daily_target_percent': 10
-}
+    # Risk Limits
+    RISK_LIMITS = {
+        'max_daily_loss_percent': 5,
+        'max_consecutive_losses': 2,
+        'min_confidence': 50,               # reduzido para permitir mais sinais
+        'min_confidence_digits': 55,        # reduzido
+        'max_stake_percent': 5,
+        'stop_loss_enabled': True,
+        'take_profit_enabled': True,
+        'daily_target_percent': 10
+    }
     
     # Estratégia Avançada
     ADVANCED_STRATEGY = {
         'momentum_threshold': 0.1,
         'digit_diff_threshold': 20,
-        'hybrid_min_confidence': 75,
+        'hybrid_min_confidence': 70,       # reduzido de 80 para 70
         'hybrid_mode_enabled': True
     }
     
