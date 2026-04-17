@@ -162,55 +162,57 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro no tick: {e}")
     
-    def place_trade(self, contract_type, amount, is_digit=False):
+    def def place_trade(self, contract_type, amount, is_digit=False):
         try:
             if not self.authorized:
-                logger.error("❌ Não autorizado")
-                return False
-
-            if is_digit:
-    # Dígitos: duração de 10 ticks (≈10 segundos)
-    duration = 10
-    duration_unit = 't'
-    if contract_type == 'CALL':
-        contract_type_full = 'DIGITODD'
-    else:
-        contract_type_full = 'DIGITEVEN'
-                else:
-                    contract_type_full = 'DIGITEVEN'
-            else:
-                # Ativos: contrato de 5 ticks (rápido)
-                duration = 5
-                duration_unit = 't'
-                contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
-
-            self.pending_trade = {
-                'amount': amount,
-                'contract_type': contract_type_full,
-                'is_digit': is_digit,
-                'action': 'ÍMPAR' if (is_digit and contract_type == 'CALL') else ('PAR' if is_digit else contract_type),
-                'timestamp': time.time(),
-                'status': 'waiting_proposal'
-            }
-
-            proposal_msg = {
-                "proposal": 1,
-                "amount": amount,
-                "basis": "stake",
-                "contract_type": contract_type_full,
-                "currency": self.currency,
-                "duration": duration,
-                "duration_unit": duration_unit,
-                "symbol": self.current_symbol,
-                "req_id": 100
-            }
-
-            logger.info(f"📝 Solicitando proposta: {contract_type_full} ${amount} (duração {duration}{duration_unit})")
-            self.ws.send(json.dumps(proposal_msg))
-            return True
-        except Exception as e:
-            logger.error(f"❌ Erro ao colocar trade: {e}")
+            logger.error("❌ Não autorizado")
             return False
+
+        # Define duração conforme o tipo de trade
+        if is_digit:
+            # Dígitos: duração de 10 ticks (aproximadamente 10 segundos)
+            duration = 10
+            duration_unit = 't'
+            if contract_type == 'CALL':
+                contract_type_full = 'DIGITODD'
+            else:
+                contract_type_full = 'DIGITEVEN'
+        else:
+            # Ativos: duração de 5 ticks (rápido)
+            duration = 5
+            duration_unit = 't'
+            contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
+
+        # Guarda informação do trade pendente
+        self.pending_trade = {
+            'amount': amount,
+            'contract_type': contract_type_full,
+            'is_digit': is_digit,
+            'action': 'ÍMPAR' if (is_digit and contract_type == 'CALL') else ('PAR' if is_digit else contract_type),
+            'timestamp': time.time(),
+            'status': 'waiting_proposal'
+        }
+
+        proposal_msg = {
+            "proposal": 1,
+            "amount": amount,
+            "basis": "stake",
+            "contract_type": contract_type_full,
+            "currency": self.currency,
+            "duration": duration,
+            "duration_unit": duration_unit,
+            "symbol": self.current_symbol,
+            "req_id": 100
+        }
+
+        logger.info(f"📝 Solicitando proposta: {contract_type_full} ${amount} (duração {duration}{duration_unit})")
+        self.ws.send(json.dumps(proposal_msg))
+
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao colocar trade: {e}")
+        return False
     
     def on_proposal(self, data):
         try:
