@@ -23,7 +23,6 @@ class DerivWebSocketClient:
         self.subscribed_symbols = set()
         self.user_token = None
         
-        # Controle de trades
         self.active_trades = {}
         self.trade_history = []
         self.pending_trade = None
@@ -168,21 +167,20 @@ class DerivWebSocketClient:
                 logger.error("❌ Não autorizado")
                 return False
 
-            # Define duração conforme o tipo de trade
             if is_digit:
-               duration = 15
-               duration_unit = 's'
-               if contract_type == 'CALL':
-                   contract_type_full = 'DIGITODD'
-              else:
-                   contract_type_full = 'DIGITEVEN'
+                # Dígitos: duração de 15 segundos
+                duration = 15
+                duration_unit = 's'
+                if contract_type == 'CALL':
+                    contract_type_full = 'DIGITODD'
+                else:
+                    contract_type_full = 'DIGITEVEN'
             else:
                 # Ativos: duração de 5 ticks
                 duration = 5
                 duration_unit = 't'
                 contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
 
-            # Guarda informação do trade pendente
             self.pending_trade = {
                 'amount': amount,
                 'contract_type': contract_type_full,
