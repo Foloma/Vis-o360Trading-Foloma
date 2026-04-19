@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 
 class DigitAnalyzer:
     def __init__(self, max_digits=20, analysis_interval=10):
-        # Armazena todos os dígitos recebidos (para histórico)
         self.digits = deque(maxlen=100)
         self.timestamps = deque(maxlen=100)
         self.max_display = max_digits
@@ -19,9 +18,9 @@ class DigitAnalyzer:
         self.countdown = analysis_interval
         self.analysis_in_progress = False
 
-        # Para exibição lenta (um dígito a cada 10 segundos)
+        # Para exibição lenta (15 segundos entre cada dígito mostrado)
         self.display_digits = deque(maxlen=20)
-        self.display_interval = 10
+        self.display_interval = 15  # <--- AUMENTADO DE 10 PARA 15 SEGUNDOS
         self.current_display_digit = None
         self.current_display_parity = '---'
         self.next_display_time = 0
@@ -54,9 +53,7 @@ class DigitAnalyzer:
                         self.trigger_analysis()
         threading.Thread(target=update_countdown, daemon=True).start()
 
-    # ========== MÉTODO PRINCIPAL – CHAMADO PELO deriv_client.py ==========
     def add_tick(self, price):
-        """Adiciona um tick (preço) ao analisador. Chamado a cada novo preço."""
         try:
             price_str = f"{price:.2f}"
             last_digit = int(price_str[-1])
@@ -65,24 +62,11 @@ class DigitAnalyzer:
             self.timestamps.append(datetime.now())
             self.current_digit = last_digit
             self.current_parity = parity
-
-            # Adiciona ao buffer de exibição lenta
             self.display_digits.append(last_digit)
-
-            # Opcional: adiciona ao buffer lento apenas se passaram 10 segundos
-            now = time.time()
-            if now >= self.next_display_time:
-                self.slow_digits.append(last_digit)
-                self.next_display_time = now + self.display_interval
-
-            # Verifica padrões imediatamente (alerta rápido)
-            self._check_immediate_pattern()
-
             return True, self.current_digit
         except Exception as e:
             logger.error(f"Erro ao processar tick: {e}")
             return False, None
-    # ================================================================
 
     def get_next_display_digit(self):
         now = time.time()
@@ -95,6 +79,7 @@ class DigitAnalyzer:
             self.current_display_digit = digit
             self.current_display_parity = 'IMPAR' if digit % 2 != 0 else 'PAR'
             self.next_display_time = now + self.display_interval
+            self.slow_digits.append(digit)
             return self.current_display_digit, self.current_display_parity, self.display_interval
 
         return self.current_display_digit, self.current_display_parity, 0
@@ -260,7 +245,6 @@ class DigitAnalyzer:
             'countdown': self.analysis_interval
         }
 
-    # Métodos auxiliares para a interface
     def get_current_digit(self):
         return self.current_digit
 
