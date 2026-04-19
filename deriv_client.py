@@ -170,8 +170,8 @@ class DerivWebSocketClient:
 
             # Define duração conforme o tipo de trade
             if is_digit:
-            duration = 15
-            duration_unit = 's'
+               duration = 15
+               duration_unit = 's'
                 if contract_type == 'CALL':
                     contract_type_full = 'DIGITODD'
                 else:
