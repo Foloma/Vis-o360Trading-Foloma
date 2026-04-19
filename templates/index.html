@@ -655,58 +655,45 @@
             </div>
             <!-- Painel Dígitos -->
             <div id="modoDigitosPanel" class="hidden">
-                <div class="card">
-                    <div class="card-title">🎲 ANÁLISE DE DÍGITOS</div>
-                    <!-- Dígito com exibição lenta -->
-                    <div class="display-digit-container">
-                        <div class="display-digit-header">
-                            <span>📺 DÍGITO EM EXIBIÇÃO</span>
-                            <span id="display-countdown" class="countdown">10s</span>
-                        </div>
-                        <div class="display-digit-value">
-                            <span id="display-digit" class="display-digit">-</span>
-                            <span id="display-parity" class="display-parity">---</span>
-                        </div>
-                        <div class="display-note">
-                            <small>✅ Novo dígito a cada 10 segundos</small>
-                        </div>
-                    </div>
-                    <div class="digits-header">
-                        <div><div style="font-size:11px;">ÚLTIMO DÍGITO (real)</div><span class="last-digit" id="lastDigit">-</span></div>
-                        <div><div style="font-size:11px;">SEQUÊNCIA</div><span id="streakCounter">0</span> <span id="streakType">---</span></div>
-                    </div>
-                    <div class="digit-countdown">Próximo tick em: <span id="digitCountdown">5s</span></div>
-                    <div class="digits-history" id="digitsHistory"></div>
-                    <div class="percent-stats">
-                        <div class="percent-row">
-                            <span>🎲 ÍMPAR</span>
-                            <span class="percent-odd-value" id="oddPercent">0%</span>
-                        </div>
-                        <div class="percent-bar">
-                            <div class="percent-odd-bar" id="oddBar" style="width: 0%"></div>
-                            <div class="percent-even-bar" id="evenBar" style="width: 0%"></div>
-                        </div>
-                        <div class="percent-row mt-2">
-                            <span>🎯 PAR</span>
-                            <span class="percent-even-value" id="evenPercent">0%</span>
-                        </div>
-                    </div>
-                    <div id="alertBox" class="alert-box">
-                        <div id="alertMessage"></div>
-                        <div class="flex" style="justify-content: center; margin-top: 8px;">
-                            <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
-                            <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
-                        </div>
-                        <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
-                    </div>
-                    <div class="stats-grid" style="margin-top: 12px;">
-                        <div><div class="stat-value" id="totalDigits">0</div><div class="stat-label">Total</div></div>
-                        <div><div class="stat-value" id="oddCount">0</div><div class="stat-label">ÍMPARES</div></div>
-                        <div><div class="stat-value" id="evenCount">0</div><div class="stat-label">PARES</div></div>
-                        <div><div class="stat-value" id="accuracy">0%</div><div class="stat-label">Acertividade</div></div>
-                    </div>
-                </div>
+    <div class="card">
+        <div class="card-title">🎲 ANÁLISE DE DÍGITOS (LENTOS)</div>
+        <!-- Dígito em exibição com contagem -->
+        <div class="display-digit-container">
+            <div class="display-digit-header">
+                <span>📺 PRÓXIMO DÍGITO EM</span>
+                <span id="display-countdown" class="countdown">15s</span>
             </div>
+            <div class="display-digit-value">
+                <span id="display-digit" class="display-digit">-</span>
+                <span id="display-parity" class="display-parity">---</span>
+            </div>
+            <div class="display-note">
+                <small>✅ Um novo dígito a cada 15 segundos</small>
+            </div>
+        </div>
+        <!-- Alertas de recomendação -->
+        <div id="alertBox" class="alert-box">
+            <div id="alertMessage"></div>
+            <div class="flex" style="justify-content: center; margin-top: 8px;">
+                <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
+                <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
+            </div>
+            <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
+        </div>
+        <!-- Estatísticas resumidas -->
+        <div class="stats-grid" style="margin-top: 12px;">
+            <div><div class="stat-value" id="totalDigits">0</div><div class="stat-label">Total lentos</div></div>
+            <div><div class="stat-value" id="oddCount">0</div><div class="stat-label">ÍMPARES</div></div>
+            <div><div class="stat-value" id="evenCount">0</div><div class="stat-label">PARES</div></div>
+            <div><div class="stat-value" id="accuracy">0%</div><div class="stat-label">Acertividade</div></div>
+        </div>
+        <!-- Botões manuais (caso queira operar sem alerta) -->
+        <div class="trade-buttons" style="margin-top: 12px;">
+            <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR</button>
+            <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR</button>
+        </div>
+    </div>
+                                                             </div>
             <!-- Trading panel -->
             <div class="card">
                 <div class="card-title">🎯 EXECUTAR TRADE</div>
