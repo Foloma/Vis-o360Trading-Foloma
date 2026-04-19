@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 
 class DigitAnalyzer:
     def __init__(self, max_digits=20, analysis_interval=15):
-        # Armazena todos os dígitos recebidos (apenas para eventual debug)
         self.all_digits = deque(maxlen=100)
         self.timestamps = deque(maxlen=100)
         self.max_display = max_digits
@@ -19,10 +18,9 @@ class DigitAnalyzer:
         self.countdown = analysis_interval
         self.analysis_in_progress = False
 
-        # Buffer de dígitos lentos (apenas os que são mostrados a cada 15s)
+        # Buffer de dígitos lentos (apenas os mostrados a cada 15s)
         self.slow_digits = deque(maxlen=20)
 
-        # Para controlo de tempo entre exibições
         self.display_interval = 15
         self.next_display_time = 0
         self.current_display_digit = None
@@ -54,7 +52,6 @@ class DigitAnalyzer:
         threading.Thread(target=update_countdown, daemon=True).start()
 
     def add_tick(self, price):
-        """Recebe um tick (chamado a cada segundo). Guarda o dígito, mas só mostra/analisa a cada 15s."""
         try:
             price_str = f"{price:.2f}"
             last_digit = int(price_str[-1])
@@ -64,41 +61,42 @@ class DigitAnalyzer:
             self.current_digit = last_digit
             self.current_parity = parity
 
-            # Verifica se está na hora de mostrar um novo dígito lento
             now = time.time()
             if now >= self.next_display_time:
-                # Mostra o dígito actual (o último tick) como o dígito lento
+                # Este dígito será o próximo dígito lento
                 self.current_display_digit = last_digit
                 self.current_display_parity = parity
                 self.slow_digits.append(last_digit)
                 self.next_display_time = now + self.display_interval
-                # Dispara alerta imediato baseado na sequência lenta
                 self._check_immediate_pattern_slow()
+
             return True, self.current_digit
         except Exception as e:
             logger.error(f"Erro ao processar tick: {e}")
             return False, None
 
     def get_next_display_digit(self):
-        """Retorna o dígito actual em exibição (o último dígito lento) e o tempo restante."""
         now = time.time()
         remaining = max(0, int(self.next_display_time - now)) if self.next_display_time > 0 else 0
         return self.current_display_digit, self.current_display_parity, remaining
 
+    def get_recent_digits(self, count=20):
+        """Retorna os últimos dígitos lentos (não os rápidos)"""
+        return list(self.slow_digits)[-count:] if self.slow_digits else []
+
     def _check_immediate_pattern_slow(self):
-        """Analisa a sequência de dígitos lentos e gera recomendação."""
         if len(self.slow_digits) < 3:
             return
         streak, streak_parity = self.get_slow_streak_info()
         if streak >= 3:
             confidence = 65 + min((streak - 3) * 10, 30)
             if streak_parity == 'PAR':
-                recommended_action = 'BUY'   # próximo ÍMPAR
+                recommended_action = 'BUY'
                 alert = 'RECOMENDADO'
                 reason = f'⚠️ {streak} PARES consecutivos! Próximo ÍMPAR (confiança {confidence}%)'
                 pattern_desc = f'{streak} PARES consecutivos'
             else:
-                recommended_action = 'SELL'  # próximo PAR
+                recommended_action = 'SELL'
                 alert = 'RECOMENDADO'
                 reason = f'⚠️ {streak} ÍMPARES consecutivos! Próximo PAR (confiança {confidence}%)'
                 pattern_desc = f'{streak} ÍMPARES consecutivos'
@@ -161,7 +159,6 @@ class DigitAnalyzer:
 
         recent_parity = ['IMPAR' if d % 2 != 0 else 'PAR' for d in list(self.slow_digits)[-20:]]
         streak, streak_parity = self.get_slow_streak_info()
-        # análise de tendência simples
         odd_count = sum(1 for d in list(self.slow_digits)[-20:] if d % 2 != 0)
         odd_pct = round((odd_count / min(20, len(self.slow_digits))) * 100, 1)
         even_pct = round(100 - odd_pct, 1)
@@ -230,9 +227,6 @@ class DigitAnalyzer:
 
     def get_current_parity(self):
         return self.current_display_parity
-
-    def get_recent_digits(self, count=20):
-        return list(self.slow_digits)[-count:] if self.slow_digits else []
 
     def get_analysis(self):
         return self.last_analysis_data
