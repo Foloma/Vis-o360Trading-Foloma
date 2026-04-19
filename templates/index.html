@@ -517,6 +517,14 @@
             font-size: 12px;
             color: #62748c;
         }
+        .hybrid-status {
+            background: #0b0e14;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 12px;
+            text-align: center;
+            font-size: 12px;
+        }
         .hidden {
             display: none;
         }
@@ -552,14 +560,6 @@
         .account-btn.active {
             background: #00f0b5;
             color: #0b0e14;
-        }
-        .hybrid-status {
-            background: #0b0e14;
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 12px;
-            text-align: center;
-            font-size: 12px;
         }
         .modal {
             position: fixed;
@@ -653,59 +653,50 @@
                     </div>
                 </div>
             </div>
-            <!-- Painel Dígitos (versão melhorada) -->
-<div id="modoDigitosPanel" class="hidden">
-    <div class="card">
-        <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
-        
-        <!-- Dígito actual e contagem -->
-        <div class="display-digit-container">
-            <div class="display-digit-header">
-                <span>📺 PRÓXIMO DÍGITO EM</span>
-                <span id="display-countdown" class="countdown">15s</span>
+            <!-- Painel Dígitos (lentos, 15s) -->
+            <div id="modoDigitosPanel" class="hidden">
+                <div class="card">
+                    <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
+                    <div class="display-digit-container">
+                        <div class="display-digit-header">
+                            <span>📺 PRÓXIMO DÍGITO EM</span>
+                            <span id="display-countdown" class="countdown">15s</span>
+                        </div>
+                        <div class="display-digit-value">
+                            <span id="display-digit" class="display-digit">-</span>
+                            <span id="display-parity" class="display-parity">---</span>
+                        </div>
+                        <div class="display-note">
+                            <small>✅ Um novo dígito a cada 15 segundos</small>
+                        </div>
+                    </div>
+                    <!-- Histórico dos últimos dígitos lentos -->
+                    <div style="margin: 12px 0;">
+                        <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS LENTOS</div>
+                        <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
+                            <div style="color:#62748c;">Aguardando dados...</div>
+                        </div>
+                    </div>
+                    <div id="alertBox" class="alert-box">
+                        <div id="alertMessage"></div>
+                        <div class="flex" style="justify-content: center; margin-top: 8px;">
+                            <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
+                            <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
+                        </div>
+                        <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
+                    </div>
+                    <div class="stats-grid" style="margin-top: 12px;">
+                        <div><div class="stat-value" id="totalDigits">0</div><div class="stat-label">Total lentos</div></div>
+                        <div><div class="stat-value" id="oddCount">0</div><div class="stat-label">ÍMPARES</div></div>
+                        <div><div class="stat-value" id="evenCount">0</div><div class="stat-label">PARES</div></div>
+                        <div><div class="stat-value" id="accuracy">0%</div><div class="stat-label">Acertividade</div></div>
+                    </div>
+                    <div class="trade-buttons" style="margin-top: 12px;">
+                        <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
+                        <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
+                    </div>
+                </div>
             </div>
-            <div class="display-digit-value">
-                <span id="display-digit" class="display-digit">-</span>
-                <span id="display-parity" class="display-parity">---</span>
-            </div>
-            <div class="display-note">
-                <small>✅ Um novo dígito a cada 15 segundos</small>
-            </div>
-        </div>
-
-        <!-- Histórico dos últimos dígitos lentos -->
-        <div style="margin: 12px 0;">
-            <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS LENTOS</div>
-            <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
-                <div style="color: #62748c; font-size: 12px;">Aguardando dados...</div>
-            </div>
-        </div>
-
-        <!-- Alertas de recomendação -->
-        <div id="alertBox" class="alert-box">
-            <div id="alertMessage"></div>
-            <div class="flex" style="justify-content: center; margin-top: 8px;">
-                <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
-                <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
-            </div>
-            <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
-        </div>
-
-        <!-- Estatísticas resumidas -->
-        <div class="stats-grid" style="margin-top: 12px;">
-            <div><div class="stat-value" id="totalDigits">0</div><div class="stat-label">Total lentos</div></div>
-            <div><div class="stat-value" id="oddCount">0</div><div class="stat-label">ÍMPARES</div></div>
-            <div><div class="stat-value" id="evenCount">0</div><div class="stat-label">PARES</div></div>
-            <div><div class="stat-value" id="accuracy">0%</div><div class="stat-label">Acertividade</div></div>
-        </div>
-
-        <!-- Botões manuais -->
-        <div class="trade-buttons" style="margin-top: 12px;">
-            <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
-            <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
-        </div>
-    </div>
-            </div>                                                             </div>
             <!-- Trading panel -->
             <div class="card">
                 <div class="card-title">🎯 EXECUTAR TRADE</div>
@@ -847,7 +838,7 @@
         let digitTimer = null;
         let lastKnownDigit = null;
         let currentAlertTimeout = null;
-        let displayCountdown = 10;
+        let displayCountdown = 15;
         let displayDigit = null;
         const symbols = { 'R_100': 'Volatility 100', 'R_75': 'Volatility 75', 'R_50': 'Volatility 50' };
 
@@ -1139,14 +1130,7 @@
         function executeDigitTrade(prediction) {
             const amount = parseFloat(document.getElementById('amount').value);
             if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
-            const isManual = document.getElementById('manualMode').checked;
-            let url = '/api/trade/digit';
-            if (isManual) {
-                // Para dígitos manual, podemos usar a mesma rota manual? Melhor criar uma rota específica? Por simplicidade, usamos a rota normal.
-                // Mas como a rota manual é só para ativos, aqui usamos a normal.
-                url = '/api/trade/digit';
-            }
-            fetch(url, {
+            fetch('/api/trade/digit', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({prediction: prediction, amount: amount})
@@ -1265,7 +1249,7 @@
                     paused = bot.paused || false;
                     document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
                     
-                    // Dígitos
+                    // ========== DÍGITOS LENTOS ==========
                     if (data.digits) {
                         const d = data.digits;
                         const newDigit = d.last;
@@ -1279,14 +1263,18 @@
                         if (d.countdown) digitCountdown = d.countdown;
                         const countdownSpan = document.getElementById('digitCountdown');
                         if (countdownSpan) countdownSpan.textContent = digitCountdown + 's';
+                        
+                        // Histórico de dígitos lentos (usando d.recent)
                         if (d.recent) {
-                            let html = '';
+                            let slowHtml = '';
                             d.recent.forEach(digit => {
                                 const isOdd = digit % 2 !== 0;
-                                html += `<div class="digit-box ${isOdd ? 'odd' : 'even'}">${digit}</div>`;
+                                slowHtml += `<div class="digit-box ${isOdd ? 'odd' : 'even'}">${digit}</div>`;
                             });
-                            document.getElementById('digitsHistory').innerHTML = html;
+                            const slowContainer = document.getElementById('slowDigitsHistory');
+                            if (slowContainer) slowContainer.innerHTML = slowHtml || '<div style="color:#62748c;">---</div>';
                         }
+                        
                         const analysis = d.analysis;
                         if (analysis) {
                             const oddPct = analysis.odd_pct || 0;
