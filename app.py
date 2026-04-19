@@ -338,11 +338,12 @@ def api_trade_digit():
             return jsonify({'error': 'Não conectado'}), 400
         if amount < 0.35 or amount > 100:
             return jsonify({'error': 'Valor inválido'}), 400
+        
+        # Obtém a recomendação actual (para debug)
         analysis = digit_analyzer.get_analysis()
         confidence = analysis.get('confidence', 0)
-        min_confidence = config.RISK_LIMITS.get('min_confidence_digits', 55)  # reduzido
-        if confidence < min_confidence:
-            return jsonify({'error': f'Confiança baixa: {confidence}% (mínimo {min_confidence}%)'}), 400
+        logger.info(f"Trade dígito: prediction={prediction}, confiança={confidence}")
+        
         contract_type = 'CALL' if prediction == 'odd' else 'PUT'
         success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=True)
         if success:
@@ -353,6 +354,7 @@ def api_trade_digit():
         else:
             return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
+        logger.error(f"Erro no trade dígito: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ========== MODO HÍBRIDO ==========
