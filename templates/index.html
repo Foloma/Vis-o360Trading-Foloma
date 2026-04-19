@@ -653,11 +653,12 @@
                     </div>
                 </div>
             </div>
-            <!-- Painel Dígitos -->
-            <div id="modoDigitosPanel" class="hidden">
+            <!-- Painel Dígitos (versão melhorada) -->
+<div id="modoDigitosPanel" class="hidden">
     <div class="card">
-        <div class="card-title">🎲 ANÁLISE DE DÍGITOS (LENTOS)</div>
-        <!-- Dígito em exibição com contagem -->
+        <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
+        
+        <!-- Dígito actual e contagem -->
         <div class="display-digit-container">
             <div class="display-digit-header">
                 <span>📺 PRÓXIMO DÍGITO EM</span>
@@ -671,6 +672,15 @@
                 <small>✅ Um novo dígito a cada 15 segundos</small>
             </div>
         </div>
+
+        <!-- Histórico dos últimos dígitos lentos -->
+        <div style="margin: 12px 0;">
+            <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS LENTOS</div>
+            <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
+                <div style="color: #62748c; font-size: 12px;">Aguardando dados...</div>
+            </div>
+        </div>
+
         <!-- Alertas de recomendação -->
         <div id="alertBox" class="alert-box">
             <div id="alertMessage"></div>
@@ -680,6 +690,7 @@
             </div>
             <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
         </div>
+
         <!-- Estatísticas resumidas -->
         <div class="stats-grid" style="margin-top: 12px;">
             <div><div class="stat-value" id="totalDigits">0</div><div class="stat-label">Total lentos</div></div>
@@ -687,13 +698,14 @@
             <div><div class="stat-value" id="evenCount">0</div><div class="stat-label">PARES</div></div>
             <div><div class="stat-value" id="accuracy">0%</div><div class="stat-label">Acertividade</div></div>
         </div>
-        <!-- Botões manuais (caso queira operar sem alerta) -->
+
+        <!-- Botões manuais -->
         <div class="trade-buttons" style="margin-top: 12px;">
-            <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR</button>
-            <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR</button>
+            <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
+            <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
         </div>
     </div>
-                                                             </div>
+            </div>                                                             </div>
             <!-- Trading panel -->
             <div class="card">
                 <div class="card-title">🎯 EXECUTAR TRADE</div>
