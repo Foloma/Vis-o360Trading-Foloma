@@ -655,21 +655,46 @@
             </div>
             <!-- Painel Dígitos (lentos, 15s) -->
             <div id="modoDigitosPanel" class="hidden">
-                <div class="card">
-                    <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
-                    <div class="display-digit-container">
-                        <div class="display-digit-header">
-                            <span>📺 PRÓXIMO DÍGITO EM</span>
-                            <span id="display-countdown" class="countdown">15s</span>
-                        </div>
-                        <div class="display-digit-value">
-                            <span id="display-digit" class="display-digit">-</span>
-                            <span id="display-parity" class="display-parity">---</span>
-                        </div>
-                        <div class="display-note">
-                            <small>✅ Um novo dígito a cada 15 segundos</small>
-                        </div>
-                    </div>
+    <div class="card">
+        <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
+        
+        <!-- Dígito actual -->
+        <div class="display-digit-container">
+            <div class="display-digit-header">
+                <span>📺 PRÓXIMO DÍGITO EM</span>
+                <span id="display-countdown" class="countdown">15s</span>
+            </div>
+            <div class="display-digit-value">
+                <span id="display-digit" class="display-digit">-</span>
+                <span id="display-parity" class="display-parity">---</span>
+            </div>
+        </div>
+
+        <!-- Recomendação (alerta) -->
+        <div id="alertBox" class="alert-box">
+            <div id="alertMessage"></div>
+            <div class="flex" style="justify-content: center; margin-top: 8px;">
+                <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
+                <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
+            </div>
+            <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
+        </div>
+
+        <!-- Histórico dos últimos dígitos lentos -->
+        <div style="margin: 12px 0;">
+            <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS</div>
+            <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
+                <div style="color:#62748c;">Aguardando dados...</div>
+            </div>
+        </div>
+
+        <!-- Botões manuais -->
+        <div class="trade-buttons" style="margin-top: 12px;">
+            <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
+            <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
+        </div>
+    </div>
+                </div>
                     <!-- Histórico dos últimos dígitos lentos -->
                     <div style="margin: 12px 0;">
                         <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS LENTOS</div>
