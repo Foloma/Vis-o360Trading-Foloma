@@ -7,8 +7,9 @@ import threading
 logger = logging.getLogger(__name__)
 
 class DigitAnalyzer:
-    def __init__(self, max_digits=20, analysis_interval=10):
-        self.digits = deque(maxlen=100)
+    def __init__(self, max_digits=20, analysis_interval=15):
+        # Armazena todos os dígitos recebidos (apenas para eventual debug)
+        self.all_digits = deque(maxlen=100)
         self.timestamps = deque(maxlen=100)
         self.max_display = max_digits
         self.analysis_interval = analysis_interval
@@ -18,15 +19,14 @@ class DigitAnalyzer:
         self.countdown = analysis_interval
         self.analysis_in_progress = False
 
-        # Para exibição lenta (15 segundos entre cada dígito mostrado)
-        self.display_digits = deque(maxlen=20)
-        self.display_interval = 15  # <--- AUMENTADO DE 10 PARA 15 SEGUNDOS
+        # Buffer de dígitos lentos (apenas os que são mostrados a cada 15s)
+        self.slow_digits = deque(maxlen=20)
+
+        # Para controlo de tempo entre exibições
+        self.display_interval = 15
+        self.next_display_time = 0
         self.current_display_digit = None
         self.current_display_parity = '---'
-        self.next_display_time = 0
-
-        # Para análise baseada em dígitos lentos (opcional)
-        self.slow_digits = deque(maxlen=20)
 
         self.last_analysis_data = {
             'streak': 0, 'streak_parity': '---',
@@ -54,54 +54,69 @@ class DigitAnalyzer:
         threading.Thread(target=update_countdown, daemon=True).start()
 
     def add_tick(self, price):
+        """Recebe um tick (chamado a cada segundo). Guarda o dígito, mas só mostra/analisa a cada 15s."""
         try:
             price_str = f"{price:.2f}"
             last_digit = int(price_str[-1])
             parity = 'IMPAR' if last_digit % 2 != 0 else 'PAR'
-            self.digits.append(last_digit)
+            self.all_digits.append(last_digit)
             self.timestamps.append(datetime.now())
             self.current_digit = last_digit
             self.current_parity = parity
-            self.display_digits.append(last_digit)
+
+            # Verifica se está na hora de mostrar um novo dígito lento
+            now = time.time()
+            if now >= self.next_display_time:
+                # Mostra o dígito actual (o último tick) como o dígito lento
+                self.current_display_digit = last_digit
+                self.current_display_parity = parity
+                self.slow_digits.append(last_digit)
+                self.next_display_time = now + self.display_interval
+                # Dispara alerta imediato baseado na sequência lenta
+                self._check_immediate_pattern_slow()
             return True, self.current_digit
         except Exception as e:
             logger.error(f"Erro ao processar tick: {e}")
             return False, None
 
     def get_next_display_digit(self):
+        """Retorna o dígito actual em exibição (o último dígito lento) e o tempo restante."""
         now = time.time()
-        if now < self.next_display_time and self.current_display_digit is not None:
-            remaining = int(self.next_display_time - now)
-            return self.current_display_digit, self.current_display_parity, remaining
+        remaining = max(0, int(self.next_display_time - now)) if self.next_display_time > 0 else 0
+        return self.current_display_digit, self.current_display_parity, remaining
 
-        if self.display_digits:
-            digit = self.display_digits.popleft()
-            self.current_display_digit = digit
-            self.current_display_parity = 'IMPAR' if digit % 2 != 0 else 'PAR'
-            self.next_display_time = now + self.display_interval
-            self.slow_digits.append(digit)
-            return self.current_display_digit, self.current_display_parity, self.display_interval
-
-        return self.current_display_digit, self.current_display_parity, 0
-
-    def _check_immediate_pattern(self):
-        if len(self.digits) < 3:
+    def _check_immediate_pattern_slow(self):
+        """Analisa a sequência de dígitos lentos e gera recomendação."""
+        if len(self.slow_digits) < 3:
             return
-        streak, streak_parity = self.get_streak_info()
+        streak, streak_parity = self.get_slow_streak_info()
         if streak >= 3:
-            confidence = 65 + min((streak - 3) * 5, 20)
+            confidence = 65 + min((streak - 3) * 10, 30)
             if streak_parity == 'PAR':
-                recommended_action = 'BUY'
+                recommended_action = 'BUY'   # próximo ÍMPAR
                 alert = 'RECOMENDADO'
                 reason = f'⚠️ {streak} PARES consecutivos! Próximo ÍMPAR (confiança {confidence}%)'
                 pattern_desc = f'{streak} PARES consecutivos'
             else:
-                recommended_action = 'SELL'
+                recommended_action = 'SELL'  # próximo PAR
                 alert = 'RECOMENDADO'
                 reason = f'⚠️ {streak} ÍMPARES consecutivos! Próximo PAR (confiança {confidence}%)'
                 pattern_desc = f'{streak} ÍMPARES consecutivos'
             self._update_analysis(recommended_action, confidence, alert, reason, pattern_desc, streak, streak_parity)
-            logger.info(f"⚡ Alerta: {reason}")
+            logger.info(f"⚡ Alerta lento: {reason}")
+
+    def get_slow_streak_info(self):
+        if len(self.slow_digits) < 2:
+            return 0, '---'
+        streak = 1
+        last_parity = 'IMPAR' if self.slow_digits[-1] % 2 != 0 else 'PAR'
+        for i in range(len(self.slow_digits)-2, -1, -1):
+            parity = 'IMPAR' if self.slow_digits[i] % 2 != 0 else 'PAR'
+            if parity == last_parity:
+                streak += 1
+            else:
+                break
+        return streak, last_parity
 
     def _update_analysis(self, action, confidence, alert, reason, pattern, streak, streak_parity):
         self.last_analysis_data.update({
@@ -112,43 +127,11 @@ class DigitAnalyzer:
             'pattern': pattern,
             'alert': alert,
             'reason': reason,
-            'last_digit': self.current_digit,
-            'last_parity': self.current_parity,
-            'recent_parity': self.get_recent_parity_sequence()[-20:],
+            'last_digit': self.current_display_digit,
+            'last_parity': self.current_display_parity,
+            'recent_parity': ['IMPAR' if d % 2 != 0 else 'PAR' for d in list(self.slow_digits)[-20:]],
             'countdown': self.countdown
         })
-
-    def get_recent_parity_sequence(self):
-        recent = list(self.digits)[-20:]
-        return ['IMPAR' if d % 2 != 0 else 'PAR' for d in recent]
-
-    def get_streak_info(self):
-        if len(self.digits) < 2:
-            return 0, '---'
-        streak = 1
-        last_parity = 'IMPAR' if self.digits[-1] % 2 != 0 else 'PAR'
-        for i in range(len(self.digits)-2, -1, -1):
-            parity = 'IMPAR' if self.digits[i] % 2 != 0 else 'PAR'
-            if parity == last_parity:
-                streak += 1
-            else:
-                break
-        return streak, last_parity
-
-    def analyze_trend(self):
-        recent = list(self.digits)[-20:]
-        if len(recent) < 10:
-            return None
-        odd_count = sum(1 for d in recent if d % 2 != 0)
-        odd_pct = (odd_count / 20) * 100
-        even_pct = 100 - odd_pct
-        diff = abs(odd_pct - even_pct)
-        if diff >= 20:
-            if odd_pct > even_pct:
-                return {'trend': 'IMPAR', 'strength': odd_pct, 'message': f'Tendência ÍMPAR ({odd_pct:.0f}% vs {even_pct:.0f}%)'}
-            else:
-                return {'trend': 'PAR', 'strength': even_pct, 'message': f'Tendência PAR ({even_pct:.0f}% vs {odd_pct:.0f}%)'}
-        return None
 
     def trigger_analysis(self):
         if self.analysis_in_progress:
@@ -159,31 +142,36 @@ class DigitAnalyzer:
             analysis = self._perform_analysis()
             self.last_analysis_data.update(analysis)
             self.last_analysis_data['countdown'] = self.analysis_interval
-            logger.info(f"📊 ANÁLISE PERIÓDICA: {analysis}")
+            logger.info(f"📊 ANÁLISE PERIÓDICA (lenta): {analysis}")
         except Exception as e:
             logger.error(f"Erro na análise: {e}")
         self.analysis_in_progress = False
 
     def _perform_analysis(self):
-        if len(self.digits) < 10:
+        if len(self.slow_digits) < 5:
             return {
                 'streak': 0, 'streak_parity': '---',
                 'recommended_action': None, 'confidence': 0,
-                'pattern': 'Acumulando dados...', 'alert': None,
-                'reason': f'Aguardando mais dados ({len(self.digits)}/10)',
+                'pattern': 'Acumulando dígitos...', 'alert': None,
+                'reason': f'Aguardando mais dados ({len(self.slow_digits)}/10)',
                 'odd_pct': 0, 'even_pct': 0, 'recent_parity': [],
                 'trend_analysis': None,
                 'countdown': self.analysis_interval
             }
 
-        recent_parity = self.get_recent_parity_sequence()
-        streak, streak_parity = self.get_streak_info()
-        trend = self.analyze_trend()
-
-        last_20 = list(self.digits)[-20:]
-        odd_count = sum(1 for d in last_20 if d % 2 != 0)
-        odd_pct = round((odd_count / 20) * 100, 1)
+        recent_parity = ['IMPAR' if d % 2 != 0 else 'PAR' for d in list(self.slow_digits)[-20:]]
+        streak, streak_parity = self.get_slow_streak_info()
+        # análise de tendência simples
+        odd_count = sum(1 for d in list(self.slow_digits)[-20:] if d % 2 != 0)
+        odd_pct = round((odd_count / min(20, len(self.slow_digits))) * 100, 1)
         even_pct = round(100 - odd_pct, 1)
+        diff = abs(odd_pct - even_pct)
+        trend = None
+        if diff >= 20:
+            if odd_pct > even_pct:
+                trend = {'trend': 'IMPAR', 'strength': odd_pct, 'message': f'Tendência ÍMPAR ({odd_pct:.0f}% vs {even_pct:.0f}%)'}
+            else:
+                trend = {'trend': 'PAR', 'strength': even_pct, 'message': f'Tendência PAR ({even_pct:.0f}% vs {odd_pct:.0f}%)'}
 
         recommended_action = None
         confidence = 0
@@ -192,7 +180,7 @@ class DigitAnalyzer:
         pattern_desc = ''
 
         if streak >= 3:
-            confidence = 65 + min((streak - 3) * 5, 20)
+            confidence = 65 + min((streak - 3) * 10, 30)
             if streak_parity == 'PAR':
                 recommended_action = 'BUY'
                 alert = 'RECOMENDADO'
@@ -203,16 +191,8 @@ class DigitAnalyzer:
                 alert = 'RECOMENDADO'
                 reason = f'⚠️ {streak} ÍMPARES consecutivos! Próximo PAR'
                 pattern_desc = f'{streak} ÍMPARES consecutivos'
-        elif len(self.digits) >= 4:
-            last4 = [d % 2 for d in list(self.digits)[-4:]]
-            if last4[0] == last4[1] and last4[2] == last4[3] and last4[0] != last4[2]:
-                recommended_action = 'BUY' if last4[3] == 1 else 'SELL'
-                confidence = 70
-                alert = 'RECOMENDADO'
-                reason = '🔄 Padrão de reversão (2 iguais + 2 opostos)'
-                pattern_desc = 'Reversão'
         elif trend:
-            confidence = 65
+            confidence = 70
             if trend['trend'] == 'IMPAR':
                 recommended_action = 'BUY'
                 alert = 'SUGESTÃO'
@@ -225,7 +205,7 @@ class DigitAnalyzer:
                 pattern_desc = 'Tendência estatística'
         else:
             alert = 'NEUTRO'
-            reason = f'📊 Últimos 20: {odd_pct}% ÍMPAR / {even_pct}% PAR → sem padrão'
+            reason = f'📊 Últimos dígitos lentos: {odd_pct}% ÍMPAR / {even_pct}% PAR → sem padrão'
             pattern_desc = 'Aguardando'
 
         return {
@@ -238,43 +218,43 @@ class DigitAnalyzer:
             'reason': reason,
             'odd_pct': odd_pct,
             'even_pct': even_pct,
-            'last_digit': self.current_digit,
-            'last_parity': self.current_parity,
+            'last_digit': self.current_display_digit,
+            'last_parity': self.current_display_parity,
             'recent_parity': recent_parity[-20:],
             'trend_analysis': trend,
             'countdown': self.analysis_interval
         }
 
     def get_current_digit(self):
-        return self.current_digit
+        return self.current_display_digit
 
     def get_current_parity(self):
-        return self.current_parity
+        return self.current_display_parity
 
     def get_recent_digits(self, count=20):
-        return list(self.digits)[-count:] if self.digits else []
+        return list(self.slow_digits)[-count:] if self.slow_digits else []
 
     def get_analysis(self):
         return self.last_analysis_data
 
     def get_stats(self):
-        if not self.digits:
+        if not self.slow_digits:
             return {'total': 0, 'odd_pct': 0, 'even_pct': 0,
                     'current_streak': 0, 'streak_parity': '---', 'recent': []}
-        total = len(self.digits)
-        odd_count = sum(1 for d in self.digits if d % 2 != 0)
+        total = len(self.slow_digits)
+        odd_count = sum(1 for d in self.slow_digits if d % 2 != 0)
         even_count = total - odd_count
-        streak, streak_parity = self.get_streak_info()
+        streak, streak_parity = self.get_slow_streak_info()
         return {
             'total': total,
             'odd_pct': round((odd_count / total) * 100, 1),
             'even_pct': round((even_count / total) * 100, 1),
             'current_streak': streak,
             'streak_parity': streak_parity,
-            'recent': self.get_recent_digits(20)
+            'recent': list(self.slow_digits)[-20:]
         }
 
     def get_countdown(self):
         return self.countdown
 
-digit_analyzer = DigitAnalyzer(max_digits=20, analysis_interval=10)
+digit_analyzer = DigitAnalyzer(max_digits=20, analysis_interval=15)
