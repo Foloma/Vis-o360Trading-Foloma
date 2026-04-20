@@ -313,7 +313,7 @@ def api_trade():
         if amount < 0.35 or amount > 100:
             return jsonify({'error': 'Valor inválido'}), 400
         signal, confidence = trading_bot.calculate_signal()
-        min_confidence = config.RISK_LIMITS.get('min_confidence', 50)  # reduzido
+        min_confidence = config.RISK_LIMITS.get('min_confidence', 50)
         if confidence < min_confidence:
             return jsonify({'error': f'Confiança baixa: {confidence:.1f}%'}), 400
         contract_type = 'CALL' if action == 'BUY' else 'PUT'
@@ -338,12 +338,11 @@ def api_trade_digit():
             return jsonify({'error': 'Não conectado'}), 400
         if amount < 0.35 or amount > 100:
             return jsonify({'error': 'Valor inválido'}), 400
-        
-        # Obtém a recomendação actual (para debug)
         analysis = digit_analyzer.get_analysis()
         confidence = analysis.get('confidence', 0)
-        logger.info(f"Trade dígito: prediction={prediction}, confiança={confidence}")
-        
+        min_confidence = config.RISK_LIMITS.get('min_confidence_digits', 55)
+        if confidence < min_confidence:
+            return jsonify({'error': f'Confiança baixa: {confidence}% (mínimo {min_confidence}%)'}), 400
         contract_type = 'CALL' if prediction == 'odd' else 'PUT'
         success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=True)
         if success:
@@ -354,7 +353,6 @@ def api_trade_digit():
         else:
             return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
-        logger.error(f"Erro no trade dígito: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ========== MODO HÍBRIDO ==========
@@ -385,7 +383,7 @@ def api_trade_hybrid():
         else:
             return jsonify({'error': '⚠️ Sinais divergentes. Aguarde convergência.'}), 400
 
-        min_hybrid = 70  # reduzido de 80 para 70
+        min_hybrid = 70
         if combined_conf < min_hybrid:
             return jsonify({'error': f'Confiança combinada baixa ({combined_conf:.1f}%)'}), 400
 
@@ -533,15 +531,4 @@ def api_withdraw():
         method = data.get('method', 'cryptocurrency')
         if amount <= 0:
             return jsonify({'error': 'Valor inválido'}), 400
-        if not deriv_client or not deriv_client.authorized:
-            return jsonify({'error': 'Não conectado'}), 400
-        if amount > deriv_client.balance:
-            return jsonify({'error': 'Saldo insuficiente'}), 400
-        result = deriv_client.request_withdrawal(amount, currency, method)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+        if not deriv_client or 
