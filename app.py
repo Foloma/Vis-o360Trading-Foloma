@@ -332,19 +332,19 @@ def api_trade():
 def api_trade_digit():
     try:
         data = request.json
-        prediction = data.get('prediction')
+        prediction = data.get('prediction')  # 'odd' ou 'even'
         amount = float(data.get('amount', 0.35))
         if not deriv_client or not deriv_client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
-        if amount < 0.35 or amount > 1000:
+        if amount < 0.35 or amount > 100:
             return jsonify({'error': 'Valor inválido'}), 400
         
-        # REMOVIDA A VERIFICAÇÃO DE CONFIANÇA – AGORA É TOTALMENTE MANUAL
-        # analysis = digit_analyzer.get_analysis()
-        # confidence = analysis.get('confidence', 0)
-        # min_confidence = 0  # qualquer valor é aceite
+        # INVERTE A LÓGICA: se o usuário clica em ÍMPAR, envia PAR (DIGITEVEN)
+        if prediction == 'odd':
+            contract_type = 'PUT'   # DIGITEVEN
+        else:
+            contract_type = 'CALL'  # DIGITODD
         
-        contract_type = 'CALL' if prediction == 'odd' else 'PUT'
         success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=True)
         if success:
             response = {'status': 'ok', 'message': f'Aposta em {prediction.upper()} enviada!'}
