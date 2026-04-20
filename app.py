@@ -531,4 +531,15 @@ def api_withdraw():
         method = data.get('method', 'cryptocurrency')
         if amount <= 0:
             return jsonify({'error': 'Valor inválido'}), 400
-        if not deriv_client or 
+        if not deriv_client or not deriv_client.authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        if amount > deriv_client.balance:
+            return jsonify({'error': 'Saldo insuficiente'}), 400
+        result = deriv_client.request_withdrawal(amount, currency, method)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
