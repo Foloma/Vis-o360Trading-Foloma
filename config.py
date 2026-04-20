@@ -12,8 +12,9 @@ class Config:
     DEMO_API_TOKEN = os.getenv('DEMO_API_TOKEN', '')
     REAL_API_TOKEN = os.getenv('REAL_API_TOKEN', '')
     
-    # WebSocket
-    WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
+    # WebSocket – use o IP directo para evitar problemas de DNS
+    WS_URL = "wss://178.128.129.18/websockets/v3?app_id=1089"
+    # Alternativa: WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
     DERIV_WS_URL = WS_URL
     
     # Tipos de conta
@@ -34,7 +35,7 @@ class Config:
     MIN_STAKE = 0.35
     MAX_STAKE = 100
     CONTRACT_DURATION = 5
-    CONTRACT_DURATION_SECONDS = 10
+    CONTRACT_DURATION_SECONDS = 15   # para dígitos, se usar segundos
     
     # Markup para conta REAL
     MARKUP_PERCENTAGE = 0.5
@@ -63,7 +64,7 @@ class Config:
     ADVANCED_STRATEGY = {
         'momentum_threshold': 0.1,
         'digit_diff_threshold': 20,
-        'hybrid_min_confidence': 70,       # reduzido de 80 para 70
+        'hybrid_min_confidence': 70,
         'hybrid_mode_enabled': True
     }
     
