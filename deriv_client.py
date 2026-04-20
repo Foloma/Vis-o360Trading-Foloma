@@ -190,7 +190,7 @@ class DerivWebSocketClient:
 
             if is_digit:
                 # Dígitos: duração de 15 ticks (mais fiável que segundos)
-                duration = 15
+                duration = 5
                 duration_unit = 't'
                 if contract_type == 'CALL':
                     contract_type_full = 'DIGITODD'
