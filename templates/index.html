@@ -653,48 +653,44 @@
                     </div>
                 </div>
             </div>
-            <!-- Painel Dígitos (lentos, 15s) -->
+            <!-- Painel Dígitos -->
             <div id="modoDigitosPanel" class="hidden">
-    <div class="card">
-        <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
-        
-        <!-- Dígito actual -->
-        <div class="display-digit-container">
-            <div class="display-digit-header">
-                <span>📺 PRÓXIMO DÍGITO EM</span>
-                <span id="display-countdown" class="countdown">15s</span>
+                <div class="card">
+                    <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
+                    <!-- Dígito actual -->
+                    <div class="display-digit-container">
+                        <div class="display-digit-header">
+                            <span>📺 PRÓXIMO DÍGITO EM</span>
+                            <span id="display-countdown" class="countdown">15s</span>
+                        </div>
+                        <div class="display-digit-value">
+                            <span id="display-digit" class="display-digit">-</span>
+                            <span id="display-parity" class="display-parity">---</span>
+                        </div>
+                    </div>
+                    <!-- Recomendação -->
+                    <div id="alertBox" class="alert-box">
+                        <div id="alertMessage"></div>
+                        <div class="flex" style="justify-content: center; margin-top: 8px;">
+                            <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
+                            <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
+                        </div>
+                        <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
+                    </div>
+                    <!-- Histórico -->
+                    <div style="margin: 12px 0;">
+                        <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS</div>
+                        <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
+                            <div style="color:#62748c;">Aguardando dados...</div>
+                        </div>
+                    </div>
+                    <!-- Botões manuais -->
+                    <div class="trade-buttons" style="margin-top: 12px;">
+                        <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
+                        <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
+                    </div>
+                </div>
             </div>
-            <div class="display-digit-value">
-                <span id="display-digit" class="display-digit">-</span>
-                <span id="display-parity" class="display-parity">---</span>
-            </div>
-        </div>
-
-        <!-- Recomendação (alerta) -->
-        <div id="alertBox" class="alert-box">
-            <div id="alertMessage"></div>
-            <div class="flex" style="justify-content: center; margin-top: 8px;">
-                <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
-                <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
-            </div>
-            <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
-        </div>
-
-        <!-- Histórico dos últimos dígitos lentos -->
-        <div style="margin: 12px 0;">
-            <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS</div>
-            <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
-                <div style="color:#62748c;">Aguardando dados...</div>
-            </div>
-        </div>
-
-        <!-- Botões manuais -->
-        <div class="trade-buttons" style="margin-top: 12px;">
-            <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
-            <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
-        </div>
-    </div>
-    </div>
             <!-- Trading panel -->
             <div class="card">
                 <div class="card-title">🎯 EXECUTAR TRADE</div>
@@ -790,7 +786,7 @@
                 </div>
             </div>
         </div>
-        <!-- Últimos trades com botão de limpar -->
+        <!-- Últimos trades -->
         <div class="card">
             <div class="card-title">
                 <span>📋 ÚLTIMOS TRADES</span>
@@ -895,7 +891,6 @@
                 ativosButtons.classList.remove('hidden');
                 digitosButtons.classList.add('hidden');
                 if (hybridStatus) hybridStatus.classList.add('hidden');
-                // Reativa botões nos outros modos
                 const buyBtn = document.getElementById('hybridBuyBtn');
                 const sellBtn = document.getElementById('hybridSellBtn');
                 if (buyBtn && sellBtn) {
@@ -958,7 +953,7 @@
             }, 1000);
         }
 
-        // ========== EXIBIÇÃO LENTA DE DÍGITOS ==========
+        // ========== EXIBIÇÃO LENTA ==========
         function fetchDisplayDigit() {
             fetch('/api/display_digit')
                 .then(r => r.json())
@@ -1250,54 +1245,43 @@
                     // ========== DÍGITOS LENTOS ==========
                     if (data.digits) {
                         const d = data.digits;
-                        const newDigit = d.last;
-                        if (newDigit !== undefined && newDigit !== lastKnownDigit) {
-                            hideCurrentAlert();
-                            lastKnownDigit = newDigit;
-                        }
-                        document.getElementById('lastDigit').textContent = newDigit ?? '-';
-                        document.getElementById('streakCounter').textContent = d.stats?.current_streak || 0;
-                        document.getElementById('streakType').textContent = d.stats?.streak_parity || '---';
-                        if (d.countdown) digitCountdown = d.countdown;
-                        const countdownSpan = document.getElementById('digitCountdown');
-                        if (countdownSpan) countdownSpan.textContent = digitCountdown + 's';
-                        
-                        // Histórico de dígitos lentos (usando d.recent)
-                        if (d.recent) {
+                        // Actualiza o histórico de dígitos lentos
+                        if (d.recent && d.recent.length > 0) {
                             let slowHtml = '';
                             d.recent.forEach(digit => {
                                 const isOdd = digit % 2 !== 0;
                                 slowHtml += `<div class="digit-box ${isOdd ? 'odd' : 'even'}">${digit}</div>`;
                             });
                             const slowContainer = document.getElementById('slowDigitsHistory');
-                            if (slowContainer) slowContainer.innerHTML = slowHtml || '<div style="color:#62748c;">---</div>';
+                            if (slowContainer) slowContainer.innerHTML = slowHtml;
+                        } else {
+                            document.getElementById('slowDigitsHistory').innerHTML = '<div style="color:#62748c;">Aguardando dados...</div>';
                         }
-                        
+                        // Recomendação (alerta)
                         const analysis = d.analysis;
+                        if (analysis && analysis.alert === 'RECOMENDADO' && analysis.confidence >= 65) {
+                            showDigitAlert(analysis.reason, analysis.confidence, analysis.recommended_action === 'BUY' ? 'odd' : (analysis.recommended_action === 'SELL' ? 'even' : null));
+                        }
+                        // Percentagens (opcional)
                         if (analysis) {
-                            const oddPct = analysis.odd_pct || 0;
-                            const evenPct = analysis.even_pct || 0;
-                            document.getElementById('oddPercent').textContent = oddPct + '%';
-                            document.getElementById('evenPercent').textContent = evenPct + '%';
-                            document.getElementById('oddBar').style.width = oddPct + '%';
-                            document.getElementById('evenBar').style.width = evenPct + '%';
+                            document.getElementById('oddPercent').textContent = (analysis.odd_pct || 0) + '%';
+                            document.getElementById('evenPercent').textContent = (analysis.even_pct || 0) + '%';
+                            document.getElementById('oddBar').style.width = (analysis.odd_pct || 0) + '%';
+                            document.getElementById('evenBar').style.width = (analysis.even_pct || 0) + '%';
                             document.getElementById('totalDigits').textContent = d.stats?.total || 0;
                             document.getElementById('oddCount').textContent = d.stats?.odd || 0;
                             document.getElementById('evenCount').textContent = d.stats?.even || 0;
                             document.getElementById('accuracy').textContent = d.stats?.accuracy || 0;
-                            if (analysis.alert === 'RECOMENDADO' && analysis.confidence >= 65) {
-                                showDigitAlert(analysis.reason, analysis.confidence, analysis.recommended_action === 'BUY' ? 'odd' : (analysis.recommended_action === 'SELL' ? 'even' : null));
-                            }
                         }
                     }
                     
-                    // ========== MODO HÍBRIDO (desativa botões) ==========
+                    // ========== MODO HÍBRIDO ==========
                     if (modoAtual === 'hybrid') {
                         const hybridDiv = document.getElementById('hybridStatus');
                         hybridDiv.classList.remove('hidden');
                         const ativoSignal = bot.signal;
                         const ativoConf = bot.confidence;
-                        const digitAnalysis = data.digits.analysis;
+                        const digitAnalysis = data.digits ? data.digits.analysis : null;
                         const digitRecommend = digitAnalysis ? digitAnalysis.recommended_action : null;
                         const digitConf = digitAnalysis ? digitAnalysis.confidence : 0;
                         let hybridMessage = '';
@@ -1322,7 +1306,6 @@
                         document.getElementById('hybridSignal').innerHTML = hybridMessage;
                         document.getElementById('hybridSignal').style.color = hybridColor;
                         document.getElementById('hybridConfidence').innerHTML = canTrade ? `Pronto para trade!` : `Confiança combinada: ${combinedConf.toFixed(1)}% (mínimo 80%)`;
-                        // Desativar/ativar botões
                         const buyBtn = document.getElementById('hybridBuyBtn');
                         const sellBtn = document.getElementById('hybridSellBtn');
                         if (buyBtn && sellBtn) {
@@ -1334,7 +1317,6 @@
                     } else {
                         const hybridDiv = document.getElementById('hybridStatus');
                         if (hybridDiv) hybridDiv.classList.add('hidden');
-                        // Reativar botões nos outros modos
                         const buyBtn = document.getElementById('hybridBuyBtn');
                         const sellBtn = document.getElementById('hybridSellBtn');
                         if (buyBtn && sellBtn) {
