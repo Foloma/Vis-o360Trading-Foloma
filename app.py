@@ -336,17 +336,18 @@ def api_trade_digit():
         amount = float(data.get('amount', 0.35))
         if not deriv_client or not deriv_client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
-        if amount < 0.35 or amount > 100:
+        if amount < 0.35 or amount > 1000:
             return jsonify({'error': 'Valor inválido'}), 400
-        analysis = digit_analyzer.get_analysis()
-        confidence = analysis.get('confidence', 0)
-        min_confidence = config.RISK_LIMITS.get('min_confidence_digits', 55)
-        if confidence < min_confidence:
-            return jsonify({'error': f'Confiança baixa: {confidence}% (mínimo {min_confidence}%)'}), 400
+        
+        # REMOVIDA A VERIFICAÇÃO DE CONFIANÇA – AGORA É TOTALMENTE MANUAL
+        # analysis = digit_analyzer.get_analysis()
+        # confidence = analysis.get('confidence', 0)
+        # min_confidence = 0  # qualquer valor é aceite
+        
         contract_type = 'CALL' if prediction == 'odd' else 'PUT'
         success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=True)
         if success:
-            response = {'status': 'ok', 'message': f'Aposta em {prediction.upper()} enviada!', 'confidence': confidence}
+            response = {'status': 'ok', 'message': f'Aposta em {prediction.upper()} enviada!'}
             if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
                 affiliate.calculate_commission(amount, deriv_client.markup_percentage)
             return jsonify(response)
