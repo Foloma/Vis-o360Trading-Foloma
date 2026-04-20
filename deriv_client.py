@@ -168,9 +168,9 @@ class DerivWebSocketClient:
                 return False
 
             if is_digit:
-                # Dígitos: duração de 15 segundos
+                # Dígitos: duração de 15 ticks (cada tick ≈ 1s, total 15s)
                 duration = 15
-                duration_unit = 's'
+                duration_unit = 't'
                 if contract_type == 'CALL':
                     contract_type_full = 'DIGITODD'
                 else:
