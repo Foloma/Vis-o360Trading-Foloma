@@ -27,6 +27,8 @@ class DerivWebSocketClient:
         self.trade_history = []
         self.pending_trade = None
         self.pending_proposal = None
+        self.reconnect_attempts = 0
+        self.should_reconnect = True
         
     def set_trading_bot(self, bot):
         self.trading_bot = bot
@@ -57,6 +59,7 @@ class DerivWebSocketClient:
     def on_open(self, ws):
         logger.info("✅ WebSocket conectado")
         self.connected = True
+        self.reconnect_attempts = 0
         self.authorize()
     
     def on_message(self, ws, message):
@@ -84,11 +87,29 @@ class DerivWebSocketClient:
     
     def on_error(self, ws, error):
         logger.error(f"WebSocket error: {error}")
+        self.connected = False
+        self.authorized = False
+        if self.should_reconnect:
+            self.schedule_reconnect()
         
     def on_close(self, ws, close_status_code, close_msg):
         logger.info("🔌 WebSocket desconectado")
         self.connected = False
         self.authorized = False
+        if self.should_reconnect:
+            self.schedule_reconnect()
+        
+    def schedule_reconnect(self):
+        self.reconnect_attempts += 1
+        delay = min(5 * self.reconnect_attempts, 30)
+        logger.info(f"🔄 Tentando reconectar em {delay}s (tentativa {self.reconnect_attempts})")
+        threading.Timer(delay, self.reconnect).start()
+        
+    def reconnect(self):
+        if not self.should_reconnect:
+            return
+        logger.info("🔄 Reconectando...")
+        self.connect()
         
     def authorize(self):
         if not self.user_token:
@@ -168,7 +189,7 @@ class DerivWebSocketClient:
                 return False
 
             if is_digit:
-                # Dígitos: duração de 15 ticks (cada tick ≈ 1s, total 15s)
+                # Dígitos: duração de 15 ticks (mais fiável que segundos)
                 duration = 15
                 duration_unit = 't'
                 if contract_type == 'CALL':
