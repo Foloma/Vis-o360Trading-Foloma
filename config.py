@@ -12,9 +12,11 @@ class Config:
     DEMO_API_TOKEN = os.getenv('DEMO_API_TOKEN', '')
     REAL_API_TOKEN = os.getenv('REAL_API_TOKEN', '')
     
-    # WebSocket – usando IP direto (evita problemas de DNS)
-    WS_URL = "wss://178.128.129.18/websockets/v3?app_id=1089"
+    # WebSocket – usar DOMÍNIO (para SSL funcionar)
+    WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
     DERIV_WS_URL = WS_URL
+    
+    # ... (restante igual)
     
     # Tipos de conta
     ACCOUNT_TYPES = {
