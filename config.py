@@ -8,13 +8,12 @@ class Config:
     # Deriv API
     DERIV_APP_ID = os.getenv('DERIV_APP_ID', '1089')
     
-    # Tokens (guardados no servidor, não partilhados)
+    # Tokens
     DEMO_API_TOKEN = os.getenv('DEMO_API_TOKEN', '')
     REAL_API_TOKEN = os.getenv('REAL_API_TOKEN', '')
     
-    # WebSocket – use o IP directo para evitar problemas de DNS
+    # WebSocket – usando IP direto (evita problemas de DNS)
     WS_URL = "wss://178.128.129.18/websockets/v3?app_id=1089"
-    # Alternativa: WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
     DERIV_WS_URL = WS_URL
     
     # Tipos de conta
@@ -33,14 +32,14 @@ class Config:
     # Configurações de trading
     DEFAULT_STAKE = 0.35
     MIN_STAKE = 0.35
-    MAX_STAKE = 100
+    MAX_STAKE = 1000
     CONTRACT_DURATION = 5
-    CONTRACT_DURATION_SECONDS = 15   # para dígitos, se usar segundos
+    CONTRACT_DURATION_SECONDS = 15  # para dígitos, se usar segundos
     
-    # Markup para conta REAL
+    # Markup
     MARKUP_PERCENTAGE = 0.5
     
-    # Configurações de MARTINGALE
+    # Martingale
     MARTINGALE_CONFIG = {
         'enabled': True,
         'multiplier': 2.0,
@@ -52,8 +51,8 @@ class Config:
     RISK_LIMITS = {
         'max_daily_loss_percent': 5,
         'max_consecutive_losses': 2,
-        'min_confidence': 50,               # reduzido para permitir mais sinais
-        'min_confidence_digits': 55,        # reduzido
+        'min_confidence': 50,
+        'min_confidence_digits': 55,
         'max_stake_percent': 5,
         'stop_loss_enabled': True,
         'take_profit_enabled': True,
