@@ -96,17 +96,17 @@ class TradingBot:
         return momentum
 
     def calculate_signal(self):
-    if not self.last_analysis:
-        return 'NEUTRAL', 0
+        if not self.last_analysis:
+            return 'NEUTRAL', 0
 
-    analysis = self.last_analysis
+        analysis = self.last_analysis
 
-    # Pesos ajustados (tendência mais importante)
-    weights = {
-        'trend': 0.50,
-        'rsi': 0.25,
-        'macd': 0.15,
-        'bollinger': 0.10
+        # Pesos ajustados (tendência mais importante)
+        weights = {
+             'trend': 0.50,
+             'rsi': 0.25,
+             'macd': 0.15,
+             'bollinger': 0.10
     }
 
     buy_score = 0
