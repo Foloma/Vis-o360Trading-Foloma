@@ -81,6 +81,9 @@
         .menu-item:hover {
             color: #00f0b5;
         }
+        .menu-item.admin-only {
+            display: none;
+        }
         .overlay {
             position: fixed;
             top: 0;
@@ -355,11 +358,11 @@
             padding: 12px;
             margin: 12px 0;
             text-align: center;
-            display: none;
             animation: pulse 1s infinite;
+            transition: opacity 0.3s;
         }
-        .alert-box.show {
-            display: block;
+        .alert-box.hide-alert {
+            display: none !important;
         }
         @keyframes pulse {
             0% { transform: scale(1); }
@@ -589,14 +592,37 @@
             border-radius: 8px;
             color: #fff;
         }
+        .user-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .user-table th, .user-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #2a3342;
+            font-size: 12px;
+        }
+        .user-table th {
+            color: #00f0b5;
+        }
+        .btn-toggle {
+            background: #2a3342;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .btn-toggle.disabled-user {
+            background: #ff4d4d;
+        }
         .text-center { text-align: center; }
         .mt-2 { margin-top: 8px; }
         .mb-2 { margin-bottom: 8px; }
         .flex { display: flex; gap: 8px; }
-        .alert-box {
-    display: none !important;
-        }
-    </style> 
+    </style>
 </head>
 <body>
     <div class="top-bar">
@@ -613,6 +639,7 @@
         <div class="menu-item" onclick="showSection('affiliate')">🔗 Afiliado</div>
         <div class="menu-item" onclick="showSection('payment')">💰 Depósito/Saque</div>
         <div class="menu-item" onclick="showSection('settings')">⚙️ Configurações</div>
+        <div class="menu-item admin-only" id="adminMenuItem" onclick="showSection('admin')">👑 Administração</div>
         <div class="menu-item" onclick="logout()">🚪 Sair</div>
     </div>
     <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
@@ -660,7 +687,6 @@
             <div id="modoDigitosPanel" class="hidden">
                 <div class="card">
                     <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
-                    <!-- Dígito actual -->
                     <div class="display-digit-container">
                         <div class="display-digit-header">
                             <span>📺 PRÓXIMO DÍGITO EM</span>
@@ -671,7 +697,9 @@
                             <span id="display-parity" class="display-parity">---</span>
                         </div>
                     </div>
-                    <!-- Recomendação -->
+                    <div class="manual-mode-checkbox">
+                        <input type="checkbox" id="toggleAlerts" checked> <span>🔔 Mostrar alertas automáticos (recomendações)</span>
+                    </div>
                     <div id="alertBox" class="alert-box">
                         <div id="alertMessage"></div>
                         <div class="flex" style="justify-content: center; margin-top: 8px;">
@@ -680,14 +708,12 @@
                         </div>
                         <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
                     </div>
-                    <!-- Histórico -->
                     <div style="margin: 12px 0;">
                         <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS</div>
                         <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
                             <div style="color:#62748c;">Aguardando dados...</div>
                         </div>
                     </div>
-                    <!-- Botões manuais -->
                     <div class="trade-buttons" style="margin-top: 12px;">
                         <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
                         <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
@@ -788,6 +814,19 @@
                     <div><div class="stat-value" id="totalReturn">0%</div><div class="stat-label">Retorno</div></div>
                 </div>
             </div>
+            <div class="card">
+                <div class="card-title">🔐 SEGURANÇA</div>
+                <button class="btn-secondary" onclick="showForgotPassword()">Esqueci a senha</button>
+            </div>
+        </div>
+        <!-- Administração (apenas admin) -->
+        <div id="admin-section" class="hidden">
+            <div class="card">
+                <div class="card-title">👑 GERIR UTILIZADORES</div>
+                <div id="adminUsersList">
+                    <div class="text-center" style="padding:20px;">Carregando...</div>
+                </div>
+            </div>
         </div>
         <!-- Últimos trades -->
         <div class="card">
@@ -807,6 +846,7 @@
             <div style="display:flex; gap:10px; margin:15px 0;">
                 <button class="btn-small" style="flex:1;" onclick="showAuthTab('login')">ENTRAR</button>
                 <button class="btn-small" style="flex:1;" onclick="showAuthTab('register')">REGISTAR</button>
+                <button class="btn-small" style="flex:1;" onclick="showForgotPassword()">RECUPERAR</button>
             </div>
             <div id="loginForm">
                 <input type="email" id="loginEmail" placeholder="Email">
@@ -819,6 +859,11 @@
                 <input type="password" id="regPassword" placeholder="Senha (min 6)">
                 <input type="text" id="regReferral" placeholder="Código de indicação">
                 <button class="btn-primary" onclick="register()">CRIAR CONTA</button>
+            </div>
+            <div id="forgotForm" style="display:none;">
+                <input type="email" id="forgotEmail" placeholder="Email">
+                <button class="btn-primary" onclick="requestPasswordReset()">ENVIAR LINK</button>
+                <div id="forgotMessage" class="text-center mt-2" style="color:#ffaa00;"></div>
             </div>
             <div id="authError" class="text-center mt-2" style="color:#ff4d4d; font-size:12px;"></div>
         </div>
@@ -837,6 +882,8 @@
         let currentAlertTimeout = null;
         let displayCountdown = 15;
         let displayDigit = null;
+        let alertsEnabled = true;
+        let isAdmin = false;
         const symbols = { 'R_100': 'Volatility 100', 'R_75': 'Volatility 75', 'R_50': 'Volatility 50' };
 
         // ========== MENU ==========
@@ -845,23 +892,16 @@
             document.getElementById('overlay').classList.toggle('show');
         }
         function showSection(section) {
-            document.getElementById('dashboard-section').classList.remove('hidden');
+            document.getElementById('dashboard-section').classList.add('hidden');
             document.getElementById('affiliate-section').classList.add('hidden');
             document.getElementById('payment-section').classList.add('hidden');
             document.getElementById('settings-section').classList.add('hidden');
-            if (section === 'affiliate') {
-                document.getElementById('dashboard-section').classList.add('hidden');
-                document.getElementById('affiliate-section').classList.remove('hidden');
-                carregarLinkAfiliado();
-            } else if (section === 'payment') {
-                document.getElementById('dashboard-section').classList.add('hidden');
-                document.getElementById('payment-section').classList.remove('hidden');
-            } else if (section === 'settings') {
-                document.getElementById('dashboard-section').classList.add('hidden');
-                document.getElementById('settings-section').classList.remove('hidden');
-            }
+            document.getElementById('admin-section').classList.add('hidden');
+            document.getElementById(section + '-section').classList.remove('hidden');
             currentSection = section;
             toggleMenu();
+            if (section === 'affiliate') carregarLinkAfiliado();
+            if (section === 'admin') carregarAdminUsers();
         }
 
         // ========== MODO ==========
@@ -912,8 +952,8 @@
         // ========== ALERTA ==========
         function hideCurrentAlert() {
             const alertBox = document.getElementById('alertBox');
-            if (alertBox && alertBox.classList.contains('show')) {
-                alertBox.classList.remove('show');
+            if (alertBox) {
+                alertBox.classList.add('hide-alert');
                 if (currentAlertTimeout) {
                     clearTimeout(currentAlertTimeout);
                     currentAlertTimeout = null;
@@ -921,12 +961,13 @@
             }
         }
         function showDigitAlert(message, confidence, recommended) {
+            if (!alertsEnabled) return;
             const alertBox = document.getElementById('alertBox');
             const alertMessage = document.getElementById('alertMessage');
             const alertConfidence = document.getElementById('alertConfidence');
             const alertOddBtn = document.getElementById('alertOddBtn');
             const alertEvenBtn = document.getElementById('alertEvenBtn');
-            hideCurrentAlert();
+            alertBox.classList.remove('hide-alert');
             alertMessage.innerHTML = message;
             alertConfidence.innerHTML = `Confiança: ${confidence}%`;
             if (recommended === 'odd') {
@@ -939,11 +980,16 @@
                 alertOddBtn.style.display = 'inline-block';
                 alertEvenBtn.style.display = 'inline-block';
             }
-            alertBox.classList.add('show');
+            if (currentAlertTimeout) clearTimeout(currentAlertTimeout);
             currentAlertTimeout = setTimeout(() => {
-                hideCurrentAlert();
+                alertBox.classList.add('hide-alert');
             }, 10000);
         }
+
+        document.getElementById('toggleAlerts')?.addEventListener('change', function(e) {
+            alertsEnabled = e.target.checked;
+            if (!alertsEnabled) hideCurrentAlert();
+        });
 
         // ========== CONTADOR ==========
         function startDigitCountdown() {
@@ -979,13 +1025,15 @@
 
         // ========== AUTENTICAÇÃO ==========
         function showAuthTab(tab) {
-            if (tab === 'login') {
-                document.getElementById('loginForm').style.display = 'block';
-                document.getElementById('registerForm').style.display = 'none';
-            } else {
-                document.getElementById('loginForm').style.display = 'none';
-                document.getElementById('registerForm').style.display = 'block';
-            }
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('forgotForm').style.display = 'none';
+            if (tab === 'login') document.getElementById('loginForm').style.display = 'block';
+            else if (tab === 'register') document.getElementById('registerForm').style.display = 'block';
+            else if (tab === 'forgot') document.getElementById('forgotForm').style.display = 'block';
+        }
+        function showForgotPassword() {
+            showAuthTab('forgot');
         }
         function register() {
             const data = {
@@ -1015,11 +1063,69 @@
                 else {
                     document.getElementById('authModal').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';
+                    if (email === 'admin@foloma.com') {
+                        isAdmin = true;
+                        document.getElementById('adminMenuItem').style.display = 'block';
+                    } else {
+                        isAdmin = false;
+                        document.getElementById('adminMenuItem').style.display = 'none';
+                    }
                     initPlatform();
                 }
             }).catch(err => console.error(err));
         }
+        function requestPasswordReset() {
+            const email = document.getElementById('forgotEmail').value;
+            fetch('/api/auth/reset-password', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({email})
+            }).then(r => r.json()).then(data => {
+                const msgDiv = document.getElementById('forgotMessage');
+                if (data.error) msgDiv.innerHTML = '❌ ' + data.error;
+                else msgDiv.innerHTML = '✅ ' + (data.message || 'Link enviado para o email.');
+            });
+        }
         function logout() { fetch('/api/auth/logout', {method: 'POST'}).then(() => location.reload()); }
+
+        // ========== ADMIN ==========
+        function carregarAdminUsers() {
+            fetch('/api/admin/users')
+                .then(r => r.json())
+                .then(data => {
+                    const container = document.getElementById('adminUsersList');
+                    if (data.error) {
+                        container.innerHTML = '<div class="text-center" style="color:#ff4d4d;">Erro ao carregar utilizadores.</div>';
+                        return;
+                    }
+                    if (!data.users || data.users.length === 0) {
+                        container.innerHTML = '<div class="text-center">Nenhum utilizador registado.</div>';
+                        return;
+                    }
+                    let html = '<table class="user-table"><tr><th>Email</th><th>Nome</th><th>Status</th><th>Ação</th></tr>';
+                    data.users.forEach(u => {
+                        const isActive = u.active !== false;
+                        html += `<tr>
+                            <td>${u.email}</td>
+                            <td>${u.name}</td>
+                            <td>${isActive ? '✅ Ativo' : '⛔ Desativado'}</td>
+                            <td><button class="btn-toggle ${!isActive ? 'disabled-user' : ''}" onclick="toggleUserStatus('${u.email}', ${!isActive})">${isActive ? 'Desativar' : 'Ativar'}</button></td>
+                        </tr>`;
+                    });
+                    html += '</table>';
+                    container.innerHTML = html;
+                });
+        }
+        function toggleUserStatus(email, enable) {
+            fetch('/api/admin/toggle-user', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({email, enable})
+            }).then(r => r.json()).then(data => {
+                if (data.error) alert('❌ ' + data.error);
+                else { alert('✅ ' + data.message); carregarAdminUsers(); }
+            });
+        }
 
         // ========== PLATAFORMA ==========
         function initPlatform() {
@@ -1179,7 +1285,6 @@
             });
         }
 
-        // ========== LIMPAR HISTÓRICO ==========
         function limparHistorico() {
             if (confirm('⚠️ Tem certeza que deseja apagar todo o histórico de trades? Esta ação não pode ser desfeita.')) {
                 fetch('/api/clear_history', {
@@ -1245,10 +1350,9 @@
                     paused = bot.paused || false;
                     document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
                     
-                    // ========== DÍGITOS LENTOS ==========
+                    // Dígitos
                     if (data.digits) {
                         const d = data.digits;
-                        // Actualiza o histórico de dígitos lentos
                         if (d.recent && d.recent.length > 0) {
                             let slowHtml = '';
                             d.recent.forEach(digit => {
@@ -1257,15 +1361,11 @@
                             });
                             const slowContainer = document.getElementById('slowDigitsHistory');
                             if (slowContainer) slowContainer.innerHTML = slowHtml;
-                        } else {
-                            document.getElementById('slowDigitsHistory').innerHTML = '<div style="color:#62748c;">Aguardando dados...</div>';
                         }
-                        // Recomendação (alerta)
                         const analysis = d.analysis;
                         if (analysis && analysis.alert === 'RECOMENDADO' && analysis.confidence >= 65) {
                             showDigitAlert(analysis.reason, analysis.confidence, analysis.recommended_action === 'BUY' ? 'odd' : (analysis.recommended_action === 'SELL' ? 'even' : null));
                         }
-                        // Percentagens (opcional)
                         if (analysis) {
                             document.getElementById('oddPercent').textContent = (analysis.odd_pct || 0) + '%';
                             document.getElementById('evenPercent').textContent = (analysis.even_pct || 0) + '%';
@@ -1278,7 +1378,7 @@
                         }
                     }
                     
-                    // ========== MODO HÍBRIDO ==========
+                    // Modo híbrido
                     if (modoAtual === 'hybrid') {
                         const hybridDiv = document.getElementById('hybridStatus');
                         hybridDiv.classList.remove('hidden');
@@ -1308,7 +1408,7 @@
                         }
                         document.getElementById('hybridSignal').innerHTML = hybridMessage;
                         document.getElementById('hybridSignal').style.color = hybridColor;
-                        document.getElementById('hybridConfidence').innerHTML = canTrade ? `Pronto para trade!` : `Confiança combinada: ${combinedConf.toFixed(1)}% (mínimo 80%)`;
+                        document.getElementById('hybridConfidence').innerHTML = canTrade ? `Pronto para trade!` : `Confiança combinada: ${combinedConf.toFixed(1)}% (mínimo 60%)`;
                         const buyBtn = document.getElementById('hybridBuyBtn');
                         const sellBtn = document.getElementById('hybridSellBtn');
                         if (buyBtn && sellBtn) {
@@ -1427,6 +1527,10 @@
             if (data.authenticated) {
                 document.getElementById('authModal').style.display = 'none';
                 document.getElementById('mainContent').style.display = 'block';
+                if (data.user && data.user.email === 'admin@foloma.com') {
+                    isAdmin = true;
+                    document.getElementById('adminMenuItem').style.display = 'block';
+                }
                 initPlatform();
             }
         });
