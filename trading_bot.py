@@ -65,10 +65,10 @@ class TradingBot:
     def on_tick(self, tick):
         self.current_price = tick['price']
         self.current_symbol = tick['symbol']
-        self.indicators.add_price(self.current_price)
+        self.indicators.add_price(self.current_price, self.current_symbol)
         if 'R_' in self.current_symbol:
             digit_analyzer.add_tick(self.current_price)
-        self.last_analysis = self.indicators.get_all_indicators()
+        self.last_analysis = self.indicators.get_all_indicators(self.current_symbol)
         if self.client:
             self.balance = self.client.balance
             self.currency = self.client.currency
@@ -88,9 +88,10 @@ class TradingBot:
         logger.info("📅 Estatísticas diárias resetadas")
 
     def get_momentum(self):
-        if len(self.indicators.prices) < 5:
+        prices = self.indicators.get_prices(self.current_symbol)
+        if len(prices) < 5:
             return 0
-        recent = list(self.indicators.prices)[-5:]
+        recent = list(prices)[-5:]
         momentum = (recent[-1] - recent[0]) / recent[0] * 100
         return momentum
 
@@ -100,12 +101,12 @@ class TradingBot:
 
         analysis = self.last_analysis
 
-        # Pesos ajustados: tendência mais importante
+        # Pesos dos indicadores
         weights = {
-            'trend': 0.50,
-            'rsi': 0.20,
+            'trend': 0.35,
+            'rsi': 0.30,
             'macd': 0.20,
-            'bollinger': 0.10
+            'bollinger': 0.15
         }
 
         buy_score = 0
@@ -140,7 +141,7 @@ class TradingBot:
         elif 'VENDA' in analysis['bollinger']['desc']:
             sell_score += analysis['bollinger']['score'] * weights['bollinger']
 
-        # Se houver conflito, reduz ambos
+        # Conflito
         if buy_score > 0 and sell_score > 0:
             buy_score *= 0.5
             sell_score *= 0.5
@@ -156,7 +157,7 @@ class TradingBot:
             signal = 'SELL'
             confidence = (sell_score / total) * 100
 
-        # Ajuste pelo momentum (apenas para reforçar)
+        # Ajuste pelo momentum
         momentum = self.get_momentum()
         threshold = config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1)
 
@@ -210,32 +211,29 @@ class TradingBot:
             self.update_stats()
 
     def on_trade_result(self, result):
+        """Processa resultado do trade usando profit real (ignora is_win)"""
         try:
             logger.info(f"📊 [BOT] Processando resultado: {result}")
             if len(self.trades) == 0:
                 logger.warning("Nenhum trade pendente")
                 return
-           last_trade = self.trades[-1]
-           profit = result.get('profit', 0)
-           is_win = profit > 0   # calcula diretamente do profit
-           if is_win:
-              last_trade['result'] = 'win'
-              last_trade['profit'] = profit
-              self.daily_stats['wins'] += 1
-              self.daily_stats['profit_loss'] += profit
-              logger.info(f"✅ GANHO! +${profit:.2f}")
-         else:
-            loss = last_trade['amount']
-            last_trade['result'] = 'loss'
-            last_trade['profit'] = 0
-            self.daily_stats['losses'] += 1
-            self.daily_stats['profit_loss'] -= loss
-            logger.info(f"❌ PERDA! -${loss:.2f}")
-        self.update_stats()
-        if self.client:
-            self.client.get_balance()
-    except Exception as e:
-        logger.error(f"Erro ao processar resultado: {e}")
+            last_trade = self.trades[-1]
+            profit = result.get('profit', 0)
+            is_win = profit > 0   # ganho se profit positivo
+
+            if is_win:
+                last_trade['result'] = 'win'
+                last_trade['profit'] = profit
+                self.daily_stats['wins'] += 1
+                self.daily_stats['profit_loss'] += profit
+                logger.info(f"✅ GANHO! +${profit:.2f}")
+            else:
+                loss = last_trade['amount']
+                last_trade['result'] = 'loss'
+                last_trade['profit'] = 0
+                self.daily_stats['losses'] += 1
+                self.daily_stats['profit_loss'] -= loss
+                logger.info(f"❌ PERDA! -${loss:.2f}")
 
             self.update_stats()
             if self.client:
@@ -326,7 +324,6 @@ class TradingBot:
         self.martingale = {'active': False, 'step': 0, 'original_amount': 0, 'last_result': None}
 
     def reset_stats(self):
-        """Reseta todas as estatísticas e limpa o histórico de trades"""
         self.stats = {
             'total': 0,
             'wins': 0,
@@ -337,6 +334,6 @@ class TradingBot:
             'total_return': 0
         }
         self.trades.clear()
-        logger.info("📊 Estatísticas e histórico resetados pelo utilizador")
+        logger.info("📊 Estatísticas e histórico resetados")
 
 trading_bot = TradingBot()
