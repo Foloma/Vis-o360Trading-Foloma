@@ -210,28 +210,32 @@ class TradingBot:
             self.update_stats()
 
     def on_trade_result(self, result):
-        try:
-            logger.info(f"📊 [BOT] Processando resultado: {result}")
-            if len(self.trades) == 0:
-                logger.warning("Nenhum trade pendente")
-                return
-            last_trade = self.trades[-1]
-            is_win = result.get('is_win', False)
-
-            if is_win:
-                profit = result.get('profit', last_trade['amount'] * 0.85)
-                last_trade['result'] = 'win'
-                last_trade['profit'] = profit
-                self.daily_stats['wins'] += 1
-                self.daily_stats['profit_loss'] += profit
-                logger.info(f"✅ GANHO! +${profit:.2f}")
-            else:
-                loss = last_trade['amount']
-                last_trade['result'] = 'loss'
-                last_trade['profit'] = 0
-                self.daily_stats['losses'] += 1
-                self.daily_stats['profit_loss'] -= loss
-                logger.info(f"❌ PERDA! -${loss:.2f}")
+    try:
+        logger.info(f"📊 [BOT] Processando resultado: {result}")
+        if len(self.trades) == 0:
+            logger.warning("Nenhum trade pendente")
+            return
+        last_trade = self.trades[-1]
+        profit = result.get('profit', 0)
+        is_win = profit > 0   # calcula diretamente do profit
+        if is_win:
+            last_trade['result'] = 'win'
+            last_trade['profit'] = profit
+            self.daily_stats['wins'] += 1
+            self.daily_stats['profit_loss'] += profit
+            logger.info(f"✅ GANHO! +${profit:.2f}")
+        else:
+            loss = last_trade['amount']
+            last_trade['result'] = 'loss'
+            last_trade['profit'] = 0
+            self.daily_stats['losses'] += 1
+            self.daily_stats['profit_loss'] -= loss
+            logger.info(f"❌ PERDA! -${loss:.2f}")
+        self.update_stats()
+        if self.client:
+            self.client.get_balance()
+    except Exception as e:
+        logger.error(f"Erro ao processar resultado: {e}")
 
             self.update_stats()
             if self.client:
