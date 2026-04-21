@@ -332,21 +332,23 @@ def api_trade():
 def api_trade_digit():
     try:
         data = request.json
-        prediction = data.get('prediction')  # 'odd' ou 'even'
+        prediction = data.get('prediction')
         amount = float(data.get('amount', 0.35))
         if not deriv_client or not deriv_client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
         if amount < 0.35 or amount > 100:
             return jsonify({'error': 'Valor inválido'}), 400
         
-        # INVERTE A LÓGICA: se o usuário clica em ÍMPAR, envia PAR (DIGITEVEN)
+        # Envia o contrato correspondente à previsão do usuário
         if prediction == 'odd':
-            contract_type = 'PUT'   # DIGITEVEN
+            contract_type = 'CALL'   # DIGITODD
         else:
-            contract_type = 'CALL'  # DIGITODD
+            contract_type = 'PUT'    # DIGITEVEN
         
         success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=True)
         if success:
+            # Guarda a previsão no trade pendente (para comparar depois)
+            deriv_client.pending_trade['user_prediction'] = prediction
             response = {'status': 'ok', 'message': f'Aposta em {prediction.upper()} enviada!'}
             if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
                 affiliate.calculate_commission(amount, deriv_client.markup_percentage)
