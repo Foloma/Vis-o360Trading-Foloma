@@ -8,6 +8,10 @@ import json
 import os
 from collections import deque
 from datetime import datetime
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -130,7 +134,8 @@ def api_register():
             'id': user_id, 'name': name, 'email': email, 'password': password_hash,
             'deriv_token': None, 'deriv_account_type': None,
             'created_at': time.time(), 'last_login': None,
-            'referral_code': referral_code, 'referrals': []
+            'referral_code': referral_code, 'referrals': [],
+            'active': True
         }
         save_users(users)
         
@@ -144,103 +149,6 @@ def api_register():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ========== ADMINISTRAÇÃO ==========
-@app.route('/api/admin/users', methods=['GET'])
-@require_auth
-def api_admin_users():
-    email = session.get('user_email')
-    if email != 'admin@foloma.com':
-        return jsonify({'error': 'Acesso negado'}), 403
-    user_list = []
-    for u_email, u in users.items():
-        user_list.append({
-            'email': u_email,
-            'name': u.get('name'),
-            'active': u.get('active', True)
-        })
-    return jsonify({'users': user_list})
-
-@app.route('/api/admin/toggle-user', methods=['POST'])
-@require_auth
-def api_admin_toggle_user():
-    email = session.get('user_email')
-    if email != 'admin@foloma.com':
-        return jsonify({'error': 'Acesso negado'}), 403
-    data = request.json
-    target_email = data.get('email')
-    enable = data.get('enable', True)
-    if target_email not in users:
-        return jsonify({'error': 'Utilizador não encontrado'}), 404
-    users[target_email]['active'] = enable
-    save_users(users)
-    return jsonify({'status': 'ok', 'message': f'Utilizador {"ativado" if enable else "desativado"} com sucesso.'})
-
-# ========== RECUPERAÇÃO DE SENHA ==========
-import secrets
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-
-# Configuração de email (substitua pelos seus dados)
-SMTP_SERVER = 'smtp.gmail.com'
-SMTP_PORT = 587
-SMTP_USER = 'seuemail@gmail.com'
-SMTP_PASSWORD = 'sua_senha_app'
-
-reset_tokens = {}
-
-def send_reset_email(to_email, token):
-    reset_link = f"https://visao360-jf.onrender.com/reset-password?token={token}"
-    subject = "Recuperação de senha - Foloma Trading"
-    body = f"""Olá,
-Solicitou a recuperação da sua senha. Clique no link abaixo para redefinir a sua senha:
-{reset_link}
-Se não foi você, ignore este email.
-"""
-    msg = MIMEMultipart()
-    msg['From'] = SMTP_USER
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
-    try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        return True
-    except Exception as e:
-        logger.error(f"Erro ao enviar email: {e}")
-        return False
-
-@app.route('/api/auth/reset-password', methods=['POST'])
-def api_reset_password():
-    data = request.json
-    email = data.get('email', '').strip().lower()
-    if email not in users:
-        return jsonify({'error': 'Email não registado'}), 404
-    token = secrets.token_urlsafe(32)
-    reset_tokens[token] = email
-    if send_reset_email(email, token):
-        return jsonify({'status': 'ok', 'message': 'Link de recuperação enviado para o email.'})
-    else:
-        return jsonify({'error': 'Erro ao enviar email. Tente mais tarde.'}), 500
-
-@app.route('/api/auth/reset-password-confirm', methods=['POST'])
-def api_reset_password_confirm():
-    data = request.json
-    token = data.get('token')
-    new_password = data.get('new_password')
-    if token not in reset_tokens:
-        return jsonify({'error': 'Token inválido ou expirado'}), 400
-    email = reset_tokens[token]
-    if email not in users:
-        return jsonify({'error': 'Utilizador não encontrado'}), 404
-    users[email]['password'] = hashlib.sha256(new_password.encode()).hexdigest()
-    save_users(users)
-    del reset_tokens[token]
-    return jsonify({'status': 'ok', 'message': 'Senha alterada com sucesso.'})
-
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
     try:
@@ -250,6 +158,8 @@ def api_login():
         user = users.get(email)
         if not user:
             return jsonify({'error': 'Utilizador não encontrado'}), 400
+        if not user.get('active', True):
+            return jsonify({'error': 'Conta desativada. Contacte o administrador.'}), 400
         password_hash = hashlib.sha256(password.encode()).hexdigest()
         if user['password'] != password_hash:
             return jsonify({'error': 'Senha incorreta'}), 400
@@ -309,6 +219,98 @@ def api_generate_referral_link():
         return jsonify({'link': link, 'code': code})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ========== ADMINISTRAÇÃO ==========
+@app.route('/api/admin/users', methods=['GET'])
+@require_auth
+def api_admin_users():
+    email = session.get('user_email')
+    if email != 'admin@foloma.com':
+        return jsonify({'error': 'Acesso negado'}), 403
+    user_list = []
+    for u_email, u in users.items():
+        user_list.append({
+            'email': u_email,
+            'name': u.get('name'),
+            'active': u.get('active', True)
+        })
+    return jsonify({'users': user_list})
+
+@app.route('/api/admin/toggle-user', methods=['POST'])
+@require_auth
+def api_admin_toggle_user():
+    email = session.get('user_email')
+    if email != 'admin@foloma.com':
+        return jsonify({'error': 'Acesso negado'}), 403
+    data = request.json
+    target_email = data.get('email')
+    enable = data.get('enable', True)
+    if target_email not in users:
+        return jsonify({'error': 'Utilizador não encontrado'}), 404
+    users[target_email]['active'] = enable
+    save_users(users)
+    return jsonify({'status': 'ok', 'message': f'Utilizador {"ativado" if enable else "desativado"} com sucesso.'})
+
+# ========== RECUPERAÇÃO DE SENHA ==========
+# Configuração de email (substitua pelos seus dados)
+SMTP_SERVER = 'smtp.gmail.com'
+SMTP_PORT = 587
+SMTP_USER = 'seuemail@gmail.com'      # ALTERE AQUI
+SMTP_PASSWORD = 'sua_senha_app'       # ALTERE AQUI
+
+reset_tokens = {}
+
+def send_reset_email(to_email, token):
+    reset_link = f"https://visao360-jf.onrender.com/reset-password?token={token}"
+    subject = "Recuperação de senha - Foloma Trading"
+    body = f"""Olá,
+Solicitou a recuperação da sua senha. Clique no link abaixo para redefinir a sua senha:
+{reset_link}
+Se não foi você, ignore este email.
+"""
+    msg = MIMEMultipart()
+    msg['From'] = SMTP_USER
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao enviar email: {e}")
+        return False
+
+@app.route('/api/auth/reset-password', methods=['POST'])
+def api_reset_password():
+    data = request.json
+    email = data.get('email', '').strip().lower()
+    if email not in users:
+        return jsonify({'error': 'Email não registado'}), 404
+    token = secrets.token_urlsafe(32)
+    reset_tokens[token] = email
+    if send_reset_email(email, token):
+        return jsonify({'status': 'ok', 'message': 'Link de recuperação enviado para o email.'})
+    else:
+        return jsonify({'error': 'Erro ao enviar email. Tente mais tarde.'}), 500
+
+@app.route('/api/auth/reset-password-confirm', methods=['POST'])
+def api_reset_password_confirm():
+    data = request.json
+    token = data.get('token')
+    new_password = data.get('new_password')
+    if token not in reset_tokens:
+        return jsonify({'error': 'Token inválido ou expirado'}), 400
+    email = reset_tokens[token]
+    if email not in users:
+        return jsonify({'error': 'Utilizador não encontrado'}), 404
+    users[email]['password'] = hashlib.sha256(new_password.encode()).hexdigest()
+    save_users(users)
+    del reset_tokens[token]
+    return jsonify({'status': 'ok', 'message': 'Senha alterada com sucesso.'})
 
 # ========== ROTAS DA PLATAFORMA ==========
 @app.route('/api/connect', methods=['POST'])
@@ -435,17 +437,10 @@ def api_trade_digit():
             return jsonify({'error': 'Não conectado'}), 400
         if amount < 0.35 or amount > 100:
             return jsonify({'error': 'Valor inválido'}), 400
-        
-        # Envia o contrato correspondente à previsão do usuário
-        if prediction == 'odd':
-            contract_type = 'CALL'   # DIGITODD
-        else:
-            contract_type = 'PUT'    # DIGITEVEN
-        
+        # Sem verificação de confiança (operação manual)
+        contract_type = 'CALL' if prediction == 'odd' else 'PUT'
         success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=True)
         if success:
-            # Guarda a previsão no trade pendente (para comparar depois)
-            deriv_client.pending_trade['user_prediction'] = prediction
             response = {'status': 'ok', 'message': f'Aposta em {prediction.upper()} enviada!'}
             if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
                 affiliate.calculate_commission(amount, deriv_client.markup_percentage)
@@ -472,6 +467,9 @@ def api_trade_hybrid():
         digit_recommend = digit_analysis.get('recommended_action')
         digit_conf = digit_analysis.get('confidence', 0)
 
+        logger.info(f"🔍 Híbrido: Sinal ativo={signal}, conf_ativo={conf_ativo}")
+        logger.info(f"🔍 Híbrido: Dígitos recomendação={digit_recommend}, conf_digit={digit_conf}")
+
         if signal == 'BUY' and digit_recommend == 'BUY':
             combined_conf = (conf_ativo + digit_conf) / 2
             action = 'BUY'
@@ -481,10 +479,12 @@ def api_trade_hybrid():
             action = 'SELL'
             message = '✅ Sinal CONFIRMADO: Ativo e Dígitos apontam para VENDA'
         else:
+            logger.info("⚠️ Híbrido: Sinais divergentes")
             return jsonify({'error': '⚠️ Sinais divergentes. Aguarde convergência.'}), 400
 
-        min_hybrid = 70
+        min_hybrid = 60
         if combined_conf < min_hybrid:
+            logger.info(f"❌ Híbrido: Confiança combinada baixa: {combined_conf:.1f}% (mínimo {min_hybrid}%)")
             return jsonify({'error': f'Confiança combinada baixa ({combined_conf:.1f}%)'}), 400
 
         contract_type = 'CALL' if action == 'BUY' else 'PUT'
@@ -492,10 +492,12 @@ def api_trade_hybrid():
         if success:
             if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
                 affiliate.calculate_commission(amount, deriv_client.markup_percentage)
+            logger.info(f"✅ Híbrido: Trade {action} executado com confiança {combined_conf:.1f}%")
             return jsonify({'status': 'ok', 'message': message, 'confidence': combined_conf})
         else:
             return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
+        logger.error(f"❌ Erro no modo híbrido: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ========== MODO MANUAL ==========
