@@ -101,70 +101,62 @@ class TradingBot:
 
         analysis = self.last_analysis
 
-        # Pesos ajustados (tendência mais importante)
         weights = {
-             'trend': 0.50,
-             'rsi': 0.25,
-             'macd': 0.15,
-             'bollinger': 0.10
-    }
+            'trend': 0.50,
+            'rsi': 0.25,
+            'macd': 0.15,
+            'bollinger': 0.10
+        }
 
-    buy_score = 0
-    sell_score = 0
+        buy_score = 0
+        sell_score = 0
 
-    # Tendência
-    if 'ALTA' in analysis['trend']['desc']:
-        buy_score += analysis['trend']['score'] * weights['trend']
-    elif 'BAIXA' in analysis['trend']['desc']:
-        sell_score += analysis['trend']['score'] * weights['trend']
+        if 'ALTA' in analysis['trend']['desc']:
+            buy_score += analysis['trend']['score'] * weights['trend']
+        elif 'BAIXA' in analysis['trend']['desc']:
+            sell_score += analysis['trend']['score'] * weights['trend']
 
-    # RSI
-    rsi = analysis['rsi']['score']
-    if rsi < 30:
-        buy_score += (30 - rsi) * weights['rsi']
-    elif rsi > 70:
-        sell_score += (rsi - 70) * weights['rsi']
-    elif rsi < 40:
-        buy_score += (40 - rsi) * weights['rsi'] * 0.5
-    elif rsi > 60:
-        sell_score += (rsi - 60) * weights['rsi'] * 0.5
+        rsi = analysis['rsi']['score']
+        if rsi < 30:
+            buy_score += (30 - rsi) * weights['rsi']
+        elif rsi > 70:
+            sell_score += (rsi - 70) * weights['rsi']
+        elif rsi < 40:
+            buy_score += (40 - rsi) * weights['rsi'] * 0.5
+        elif rsi > 60:
+            sell_score += (rsi - 60) * weights['rsi'] * 0.5
 
-    # MACD
-    if 'COMPRA' in analysis['macd']['desc']:
-        buy_score += analysis['macd']['score'] * weights['macd']
-    elif 'VENDA' in analysis['macd']['desc']:
-        sell_score += analysis['macd']['score'] * weights['macd']
+        if 'COMPRA' in analysis['macd']['desc']:
+            buy_score += analysis['macd']['score'] * weights['macd']
+        elif 'VENDA' in analysis['macd']['desc']:
+            sell_score += analysis['macd']['score'] * weights['macd']
 
-    # Bollinger
-    if 'COMPRA' in analysis['bollinger']['desc']:
-        buy_score += analysis['bollinger']['score'] * weights['bollinger']
-    elif 'VENDA' in analysis['bollinger']['desc']:
-        sell_score += analysis['bollinger']['score'] * weights['bollinger']
+        if 'COMPRA' in analysis['bollinger']['desc']:
+            buy_score += analysis['bollinger']['score'] * weights['bollinger']
+        elif 'VENDA' in analysis['bollinger']['desc']:
+            sell_score += analysis['bollinger']['score'] * weights['bollinger']
 
-    # Conflito
-    if buy_score > 0 and sell_score > 0:
-        buy_score *= 0.5
-        sell_score *= 0.5
+        if buy_score > 0 and sell_score > 0:
+            buy_score *= 0.5
+            sell_score *= 0.5
 
-    total = buy_score + sell_score
-    if total == 0:
-        return 'NEUTRAL', 0
+        total = buy_score + sell_score
+        if total == 0:
+            return 'NEUTRAL', 0
 
-    if buy_score > sell_score:
-        signal = 'BUY'
-        confidence = (buy_score / total) * 100
-    else:
-        signal = 'SELL'
-        confidence = (sell_score / total) * 100
+        if buy_score > sell_score:
+            signal = 'BUY'
+            confidence = (buy_score / total) * 100
+        else:
+            signal = 'SELL'
+            confidence = (sell_score / total) * 100
 
-    # Filtro adicional: se a tendência for forte e o RSI estiver em extremo, reduzir confiança
-    if signal == 'BUY' and analysis['rsi']['score'] > 70:
-        confidence *= 0.7
-    elif signal == 'SELL' and analysis['rsi']['score'] < 30:
-        confidence *= 0.7
+        if signal == 'BUY' and analysis['rsi']['score'] > 70:
+            confidence *= 0.7
+        elif signal == 'SELL' and analysis['rsi']['score'] < 30:
+            confidence *= 0.7
 
-    # Limitar a confiança
-    return signal, min(max(confidence, 0), 95)
+        return signal, min(max(confidence, 0), 95)
 
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
@@ -205,7 +197,6 @@ class TradingBot:
             self.update_stats()
 
     def on_trade_result(self, result):
-        """Processa resultado do trade usando profit real (ignora is_win)"""
         try:
             logger.info(f"📊 [BOT] Processando resultado: {result}")
             if len(self.trades) == 0:
@@ -213,7 +204,7 @@ class TradingBot:
                 return
             last_trade = self.trades[-1]
             profit = result.get('profit', 0)
-            is_win = profit > 0   # ganho se profit positivo
+            is_win = profit > 0
 
             if is_win:
                 last_trade['result'] = 'win'
