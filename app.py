@@ -144,6 +144,103 @@ def api_register():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ========== ADMINISTRAÇÃO ==========
+@app.route('/api/admin/users', methods=['GET'])
+@require_auth
+def api_admin_users():
+    email = session.get('user_email')
+    if email != 'admin@foloma.com':
+        return jsonify({'error': 'Acesso negado'}), 403
+    user_list = []
+    for u_email, u in users.items():
+        user_list.append({
+            'email': u_email,
+            'name': u.get('name'),
+            'active': u.get('active', True)
+        })
+    return jsonify({'users': user_list})
+
+@app.route('/api/admin/toggle-user', methods=['POST'])
+@require_auth
+def api_admin_toggle_user():
+    email = session.get('user_email')
+    if email != 'admin@foloma.com':
+        return jsonify({'error': 'Acesso negado'}), 403
+    data = request.json
+    target_email = data.get('email')
+    enable = data.get('enable', True)
+    if target_email not in users:
+        return jsonify({'error': 'Utilizador não encontrado'}), 404
+    users[target_email]['active'] = enable
+    save_users(users)
+    return jsonify({'status': 'ok', 'message': f'Utilizador {"ativado" if enable else "desativado"} com sucesso.'})
+
+# ========== RECUPERAÇÃO DE SENHA ==========
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# Configuração de email (substitua pelos seus dados)
+SMTP_SERVER = 'smtp.gmail.com'
+SMTP_PORT = 587
+SMTP_USER = 'seuemail@gmail.com'
+SMTP_PASSWORD = 'sua_senha_app'
+
+reset_tokens = {}
+
+def send_reset_email(to_email, token):
+    reset_link = f"https://visao360-jf.onrender.com/reset-password?token={token}"
+    subject = "Recuperação de senha - Foloma Trading"
+    body = f"""Olá,
+Solicitou a recuperação da sua senha. Clique no link abaixo para redefinir a sua senha:
+{reset_link}
+Se não foi você, ignore este email.
+"""
+    msg = MIMEMultipart()
+    msg['From'] = SMTP_USER
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao enviar email: {e}")
+        return False
+
+@app.route('/api/auth/reset-password', methods=['POST'])
+def api_reset_password():
+    data = request.json
+    email = data.get('email', '').strip().lower()
+    if email not in users:
+        return jsonify({'error': 'Email não registado'}), 404
+    token = secrets.token_urlsafe(32)
+    reset_tokens[token] = email
+    if send_reset_email(email, token):
+        return jsonify({'status': 'ok', 'message': 'Link de recuperação enviado para o email.'})
+    else:
+        return jsonify({'error': 'Erro ao enviar email. Tente mais tarde.'}), 500
+
+@app.route('/api/auth/reset-password-confirm', methods=['POST'])
+def api_reset_password_confirm():
+    data = request.json
+    token = data.get('token')
+    new_password = data.get('new_password')
+    if token not in reset_tokens:
+        return jsonify({'error': 'Token inválido ou expirado'}), 400
+    email = reset_tokens[token]
+    if email not in users:
+        return jsonify({'error': 'Utilizador não encontrado'}), 404
+    users[email]['password'] = hashlib.sha256(new_password.encode()).hexdigest()
+    save_users(users)
+    del reset_tokens[token]
+    return jsonify({'status': 'ok', 'message': 'Senha alterada com sucesso.'})
+
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
     try:
