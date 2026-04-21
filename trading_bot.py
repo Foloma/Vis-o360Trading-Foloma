@@ -210,21 +210,21 @@ class TradingBot:
             self.update_stats()
 
     def on_trade_result(self, result):
-    try:
-        logger.info(f"📊 [BOT] Processando resultado: {result}")
-        if len(self.trades) == 0:
-            logger.warning("Nenhum trade pendente")
-            return
-        last_trade = self.trades[-1]
-        profit = result.get('profit', 0)
-        is_win = profit > 0   # calcula diretamente do profit
-        if is_win:
-            last_trade['result'] = 'win'
-            last_trade['profit'] = profit
-            self.daily_stats['wins'] += 1
-            self.daily_stats['profit_loss'] += profit
-            logger.info(f"✅ GANHO! +${profit:.2f}")
-        else:
+        try:
+            logger.info(f"📊 [BOT] Processando resultado: {result}")
+            if len(self.trades) == 0:
+                logger.warning("Nenhum trade pendente")
+                return
+           last_trade = self.trades[-1]
+           profit = result.get('profit', 0)
+           is_win = profit > 0   # calcula diretamente do profit
+           if is_win:
+              last_trade['result'] = 'win'
+              last_trade['profit'] = profit
+              self.daily_stats['wins'] += 1
+              self.daily_stats['profit_loss'] += profit
+              logger.info(f"✅ GANHO! +${profit:.2f}")
+         else:
             loss = last_trade['amount']
             last_trade['result'] = 'loss'
             last_trade['profit'] = 0
