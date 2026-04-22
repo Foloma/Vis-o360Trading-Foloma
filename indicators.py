@@ -57,7 +57,7 @@ class TechnicalIndicators:
         if ema_fast is None or ema_slow is None:
             return None, None
         macd_line = ema_fast - ema_slow
-        # simplificado: não calcula signal line aqui
+        # não calculamos signal line por simplicidade
         return macd_line, None
 
     def _bollinger_bands(self, data, period=20, std_dev=2):
@@ -71,6 +71,23 @@ class TechnicalIndicators:
         lower = sma - std_dev * std
         return upper, sma, lower
 
+    def _stochastic(self, data, k_period=14, d_period=3):
+        if len(data) < k_period:
+            return None, None
+        low = min(data[-k_period:])
+        high = max(data[-k_period:])
+        current = data[-1]
+        if high == low:
+            return 50, 50
+        k = (current - low) / (high - low) * 100
+        # simplificado: retorna %K
+        return k, None
+
+    def _sma_long(self, data, period=200):
+        if len(data) < period:
+            return None
+        return sum(data[-period:]) / period
+
     def get_all_indicators(self, symbol='R_100'):
         prices = self.get_prices(symbol)
         if len(prices) < 10:
@@ -79,6 +96,8 @@ class TechnicalIndicators:
                 'rsi': {'score': 0, 'desc': '---'},
                 'macd': {'score': 0, 'desc': '---'},
                 'bollinger': {'score': 0, 'desc': '---'},
+                'stochastic': {'score': 0, 'desc': '---'},
+                'sma200': None,
                 'sma9': None, 'sma21': None, 'sma50': None,
                 'ema12': None, 'ema26': None
             }
@@ -86,6 +105,7 @@ class TechnicalIndicators:
         sma9 = self._sma(data, 9)
         sma21 = self._sma(data, 21)
         sma50 = self._sma(data, 50)
+        sma200 = self._sma_long(data, 200)
         ema12 = self._ema(data, 12)
         ema26 = self._ema(data, 26)
 
@@ -125,7 +145,6 @@ class TechnicalIndicators:
         # MACD
         macd_line, _ = self._macd(data)
         if macd_line is not None:
-            # simplificado: se macd_line > 0 => COMPRA
             if macd_line > 0:
                 macd_desc = 'COMPRA'
                 macd_score = 80
@@ -153,11 +172,29 @@ class TechnicalIndicators:
             bb_desc = '---'
             bb_score = 0
 
+        # Estocástico
+        stoch, _ = self._stochastic(data)
+        if stoch is not None:
+            if stoch < 20:
+                stoch_desc = 'SOBREVENDIDO'
+                stoch_score = 80
+            elif stoch > 80:
+                stoch_desc = 'SOBRECOMPRADO'
+                stoch_score = 80
+            else:
+                stoch_desc = 'NEUTRO'
+                stoch_score = 50
+        else:
+            stoch_desc = '---'
+            stoch_score = 0
+
         return {
             'trend': {'score': trend_score, 'desc': trend_desc},
             'rsi': {'score': rsi_score, 'desc': rsi_desc},
             'macd': {'score': macd_score, 'desc': macd_desc},
             'bollinger': {'score': bb_score, 'desc': bb_desc},
+            'stochastic': {'score': stoch_score, 'desc': stoch_desc},
+            'sma200': sma200,
             'sma9': sma9,
             'sma21': sma21,
             'sma50': sma50,
