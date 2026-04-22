@@ -101,62 +101,62 @@ class TradingBot:
 
         analysis = self.last_analysis
 
-        weights = {
-            'trend': 0.50,
-            'rsi': 0.25,
-            'macd': 0.15,
-            'bollinger': 0.10
-        }
+        # Votos: 1 = BUY, -1 = SELL, 0 = neutro
+        vote_trend = 0
+        vote_rsi = 0
+        vote_macd = 0
+        vote_bb = 0
 
-        buy_score = 0
-        sell_score = 0
-
+        # Tendência
         if 'ALTA' in analysis['trend']['desc']:
-            buy_score += analysis['trend']['score'] * weights['trend']
+            vote_trend = 1
         elif 'BAIXA' in analysis['trend']['desc']:
-            sell_score += analysis['trend']['score'] * weights['trend']
+            vote_trend = -1
 
+        # RSI
         rsi = analysis['rsi']['score']
         if rsi < 30:
-            buy_score += (30 - rsi) * weights['rsi']
+            vote_rsi = 1
         elif rsi > 70:
-            sell_score += (rsi - 70) * weights['rsi']
+            vote_rsi = -1
         elif rsi < 40:
-            buy_score += (40 - rsi) * weights['rsi'] * 0.5
+            vote_rsi = 0.5
         elif rsi > 60:
-            sell_score += (rsi - 60) * weights['rsi'] * 0.5
+            vote_rsi = -0.5
+        else:
+            vote_rsi = 0
 
+        # MACD
         if 'COMPRA' in analysis['macd']['desc']:
-            buy_score += analysis['macd']['score'] * weights['macd']
+            vote_macd = 1
         elif 'VENDA' in analysis['macd']['desc']:
-            sell_score += analysis['macd']['score'] * weights['macd']
+            vote_macd = -1
 
+        # Bollinger
         if 'COMPRA' in analysis['bollinger']['desc']:
-            buy_score += analysis['bollinger']['score'] * weights['bollinger']
+            vote_bb = 1
         elif 'VENDA' in analysis['bollinger']['desc']:
-            sell_score += analysis['bollinger']['score'] * weights['bollinger']
+            vote_bb = -1
 
-        if buy_score > 0 and sell_score > 0:
-            buy_score *= 0.5
-            sell_score *= 0.5
+        # Contagem de votos positivos e negativos
+        buy_votes = sum(1 for v in [vote_trend, vote_rsi, vote_macd, vote_bb] if v > 0)
+        sell_votes = sum(1 for v in [vote_trend, vote_rsi, vote_macd, vote_bb] if v < 0)
+        total_votes = buy_votes + sell_votes
 
-        total = buy_score + sell_score
-        if total == 0:
+        if total_votes == 0:
             return 'NEUTRAL', 0
 
-        if buy_score > sell_score:
+        if buy_votes > sell_votes:
             signal = 'BUY'
-            confidence = (buy_score / total) * 100
-        else:
+            confidence = (buy_votes / total_votes) * 100
+        elif sell_votes > buy_votes:
             signal = 'SELL'
-            confidence = (sell_score / total) * 100
+            confidence = (sell_votes / total_votes) * 100
+        else:
+            return 'NEUTRAL', 0
 
-        if signal == 'BUY' and analysis['rsi']['score'] > 70:
-            confidence *= 0.7
-        elif signal == 'SELL' and analysis['rsi']['score'] < 30:
-            confidence *= 0.7
-
-        return signal, min(max(confidence, 0), 95)
+        # Confiança máxima 95% e nunca 100%
+        return signal, min(confidence, 95)
 
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
