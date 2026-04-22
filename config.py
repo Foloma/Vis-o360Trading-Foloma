@@ -12,11 +12,12 @@ class Config:
     DEMO_API_TOKEN = os.getenv('DEMO_API_TOKEN', '')
     REAL_API_TOKEN = os.getenv('REAL_API_TOKEN', '')
     
-    # WebSocket – usar DOMÍNIO (para SSL funcionar)
+    # WebSocket – usar domínio (SSL funciona)
     WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
     DERIV_WS_URL = WS_URL
     
-    # ... (restante igual)
+    # Base de Dados (não usamos, mas mantido por compatibilidade)
+    DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
     
     # Tipos de conta
     ACCOUNT_TYPES = {
@@ -34,9 +35,9 @@ class Config:
     # Configurações de trading
     DEFAULT_STAKE = 0.35
     MIN_STAKE = 0.35
-    MAX_STAKE = 1000
+    MAX_STAKE = 100
     CONTRACT_DURATION = 5
-    CONTRACT_DURATION_SECONDS = 15  # para dígitos, se usar segundos
+    CONTRACT_DURATION_SECONDS = 10
     
     # Markup
     MARKUP_PERCENTAGE = 0.5
@@ -54,7 +55,7 @@ class Config:
         'max_daily_loss_percent': 5,
         'max_consecutive_losses': 2,
         'min_confidence': 50,
-        'min_confidence_digits': 55,
+        'min_confidence_digits': 0,   # dígitos sem confiança mínima
         'max_stake_percent': 5,
         'stop_loss_enabled': True,
         'take_profit_enabled': True,
@@ -65,7 +66,7 @@ class Config:
     ADVANCED_STRATEGY = {
         'momentum_threshold': 0.1,
         'digit_diff_threshold': 20,
-        'hybrid_min_confidence': 70,
+        'hybrid_min_confidence': 60,
         'hybrid_mode_enabled': True
     }
     
