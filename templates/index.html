@@ -626,249 +626,248 @@
 </head>
 <body>
     <div class="top-bar">
-        <button class="menu-btn" onclick="toggleMenu()">☰</button>
-        <div class="logo">FOLOMA</div>
-        <div></div>
+    <button class="menu-btn" onclick="toggleMenu()">☰</button>
+    <div class="logo">FOLOMA</div>
+    <div></div>
+</div>
+<div class="side-menu" id="sideMenu">
+    <div class="menu-header">
+        <span style="color:#00f0b5; font-weight:bold;">MENU</span>
+        <button class="menu-close" onclick="toggleMenu()">✕</button>
     </div>
-    <div class="side-menu" id="sideMenu">
-        <div class="menu-header">
-            <span style="color:#00f0b5; font-weight:bold;">MENU</span>
-            <button class="menu-close" onclick="toggleMenu()">✕</button>
-        </div>
-        <div class="menu-item" onclick="showSection('dashboard')">📊 Dashboard</div>
-        <div class="menu-item" onclick="showSection('affiliate')">🔗 Afiliado</div>
-        <div class="menu-item" onclick="showSection('payment')">💰 Depósito/Saque</div>
-        <div class="menu-item" onclick="showSection('settings')">⚙️ Configurações</div>
-        <div class="menu-item admin-only" id="adminMenuItem" onclick="showSection('admin')">👑 Administração</div>
-        <div class="menu-item" onclick="logout()">🚪 Sair</div>
-    </div>
-    <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
-    <div class="container" id="mainContent" style="display:none;">
-        <div id="dashboard-section">
-            <!-- Status -->
-            <div class="card">
-                <div class="card-title">📡 STATUS</div>
-                <div class="status-row">
-                    <div><span class="dot" id="statusDot"></span> <span id="statusText">Desconectado</span></div>
-                    <div class="balance"><span id="balance">0.00</span> <span id="currency">USD</span></div>
-                </div>
-                <button class="btn-primary" id="connectBtn" onclick="conectar()">🔌 CONECTAR</button>
-                <div id="connectStatus" class="text-center mt-2" style="font-size:11px; color:#ffaa00;"></div>
-            </div>
-            <!-- Modo de operação (3 modos) -->
-            <div class="card">
-                <div class="card-title">🎮 MODO DE OPERAÇÃO</div>
-                <div class="mode-selector">
-                    <button id="modeAtivos" class="mode-btn active" onclick="setModo('ativos')">📈 ATIVOS</button>
-                    <button id="modeDigitos" class="mode-btn" onclick="setModo('digitos')">🎲 DÍGITOS</button>
-                    <button id="modeHybrid" class="mode-btn" onclick="setModo('hybrid')">🔗 HÍBRIDO</button>
-                </div>
-            </div>
-            <!-- Painel Ativos -->
-            <div id="modoAtivosPanel">
-                <div class="card">
-                    <div class="card-title">📊 ATIVOS</div>
-                    <div class="symbol-row" id="symbol-selector"></div>
-                </div>
-                <div class="card">
-                    <div class="price-area">
-                        <div class="price" id="price">0.0000</div>
-                        <div><span id="signalBadge" class="signal-badge neutral">NEUTRAL</span><span id="signalConfidence" class="signal-confidence">0%</span></div>
-                    </div>
-                    <div class="indicators-row">
-                        <div class="indicator"><div class="label">TENDÊNCIA</div><div class="value" id="trendScore">-</div><div class="desc" id="trendDesc">---</div></div>
-                        <div class="indicator"><div class="label">RSI</div><div class="value" id="rsiScore">-</div><div class="desc" id="rsiDesc">---</div></div>
-                        <div class="indicator"><div class="label">MACD</div><div class="value" id="macdScore">-</div><div class="desc" id="macdDesc">---</div></div>
-                        <div class="indicator"><div class="label">BB</div><div class="value" id="bbScore">-</div><div class="desc" id="bbDesc">---</div></div>
-                    </div>
-                </div>
-            </div>
-            <!-- Painel Dígitos -->
-            <div id="modoDigitosPanel" class="hidden">
-                <div class="card">
-                    <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
-                    <div class="display-digit-container">
-                        <div class="display-digit-header">
-                            <span>📺 PRÓXIMO DÍGITO EM</span>
-                            <span id="display-countdown" class="countdown">15s</span>
-                        </div>
-                        <div class="display-digit-value">
-                            <span id="display-digit" class="display-digit">-</span>
-                            <span id="display-parity" class="display-parity">---</span>
-                        </div>
-                    </div>
-                    <div class="manual-mode-checkbox">
-                        <input type="checkbox" id="toggleAlerts" checked> <span>🔔 Mostrar alertas automáticos (recomendações)</span>
-                    </div>
-                    <div id="alertBox" class="alert-box">
-                        <div id="alertMessage"></div>
-                        <div class="flex" style="justify-content: center; margin-top: 8px;">
-                            <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
-                            <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
-                        </div>
-                        <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
-                    </div>
-                    <div style="margin: 12px 0;">
-                        <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS</div>
-                        <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
-                            <div style="color:#62748c;">Aguardando dados...</div>
-                        </div>
-                    </div>
-                    <div class="trade-buttons" style="margin-top: 12px;">
-                        <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
-                        <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
-                    </div>
-                </div>
-            </div>
-            <!-- Trading panel -->
-            <div class="card">
-                <div class="card-title">🎯 EXECUTAR TRADE</div>
-                <input type="number" id="amount" class="amount-input" value="0.35" step="0.01" min="0.35" max="100">
-                <div class="manual-mode-checkbox">
-                    <input type="checkbox" id="manualMode"> <span>🔓 Modo Manual (ignorar sinais)</span>
-                </div>
-                <div id="hybridStatus" class="hybrid-status hidden">
-                    <div id="hybridSignal"></div>
-                    <div id="hybridConfidence"></div>
-                </div>
-                <div id="ativosButtons">
-                    <div class="trade-buttons">
-                        <button class="btn-buy" id="hybridBuyBtn" onclick="executeTrade('BUY')">📈 COMPRAR</button>
-                        <button class="btn-sell" id="hybridSellBtn" onclick="executeTrade('SELL')">📉 VENDER</button>
-                    </div>
-                </div>
-                <div id="digitosButtons" class="hidden">
-                    <div class="trade-buttons">
-                        <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR</button>
-                        <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR</button>
-                    </div>
-                </div>
-                <div class="flex">
-                    <button class="btn-martingale" onclick="aplicarMartingale()">🎲 MARTINGALE</button>
-                    <button class="btn-martingale-reset" onclick="resetarMartingale()">🔄 RESETAR</button>
-                </div>
-                <div class="martingale-status">
-                    <div>Martingale: <span id="martingaleActive">DESATIVADO</span></div>
-                    <div>Próximo valor: <span id="martingaleNext">$0.35</span></div>
-                </div>
-                <button class="btn-small" style="width:100%; margin-top:8px;" onclick="togglePause()" id="pauseBtn">⏸️ PAUSAR</button>
-            </div>
-        </div>
-        <!-- Afiliado -->
-        <div id="affiliate-section" class="hidden">
-            <div class="card">
-                <div class="card-title">🔗 SEU LINK</div>
-                <div class="link-copy">
-                    <input type="text" id="referralLink" readonly value="Carregando...">
-                    <button class="btn-small" onclick="copiarLink()">📋</button>
-                </div>
-                <div class="stats-grid" style="margin-top:15px;">
-                    <div><div class="stat-value" id="refCount">0</div><div class="stat-label">Indicações</div></div>
-                    <div><div class="stat-value" id="refCommission">$0</div><div class="stat-label">Comissão</div></div>
-                </div>
-            </div>
-        </div>
-        <!-- Pagamento -->
-        <div id="payment-section" class="hidden">
-            <div class="card">
-                <div class="card-title">💰 DEPOSITAR</div>
-                <input type="number" id="depositAmount" placeholder="Valor" min="10" class="amount-input">
-                <select id="depositMethod" class="btn-small" style="width:100%;">
-                    <option value="cryptocurrency">💎 Criptomoedas</option>
-                    <option value="bank_transfer">🏦 Transferência</option>
-                </select>
-                <button class="btn-primary mt-2" onclick="realizarDeposito()">DEPOSITAR</button>
-            </div>
-            <div class="card">
-                <div class="card-title">💸 SACAR</div>
-                <input type="number" id="withdrawAmount" placeholder="Valor" min="10" class="amount-input">
-                <select id="withdrawMethod" class="btn-small" style="width:100%;">
-                    <option value="cryptocurrency">💎 Criptomoedas</option>
-                    <option value="bank_transfer">🏦 Transferência</option>
-                </select>
-                <button class="btn-primary mt-2" onclick="realizarSaque()">SACAR</button>
-            </div>
-        </div>
-        <!-- Configurações -->
-        <div id="settings-section" class="hidden">
-            <div class="card">
-                <div class="card-title">🏦 CONTA</div>
-                <div class="account-selector">
-                    <button id="btnDemo" class="account-btn active" onclick="selectAccount('demo')">🎮 DEMO</button>
-                    <button id="btnReal" class="account-btn" onclick="selectAccount('real')">💰 REAL</button>
-                </div>
-                <div id="accountInfo" class="text-center mt-2" style="font-size:11px; color:#62748c;"></div>
-            </div>
-            <div class="card">
-                <div class="card-title">🔑 TOKEN DERIV</div>
-                <input type="password" id="tokenInput" placeholder="Cole seu token aqui" class="amount-input">
-                <button class="btn-primary" onclick="saveToken()">💾 SALVAR</button>
-                <div id="tokenStatus" style="font-size:11px; color:#ffaa00; margin-top:8px;"></div>
-            </div>
-            <div class="card">
-                <div class="card-title">📊 ESTATÍSTICAS</div>
-                <div class="stats-grid">
-                    <div><div class="stat-value" id="totalTrades">0</div><div class="stat-label">Trades</div></div>
-                    <div><div class="stat-value" id="winRate">0%</div><div class="stat-label">Win Rate</div></div>
-                    <div><div class="stat-value" id="profitLoss">$0</div><div class="stat-label">P/L</div></div>
-                    <div><div class="stat-value" id="totalReturn">0%</div><div class="stat-label">Retorno</div></div>
-                </div>
-            </div>
-            <div class="card">
-                <div class="card-title">🔐 SEGURANÇA</div>
-                <button class="btn-secondary" onclick="showForgotPassword()">Esqueci a senha</button>
-            </div>
-        </div>
-        <!-- Administração (apenas admin) -->
-        <div id="admin-section" class="hidden">
-            <div class="card">
-                <div class="card-title">👑 GERIR UTILIZADORES</div>
-                <div id="adminUsersList">
-                    <div class="text-center" style="padding:20px;">Carregando...</div>
-                </div>
-            </div>
-        </div>
-        <!-- Últimos trades -->
+    <div class="menu-item" onclick="showSection('dashboard')">📊 Dashboard</div>
+    <div class="menu-item" onclick="showSection('affiliate')">🔗 Afiliado</div>
+    <div class="menu-item" onclick="showSection('payment')">💰 Depósito/Saque</div>
+    <div class="menu-item" onclick="showSection('settings')">⚙️ Configurações</div>
+    <div class="menu-item admin-only" id="adminMenuItem" onclick="showSection('admin')">👑 Administração</div>
+    <div class="menu-item" onclick="logout()">🚪 Sair</div>
+</div>
+<div class="overlay" id="overlay" onclick="toggleMenu()"></div>
+<div class="container" id="mainContent" style="display:none;">
+    <div id="dashboard-section">
+        <!-- Status -->
         <div class="card">
-            <div class="card-title">
-                <span>📋 ÚLTIMOS TRADES</span>
-                <button class="btn-clear-history" onclick="limparHistorico()">🗑️ LIMPAR HISTÓRICO</button>
+            <div class="card-title">📡 STATUS</div>
+            <div class="status-row">
+                <div><span class="dot" id="statusDot"></span> <span id="statusText">Desconectado</span></div>
+                <div class="balance"><span id="balance">0.00</span> <span id="currency">USD</span></div>
             </div>
-            <div id="tradesList">
-                <div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>
+            <button class="btn-primary" id="connectBtn" onclick="conectar()">🔌 CONECTAR</button>
+            <div id="connectStatus" class="text-center mt-2" style="font-size:11px; color:#ffaa00;"></div>
+        </div>
+        <!-- Modo de operação (3 modos) -->
+        <div class="card">
+            <div class="card-title">🎮 MODO DE OPERAÇÃO</div>
+            <div class="mode-selector">
+                <button id="modeAtivos" class="mode-btn active" onclick="setModo('ativos')">📈 ATIVOS</button>
+                <button id="modeDigitos" class="mode-btn" onclick="setModo('digitos')">🎲 DÍGITOS</button>
+                <button id="modeHybrid" class="mode-btn" onclick="setModo('hybrid')">🔗 HÍBRIDO</button>
+            </div>
+        </div>
+        <!-- Painel Ativos -->
+        <div id="modoAtivosPanel">
+            <div class="card">
+                <div class="card-title">📊 ATIVOS</div>
+                <div class="symbol-row" id="symbol-selector"></div>
+            </div>
+            <div class="card">
+                <div class="price-area">
+                    <div class="price" id="price">0.0000</div>
+                    <div><span id="signalBadge" class="signal-badge neutral">NEUTRAL</span><span id="signalConfidence" class="signal-confidence">0%</span></div>
+                </div>
+                <div class="indicators-row">
+                    <div class="indicator"><div class="label">TENDÊNCIA</div><div class="value" id="trendScore">-</div><div class="desc" id="trendDesc">---</div></div>
+                    <div class="indicator"><div class="label">RSI</div><div class="value" id="rsiScore">-</div><div class="desc" id="rsiDesc">---</div></div>
+                    <div class="indicator"><div class="label">MACD</div><div class="value" id="macdScore">-</div><div class="desc" id="macdDesc">---</div></div>
+                    <div class="indicator"><div class="label">BB</div><div class="value" id="bbScore">-</div><div class="desc" id="bbDesc">---</div></div>
+                </div>
+            </div>
+        </div>
+        <!-- Painel Dígitos -->
+        <div id="modoDigitosPanel" class="hidden">
+            <div class="card">
+                <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
+                <div class="display-digit-container">
+                    <div class="display-digit-header">
+                        <span>📺 PRÓXIMO DÍGITO EM</span>
+                        <span id="display-countdown" class="countdown">15s</span>
+                    </div>
+                    <div class="display-digit-value">
+                        <span id="display-digit" class="display-digit">-</span>
+                        <span id="display-parity" class="display-parity">---</span>
+                    </div>
+                </div>
+                <div class="manual-mode-checkbox">
+                    <input type="checkbox" id="toggleAlerts" checked> <span>🔔 Mostrar alertas automáticos (recomendações)</span>
+                </div>
+                <div id="alertBox" class="alert-box">
+                    <div id="alertMessage"></div>
+                    <div class="flex" style="justify-content: center; margin-top: 8px;">
+                        <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
+                        <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
+                    </div>
+                    <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
+                </div>
+                <div style="margin: 12px 0;">
+                    <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS</div>
+                    <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
+                        <div style="color:#62748c;">Aguardando dados...</div>
+                    </div>
+                </div>
+                <div class="trade-buttons" style="margin-top: 12px;">
+                    <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
+                    <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
+                </div>
+            </div>
+        </div>
+        <!-- Trading panel -->
+        <div class="card">
+            <div class="card-title">🎯 EXECUTAR TRADE</div>
+            <input type="number" id="amount" class="amount-input" value="0.35" step="0.01" min="0.35" max="100">
+            <div class="manual-mode-checkbox">
+                <input type="checkbox" id="manualMode"> <span>🔓 Modo Manual (ignorar sinais)</span>
+            </div>
+            <div id="hybridStatus" class="hybrid-status hidden">
+                <div id="hybridSignal"></div>
+                <div id="hybridConfidence"></div>
+            </div>
+            <div id="ativosButtons">
+                <div class="trade-buttons">
+                    <button class="btn-buy" id="hybridBuyBtn" onclick="executeTrade('BUY')">📈 COMPRAR</button>
+                    <button class="btn-sell" id="hybridSellBtn" onclick="executeTrade('SELL')">📉 VENDER</button>
+                </div>
+            </div>
+            <div id="digitosButtons" class="hidden">
+                <div class="trade-buttons">
+                    <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR</button>
+                    <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR</button>
+                </div>
+            </div>
+            <div class="flex">
+                <button class="btn-martingale" onclick="aplicarMartingale()">🎲 MARTINGALE</button>
+                <button class="btn-martingale-reset" onclick="resetarMartingale()">🔄 RESETAR</button>
+            </div>
+            <div class="martingale-status">
+                <div>Martingale: <span id="martingaleActive">DESATIVADO</span></div>
+                <div>Próximo valor: <span id="martingaleNext">$0.35</span></div>
+            </div>
+            <button class="btn-small" style="width:100%; margin-top:8px;" onclick="togglePause()" id="pauseBtn">⏸️ PAUSAR</button>
+        </div>
+    </div>
+    <!-- Afiliado -->
+    <div id="affiliate-section" class="hidden">
+        <div class="card">
+            <div class="card-title">🔗 SEU LINK</div>
+            <div class="link-copy">
+                <input type="text" id="referralLink" readonly value="Carregando...">
+                <button class="btn-small" onclick="copiarLink()">📋</button>
+            </div>
+            <div class="stats-grid" style="margin-top:15px;">
+                <div><div class="stat-value" id="refCount">0</div><div class="stat-label">Indicações</div></div>
+                <div><div class="stat-value" id="refCommission">$0</div><div class="stat-label">Comissão</div></div>
             </div>
         </div>
     </div>
-    <!-- Modal de login -->
-    <div id="authModal" class="modal">
-        <div class="modal-content">
-            <h2 style="color:#00f0b5; text-align:center;">FOLOMA</h2>
-            <div style="display:flex; gap:10px; margin:15px 0;">
-                <button class="btn-small" style="flex:1;" onclick="showAuthTab('login')">ENTRAR</button>
-                <button class="btn-small" style="flex:1;" onclick="showAuthTab('register')">REGISTAR</button>
-                <button class="btn-small" style="flex:1;" onclick="showForgotPassword()">RECUPERAR</button>
-            </div>
-            <div id="loginForm">
-                <input type="email" id="loginEmail" placeholder="Email">
-                <input type="password" id="loginPassword" placeholder="Senha">
-                <button class="btn-primary" onclick="login()">ENTRAR</button>
-            </div>
-            <div id="registerForm" style="display:none;">
-                <input type="text" id="regName" placeholder="Nome">
-                <input type="email" id="regEmail" placeholder="Email">
-                <input type="password" id="regPassword" placeholder="Senha (min 6)">
-                <input type="text" id="regReferral" placeholder="Código de indicação">
-                <button class="btn-primary" onclick="register()">CRIAR CONTA</button>
-            </div>
-            <div id="forgotForm" style="display:none;">
-                <input type="email" id="forgotEmail" placeholder="Email">
-                <button class="btn-primary" onclick="requestPasswordReset()">ENVIAR LINK</button>
-                <div id="forgotMessage" class="text-center mt-2" style="color:#ffaa00;"></div>
-            </div>
-            <div id="authError" class="text-center mt-2" style="color:#ff4d4d; font-size:12px;"></div>
+    <!-- Pagamento -->
+    <div id="payment-section" class="hidden">
+        <div class="card">
+            <div class="card-title">💰 DEPOSITAR</div>
+            <input type="number" id="depositAmount" placeholder="Valor" min="10" class="amount-input">
+            <select id="depositMethod" class="btn-small" style="width:100%;">
+                <option value="cryptocurrency">💎 Criptomoedas</option>
+                <option value="bank_transfer">🏦 Transferência</option>
+            </select>
+            <button class="btn-primary mt-2" onclick="realizarDeposito()">DEPOSITAR</button>
+        </div>
+        <div class="card">
+            <div class="card-title">💸 SACAR</div>
+            <input type="number" id="withdrawAmount" placeholder="Valor" min="10" class="amount-input">
+            <select id="withdrawMethod" class="btn-small" style="width:100%;">
+                <option value="cryptocurrency">💎 Criptomoedas</option>
+                <option value="bank_transfer">🏦 Transferência</option>
+            </select>
+            <button class="btn-primary mt-2" onclick="realizarSaque()">SACAR</button>
         </div>
     </div>
-    <script>
+    <!-- Configurações -->
+    <div id="settings-section" class="hidden">
+        <div class="card">
+            <div class="card-title">🏦 CONTA</div>
+            <div class="account-selector">
+                <button id="btnDemo" class="account-btn active" onclick="selectAccount('demo')">🎮 DEMO</button>
+                <button id="btnReal" class="account-btn" onclick="selectAccount('real')">💰 REAL</button>
+            </div>
+            <div id="accountInfo" class="text-center mt-2" style="font-size:11px; color:#62748c;"></div>
+        </div>
+        <div class="card">
+            <div class="card-title">🔑 TOKEN DERIV</div>
+            <input type="password" id="tokenInput" placeholder="Cole seu token aqui" class="amount-input">
+            <button class="btn-primary" onclick="saveToken()">💾 SALVAR</button>
+            <div id="tokenStatus" style="font-size:11px; color:#ffaa00; margin-top:8px;"></div>
+        </div>
+        <div class="card">
+            <div class="card-title">📊 ESTATÍSTICAS</div>
+            <div class="stats-grid">
+                <div><div class="stat-value" id="totalTrades">0</div><div class="stat-label">Trades</div></div>
+                <div><div class="stat-value" id="winRate">0%</div><div class="stat-label">Win Rate</div></div>
+                <div><div class="stat-value" id="profitLoss">$0</div><div class="stat-label">P/L</div></div>
+                <div><div class="stat-value" id="totalReturn">0%</div><div class="stat-label">Retorno</div></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-title">🔐 SEGURANÇA</div>
+            <button class="btn-secondary" onclick="showForgotPassword()">Esqueci a senha</button>
+        </div>
+    </div>
+    <!-- Administração (apenas admin) -->
+    <div id="admin-section" class="hidden">
+        <div class="card">
+            <div class="card-title">👑 GERIR UTILIZADORES</div>
+            <div id="adminUsersList">
+                <div class="text-center" style="padding:20px;">Carregando...</div>
+            </div>
+        </div>
+    </div>
+    <!-- Últimos trades -->
+    <div class="card">
+        <div class="card-title">
+            <span>📋 ÚLTIMOS TRADES</span>
+            <button class="btn-clear-history" onclick="limparHistorico()">🗑️ LIMPAR HISTÓRICO</button>
+        </div>
+        <div id="tradesList">
+            <div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>
+        </div>
+    </div>
+</div>
+<!-- Modal de login -->
+<div id="authModal" class="modal">
+    <div class="modal-content">
+        <h2 style="color:#00f0b5; text-align:center;">FOLOMA</h2>
+        <div style="display:flex; gap:10px; margin:15px 0;">
+            <button class="btn-small" style="flex:1;" onclick="showAuthTab('login')">ENTRAR</button>
+            <button class="btn-small" style="flex:1;" onclick="showAuthTab('register')">REGISTAR</button>
+            <button class="btn-small" style="flex:1;" onclick="showForgotPassword()">RECUPERAR</button>
+        </div>
+        <div id="loginForm">
+            <input type="email" id="loginEmail" placeholder="Email">
+            <input type="password" id="loginPassword" placeholder="Senha">
+            <button class="btn-primary" onclick="login()">ENTRAR</button>
+        </div>
+        <div id="registerForm" style="display:none;">
+            <input type="text" id="regName" placeholder="Nome">
+            <input type="email" id="regEmail" placeholder="Email">
+            <input type="password" id="regPassword" placeholder="Senha (min 6)">
+            <input type="text" id="regReferral" placeholder="Código de indicação">
+            <button class="btn-primary" onclick="register()">CRIAR CONTA</button>
+        </div>
+        <div id="forgotForm" style="display:none;">
+            <input type="email" id="forgotEmail" placeholder="Email">
+            <button class="btn-primary" onclick="requestPasswordReset()">ENVIAR LINK</button>
+            <div id="forgotMessage" class="text-center mt-2" style="color:#ffaa00;"></div>
+        </div>
+        <div id="authError" class="text-center mt-2" style="color:#ff4d4d; font-size:12px;"></div>
+    </div>
+<script>
         // ========== VARIÁVEIS GLOBAIS ==========
         let currentSection = 'dashboard';
         let selectedAccount = 'demo';
@@ -981,9 +980,10 @@
                 alertEvenBtn.style.display = 'inline-block';
             }
             if (currentAlertTimeout) clearTimeout(currentAlertTimeout);
+            // Alerta desaparece após 15 segundos (ou quando novo dígito aparecer)
             currentAlertTimeout = setTimeout(() => {
                 alertBox.classList.add('hide-alert');
-            }, 10000);
+            }, 15000);
         }
 
         document.getElementById('toggleAlerts')?.addEventListener('change', function(e) {
@@ -1350,9 +1350,15 @@
                     paused = bot.paused || false;
                     document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
                     
-                    // Dígitos
+                    // ========== DÍGITOS ==========
                     if (data.digits) {
                         const d = data.digits;
+                        const newDigit = d.last;
+                        if (newDigit !== undefined && newDigit !== lastKnownDigit) {
+                            console.log("🔁 Dígito mudou de", lastKnownDigit, "para", newDigit);
+                            hideCurrentAlert();
+                            lastKnownDigit = newDigit;
+                        }
                         if (d.recent && d.recent.length > 0) {
                             let slowHtml = '';
                             d.recent.forEach(digit => {
@@ -1378,7 +1384,7 @@
                         }
                     }
                     
-                    // Modo híbrido
+                    // ========== MODO HÍBRIDO ==========
                     if (modoAtual === 'hybrid') {
                         const hybridDiv = document.getElementById('hybridStatus');
                         hybridDiv.classList.remove('hidden');
@@ -1391,6 +1397,8 @@
                         let hybridColor = '#ffaa00';
                         let canTrade = false;
                         let combinedConf = 0;
+                        console.log("🔍 Híbrido - Ativo:", ativoSignal, "conf:", ativoConf);
+                        console.log("🔍 Híbrido - Dígitos:", digitRecommend, "conf:", digitConf);
                         if (ativoSignal === 'BUY' && digitRecommend === 'BUY') {
                             combinedConf = (ativoConf + digitConf) / 2;
                             hybridMessage = `✅ SINAIS CONVERGENTES (COMPRA) – Confiança combinada: ${combinedConf.toFixed(1)}%`;
@@ -1537,3 +1545,4 @@
     </script>
 </body>
 </html>
+        
