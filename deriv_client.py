@@ -189,7 +189,6 @@ class DerivWebSocketClient:
                 return False
 
             if is_digit:
-                # Dígitos: duração de 5 ticks (padrão que a Deriv aceita)
                 duration = 5
                 duration_unit = 't'
                 if contract_type == 'CALL':
@@ -197,7 +196,6 @@ class DerivWebSocketClient:
                 else:
                     contract_type_full = 'DIGITEVEN'
             else:
-                # Ativos: duração de 5 ticks
                 duration = 5
                 duration_unit = 't'
                 contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
@@ -206,7 +204,7 @@ class DerivWebSocketClient:
                 'amount': amount,
                 'contract_type': contract_type_full,
                 'is_digit': is_digit,
-                'user_prediction': None,   # será preenchido depois (para dígitos)
+                'user_prediction': None,
                 'timestamp': time.time(),
                 'status': 'waiting_proposal'
             }
@@ -225,7 +223,6 @@ class DerivWebSocketClient:
 
             logger.info(f"📝 Solicitando proposta: {contract_type_full} ${amount} (duração {duration}{duration_unit})")
             self.ws.send(json.dumps(proposal_msg))
-
             return True
 
         except Exception as e:
@@ -273,7 +270,6 @@ class DerivWebSocketClient:
                         'confidence': 70
                     }
                     self.trading_bot.register_trade(trade_data)
-                    logger.info(f"📝 Trade registado no histórico")
                 if contract_id:
                     self.active_trades[contract_id] = {
                         'contract_id': contract_id,
@@ -282,7 +278,6 @@ class DerivWebSocketClient:
                         'timestamp': time.time(),
                         'action': action
                     }
-                    logger.info(f"📌 Mapeado contract_id {contract_id}")
                 if contract_id:
                     self.subscribe_contract(contract_id)
                 self.pending_trade = None
