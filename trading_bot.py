@@ -106,6 +106,7 @@ class TradingBot:
         vote_rsi = 0
         vote_macd = 0
         vote_bb = 0
+        vote_stoch = 0
 
         # Tendência
         if 'ALTA' in analysis['trend']['desc']:
@@ -138,10 +139,19 @@ class TradingBot:
         elif 'VENDA' in analysis['bollinger']['desc']:
             vote_bb = -1
 
-        # Contagem de votos positivos e negativos
-        buy_votes = sum(1 for v in [vote_trend, vote_rsi, vote_macd, vote_bb] if v > 0)
-        sell_votes = sum(1 for v in [vote_trend, vote_rsi, vote_macd, vote_bb] if v < 0)
-        total_votes = buy_votes + sell_votes
+        # Estocástico
+        stoch_desc = analysis.get('stochastic', {}).get('desc', '---')
+        if 'SOBREVENDIDO' in stoch_desc:
+            vote_stoch = 1
+        elif 'SOBRECOMPRADO' in stoch_desc:
+            vote_stoch = -1
+        else:
+            vote_stoch = 0
+
+        votes = [v for v in [vote_trend, vote_rsi, vote_macd, vote_bb, vote_stoch] if v != 0]
+        buy_votes = sum(1 for v in votes if v > 0)
+        sell_votes = sum(1 for v in votes if v < 0)
+        total_votes = len(votes)
 
         if total_votes == 0:
             return 'NEUTRAL', 0
@@ -155,8 +165,14 @@ class TradingBot:
         else:
             return 'NEUTRAL', 0
 
-        # Confiança máxima 95% e nunca 100%
-        return signal, min(confidence, 95)
+        # Ajuste pelo momentum (opcional)
+        momentum = self.get_momentum()
+        if signal == 'BUY' and momentum > 0.1:
+            confidence = min(confidence + 5, 100)
+        elif signal == 'SELL' and momentum < -0.1:
+            confidence = min(confidence + 5, 100)
+
+        return signal, min(confidence, 100)
 
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
