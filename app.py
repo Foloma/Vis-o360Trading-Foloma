@@ -252,7 +252,6 @@ def api_admin_toggle_user():
     return jsonify({'status': 'ok', 'message': f'Utilizador {"ativado" if enable else "desativado"} com sucesso.'})
 
 # ========== RECUPERAÇÃO DE SENHA ==========
-# Configuração de email (substitua pelos seus dados)
 SMTP_SERVER = 'smtp.gmail.com'
 SMTP_PORT = 587
 SMTP_USER = 'seuemail@gmail.com'      # ALTERE AQUI
@@ -482,7 +481,7 @@ def api_trade_hybrid():
             logger.info("⚠️ Híbrido: Sinais divergentes")
             return jsonify({'error': '⚠️ Sinais divergentes. Aguarde convergência.'}), 400
 
-        min_hybrid = 60
+        min_hybrid = config.ADVANCED_STRATEGY.get('hybrid_min_confidence', 60)
         if combined_conf < min_hybrid:
             logger.info(f"❌ Híbrido: Confiança combinada baixa: {combined_conf:.1f}% (mínimo {min_hybrid}%)")
             return jsonify({'error': f'Confiança combinada baixa ({combined_conf:.1f}%)'}), 400
