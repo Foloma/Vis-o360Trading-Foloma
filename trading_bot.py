@@ -39,7 +39,7 @@ class TradingBot:
         }
 
         self.trades = deque(maxlen=100)
-        self.consecutive_losses = 0
+        self.consecutive_losses = 0   # ✅ FIX: agora são atualizados corretamente
         self.consecutive_wins = 0
 
         self.martingale = {
@@ -101,7 +101,6 @@ class TradingBot:
 
         analysis = self.last_analysis
 
-        # Votos: 1 = BUY, -1 = SELL, 0 = neutro
         vote_trend = 0
         vote_rsi = 0
         vote_macd = 0
@@ -165,7 +164,6 @@ class TradingBot:
         else:
             return 'NEUTRAL', 0
 
-        # Ajuste pelo momentum (opcional)
         momentum = self.get_momentum()
         if signal == 'BUY' and momentum > 0.1:
             confidence = min(confidence + 5, 100)
@@ -180,6 +178,7 @@ class TradingBot:
         self.stats['total'] += 1
         self.stats['total_invested'] += trade_data['amount']
         self.daily_stats['trades'] += 1
+        logger.info(f"📋 Trade registado: {trade_data.get('action')} ${trade_data.get('amount')} | ID: {trade_data.get('contract_id', 'N/A')}")
         self.update_stats()
 
     def update_stats(self):
@@ -192,6 +191,7 @@ class TradingBot:
                 profit_loss += trade.get('profit', 0)
             elif trade.get('result') == 'loss':
                 losses += 1
+                # ✅ FIX: Subtrair apenas o valor apostado (amount), não buy_price
                 profit_loss -= trade.get('amount', 0)
         self.stats['wins'] = wins
         self.stats['losses'] = losses
@@ -204,41 +204,73 @@ class TradingBot:
         updated = False
         for trade in self.trades:
             if trade.get('result') == 'pending':
-                if (now - trade['timestamp']).total_seconds() > 30:
+                elapsed = (now - trade['timestamp']).total_seconds()
+                if elapsed > 60:  # ✅ FIX: Aumentado para 60s (5 ticks podem demorar mais)
                     trade['result'] = 'loss'
                     trade['profit'] = 0
                     updated = True
-                    logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')}")
+                    logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')} | ID: {trade.get('contract_id', 'N/A')}")
         if updated:
             self.update_stats()
 
     def on_trade_result(self, result):
         try:
             logger.info(f"📊 [BOT] Processando resultado: {result}")
-            if len(self.trades) == 0:
-                logger.warning("Nenhum trade pendente")
-                return
-            last_trade = self.trades[-1]
+
+            contract_id = result.get('contract_id')
             profit = result.get('profit', 0)
             is_win = profit > 0
 
+            # ✅ FIX CRÍTICO: Encontrar o trade correto pelo contract_id
+            target_trade = None
+            if contract_id:
+                for trade in reversed(list(self.trades)):
+                    if trade.get('contract_id') == contract_id:
+                        target_trade = trade
+                        break
+
+            # Fallback: último trade pendente (se não há contract_id)
+            if target_trade is None:
+                for trade in reversed(list(self.trades)):
+                    if trade.get('result') == 'pending':
+                        target_trade = trade
+                        logger.warning("⚠️ Usando fallback: último trade pendente")
+                        break
+
+            if target_trade is None:
+                logger.warning("⚠️ Nenhum trade pendente encontrado para este resultado")
+                return
+
+            # ✅ FIX: Verificar se já foi processado (evitar duplicação)
+            if target_trade.get('result') != 'pending':
+                logger.warning(f"⚠️ Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando duplicado.")
+                return
+
             if is_win:
-                last_trade['result'] = 'win'
-                last_trade['profit'] = profit
+                target_trade['result'] = 'win'
+                target_trade['profit'] = profit
                 self.daily_stats['wins'] += 1
                 self.daily_stats['profit_loss'] += profit
-                logger.info(f"✅ GANHO! +${profit:.2f}")
+                # ✅ FIX: Atualizar consecutive stats
+                self.consecutive_wins += 1
+                self.consecutive_losses = 0
+                logger.info(f"✅ GANHO! +${profit:.2f} | Vitórias consecutivas: {self.consecutive_wins}")
             else:
-                loss = last_trade['amount']
-                last_trade['result'] = 'loss'
-                last_trade['profit'] = 0
+                loss = target_trade.get('amount', 0)
+                target_trade['result'] = 'loss'
+                target_trade['profit'] = 0
                 self.daily_stats['losses'] += 1
                 self.daily_stats['profit_loss'] -= loss
-                logger.info(f"❌ PERDA! -${loss:.2f}")
+                # ✅ FIX: Atualizar consecutive stats
+                self.consecutive_losses += 1
+                self.consecutive_wins = 0
+                logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
 
             self.update_stats()
+
             if self.client:
                 self.client.get_balance()
+
         except Exception as e:
             logger.error(f"Erro ao processar resultado: {e}")
 
@@ -283,7 +315,9 @@ class TradingBot:
             'stats': self.stats,
             'paused': self.paused,
             'martingale': self.get_martingale_status(),
-            'daily_stats': self.daily_stats
+            'daily_stats': self.daily_stats,
+            'consecutive_wins': self.consecutive_wins,
+            'consecutive_losses': self.consecutive_losses
         }
 
     def get_martingale_status(self):
@@ -318,11 +352,13 @@ class TradingBot:
             'step': self.martingale['step'],
             'next_amount': next_amount,
             'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
-            'message': f"📈 Martingale ativo - Passo {self.martingale['step']}/{max_steps} | Próximo valor: ${next_amount:.2f}"
+            'message': f"📈 Martingale ativo - Passo {self.martingale['step']}/{max_steps} | Próximo: ${next_amount:.2f}"
         }
 
     def reset_martingale(self):
         self.martingale = {'active': False, 'step': 0, 'original_amount': 0, 'last_result': None}
+        self.consecutive_losses = 0
+        self.consecutive_wins = 0
 
     def reset_stats(self):
         self.stats = {
@@ -335,6 +371,9 @@ class TradingBot:
             'total_return': 0
         }
         self.trades.clear()
+        self.consecutive_losses = 0
+        self.consecutive_wins = 0
         logger.info("📊 Estatísticas e histórico resetados")
 
 trading_bot = TradingBot()
+        
