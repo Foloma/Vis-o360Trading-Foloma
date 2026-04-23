@@ -238,3 +238,4 @@ class DigitAnalyzer:
         return self.countdown
 
 digit_analyzer = DigitAnalyzer(max_digits=50, analysis_interval=15)
+                
