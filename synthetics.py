@@ -1,141 +1,207 @@
 from collections import deque
 import time
 import logging
-from datetime import datetime
 import threading
 
 logger = logging.getLogger(__name__)
 
+
 class DigitAnalyzer:
-    def __init__(self, max_digits=50, analysis_interval=15):
-        # ✅ FIX: maxlen aumentado para 50 para ter dados suficientes
-        self.slow_digits = deque(maxlen=50)
-        self.analysis_interval = analysis_interval
-        self.last_analysis = time.time()
-        self.countdown = analysis_interval
-        self.analysis_in_progress = False
+    """
+    Captura 1 dígito a cada 15 segundos (dígito lento).
+    - Exibe apenas esses dígitos na interface.
+    - Analisa padrões PAR/ÍMPAR nesses dígitos.
+    - Expõe o countdown preciso até ao próximo dígito.
+    - Quando o utilizador aposta em PAR/ÍMPAR, o contrato deve durar
+      exatamente `countdown` segundos para expirar no próximo dígito.
+    """
+
+    DISPLAY_INTERVAL = 15  # segundos entre cada dígito lento
+
+    def __init__(self, max_digits=50):
+        self.slow_digits = deque(maxlen=max_digits)
+
+        # Dígito atualmente em exibição (último dígito lento capturado)
         self.current_display_digit = None
         self.current_display_parity = '---'
-        self.next_display_time = 0
 
-        # ✅ FIX: display_interval reduzido — 1 dígito por tick (não a cada 15s)
-        # Cada tick da Deriv é ~1s, por isso registamos todos os ticks relevantes
-        self.display_interval = 1
+        # Controlo de tempo para captura do próximo dígito lento
+        self._next_capture_time = time.time() + self.DISPLAY_INTERVAL
 
-        # ✅ FIX: Lock para thread safety
+        # Countdown em segundos até ao próximo dígito (atualizado por thread)
+        self.countdown = self.DISPLAY_INTERVAL
+
+        # Lock para thread safety
         self._lock = threading.Lock()
 
+        # Análise atual
         self.last_analysis_data = {
             'streak': 0,
             'streak_parity': '---',
             'recommended_action': None,
             'confidence': 0,
-            'pattern': 'Aguardando análise...',
+            'pattern': 'Aguardando primeiros dígitos...',
             'alert': None,
-            'reason': 'Aguardando dados...',
-            'countdown': analysis_interval,
+            'reason': f'Próximo dígito em {self.DISPLAY_INTERVAL}s...',
+            'countdown': self.DISPLAY_INTERVAL,
+            'seconds_to_next': self.DISPLAY_INTERVAL,
             'odd_pct': 0,
             'even_pct': 0,
-            'recent_parity': []
+            'recent_parity': [],
+            'total_digits': 0
         }
 
-        self.countdown_thread_running = True
-        self.start_countdown_thread()
+        # Iniciar thread de countdown
+        self._running = True
+        self._start_countdown_thread()
 
-    def start_countdown_thread(self):
-        def update_countdown():
-            while self.countdown_thread_running:
-                time.sleep(1)
-                elapsed = time.time() - self.last_analysis
-                self.countdown = max(0, self.analysis_interval - int(elapsed))
+    # ─────────────────────────────────────────────────────────────
+    # THREAD DE COUNTDOWN (atualiza a cada segundo)
+    # ─────────────────────────────────────────────────────────────
+    def _start_countdown_thread(self):
+        def _run():
+            while self._running:
+                time.sleep(0.5)
+                now = time.time()
+                remaining = max(0.0, self._next_capture_time - now)
+                secs = int(remaining) + 1  # arredondar para cima
+
                 with self._lock:
-                    self.last_analysis_data['countdown'] = self.countdown
-                if self.countdown <= 0 and not self.analysis_in_progress:
-                    self.trigger_analysis()
-        threading.Thread(target=update_countdown, daemon=True).start()
+                    self.countdown = secs
+                    self.last_analysis_data['countdown'] = secs
+                    self.last_analysis_data['seconds_to_next'] = secs
 
+        threading.Thread(target=_run, daemon=True).start()
+
+    # ─────────────────────────────────────────────────────────────
+    # RECEBER TICK DA DERIV (chamado a cada tick ~1s)
+    # ─────────────────────────────────────────────────────────────
     def add_tick(self, price):
+        """
+        Recebe cada tick da Deriv.
+        Só regista o dígito lento quando os 15 segundos passam.
+        O dígito exibido na interface só muda de 15 em 15 segundos.
+        """
         try:
-            price_str = f"{price:.5f}"  # ✅ FIX: usar 5 casas decimais para maior precisão
+            # Calcular dígito do tick atual
+            price_str = f"{price:.5f}"
             last_digit = int(price_str[-1])
             parity = 'IMPAR' if last_digit % 2 != 0 else 'PAR'
 
             now = time.time()
 
-            # ✅ FIX: Registar dígito a cada tick (não a cada 15 segundos)
-            with self._lock:
-                self.current_display_digit = last_digit
-                self.current_display_parity = parity
-                self.slow_digits.append(last_digit)
+            # ✅ Só captura dígito lento quando os 15 segundos terminam
+            if now >= self._next_capture_time:
+                # Definir próxima captura exatamente 15s depois
+                self._next_capture_time = now + self.DISPLAY_INTERVAL
 
-            if now >= self.next_display_time:
-                self.next_display_time = now + self.display_interval
-                self._generate_recommendation()
+                # Atualizar dígito exibido na interface
+                with self._lock:
+                    self.current_display_digit = last_digit
+                    self.current_display_parity = parity
+                    self.slow_digits.append(last_digit)
+                    digits_snap = list(self.slow_digits)
+
+                logger.info(
+                    f"⏱️ [15s] Dígito capturado: {last_digit} ({parity}) "
+                    f"| Total: {len(digits_snap)}"
+                )
+                # Gerar análise com os novos dados
+                self._generate_recommendation(digits_snap)
 
             return True, last_digit
+
         except Exception as e:
             logger.error(f"Erro ao processar tick: {e}")
             return False, None
 
-    def _generate_recommendation(self):
-        with self._lock:
-            digits_snapshot = list(self.slow_digits)
-
-        if len(digits_snapshot) < 3:
-            return
-
-        streak, streak_parity = self._calc_streak(digits_snapshot)
-
-        if streak >= 3:
-            confidence = min(65 + (streak - 3) * 10, 95)
-            if streak_parity == 'PAR':
-                recommended_action = 'BUY'   # próximo ÍMPAR (DIGITODD)
-                alert = 'RECOMENDADO'
-                reason = f'⚠️ {streak} PARES seguidos! Próximo ÍMPAR (conf. {confidence}%)'
-                pattern_desc = f'{streak} PARES consecutivos'
-            else:
-                recommended_action = 'SELL'  # próximo PAR (DIGITEVEN)
-                alert = 'RECOMENDADO'
-                reason = f'⚠️ {streak} ÍMPARES seguidos! Próximo PAR (conf. {confidence}%)'
-                pattern_desc = f'{streak} ÍMPARES consecutivos'
-
-            self._update_analysis(
-                recommended_action, confidence, alert,
-                reason, pattern_desc, streak, streak_parity,
-                digits_snapshot
-            )
-            logger.info(f"⚡ Recomendação gerada: {reason}")
-        else:
-            # ✅ FIX CRÍTICO: Resetar recomendação quando não há padrão forte
-            self._reset_recommendation(streak, streak_parity, digits_snapshot)
-
-    def _reset_recommendation(self, streak, streak_parity, digits_snapshot):
-        """Limpa a recomendação quando não há padrão suficiente."""
-        odd_count = sum(1 for d in digits_snapshot if d % 2 != 0)
-        total = len(digits_snapshot)
+    # ─────────────────────────────────────────────────────────────
+    # ANÁLISE DE PADRÕES
+    # ─────────────────────────────────────────────────────────────
+    def _generate_recommendation(self, digits_snap):
+        total = len(digits_snap)
+        odd_count = sum(1 for d in digits_snap if d % 2 != 0)
         odd_pct = round((odd_count / total) * 100, 1) if total > 0 else 0
         even_pct = round(100 - odd_pct, 1)
+        recent_parity = ['IMPAR' if d % 2 != 0 else 'PAR' for d in digits_snap[-20:]]
 
+        if total < 3:
+            self._set_no_signal(
+                digits_snap, odd_pct, even_pct, recent_parity,
+                reason=f'Aguardando mais dígitos ({total}/3 mínimo)...'
+            )
+            return
+
+        streak, streak_parity = self._calc_streak(digits_snap)
+
+        if streak >= 3:
+            confidence = min(60 + (streak - 3) * 10, 95)
+
+            if streak_parity == 'PAR':
+                action = 'BUY'   # → DIGITODD (próximo ÍMPAR)
+                reason = (
+                    f'🔥 {streak} PARES consecutivos! '
+                    f'Provável próximo: ÍMPAR. Confiança: {confidence}%'
+                )
+                pattern = f'{streak} PARES seguidos → próximo ÍMPAR'
+            else:
+                action = 'SELL'  # → DIGITEVEN (próximo PAR)
+                reason = (
+                    f'🔥 {streak} ÍMPARES consecutivos! '
+                    f'Provável próximo: PAR. Confiança: {confidence}%'
+                )
+                pattern = f'{streak} ÍMPARES seguidos → próximo PAR'
+
+            with self._lock:
+                self.last_analysis_data.update({
+                    'streak': streak,
+                    'streak_parity': streak_parity,
+                    'recommended_action': action,
+                    'confidence': confidence,
+                    'pattern': pattern,
+                    'alert': 'SINAL ATIVO',
+                    'reason': reason,
+                    'last_digit': self.current_display_digit,
+                    'last_parity': self.current_display_parity,
+                    'recent_parity': recent_parity,
+                    'odd_pct': odd_pct,
+                    'even_pct': even_pct,
+                    'total_digits': total
+                })
+            logger.info(f"⚡ Sinal: {reason}")
+        else:
+            self._set_no_signal(
+                digits_snap, odd_pct, even_pct, recent_parity,
+                streak=streak, streak_parity=streak_parity,
+                reason=f'Streak: {streak} {streak_parity}. Aguarda 3+ consecutivos.'
+            )
+
+    def _set_no_signal(self, digits_snap, odd_pct=0, even_pct=0,
+                       recent_parity=None, streak=0, streak_parity='---', reason=''):
+        if recent_parity is None:
+            recent_parity = []
         with self._lock:
             self.last_analysis_data.update({
                 'streak': streak,
                 'streak_parity': streak_parity,
-                'recommended_action': None,      # ✅ Sem recomendação ativa
+                'recommended_action': None,
                 'confidence': 0,
-                'pattern': f'Streak atual: {streak} ({streak_parity})',
+                'pattern': f'Streak: {streak} ({streak_parity})',
                 'alert': None,
-                'reason': f'Padrão insuficiente (mín. 3 consecutivos). Streak atual: {streak}',
+                'reason': reason,
                 'last_digit': self.current_display_digit,
                 'last_parity': self.current_display_parity,
-                'recent_parity': ['IMPAR' if d % 2 != 0 else 'PAR' for d in digits_snapshot[-20:]],
+                'recent_parity': recent_parity,
                 'odd_pct': odd_pct,
                 'even_pct': even_pct,
-                'countdown': self.countdown
+                'total_digits': len(digits_snap)
             })
 
+    # ─────────────────────────────────────────────────────────────
+    # CÁLCULO DE STREAK
+    # ─────────────────────────────────────────────────────────────
     def _calc_streak(self, digits_list):
-        """Calcula streak a partir de uma lista (thread-safe)."""
-        if len(digits_list) < 2:
+        if not digits_list:
             return 0, '---'
         streak = 1
         last_parity = 'IMPAR' if digits_list[-1] % 2 != 0 else 'PAR'
@@ -147,59 +213,20 @@ class DigitAnalyzer:
                 break
         return streak, last_parity
 
-    def get_streak_info(self):
-        with self._lock:
-            digits_snapshot = list(self.slow_digits)
-        return self._calc_streak(digits_snapshot)
+    # ─────────────────────────────────────────────────────────────
+    # API PÚBLICA
+    # ─────────────────────────────────────────────────────────────
 
-    def _update_analysis(self, action, confidence, alert, reason, pattern, streak, streak_parity, digits_snapshot):
-        odd_count = sum(1 for d in digits_snapshot if d % 2 != 0)
-        total = len(digits_snapshot)
-        odd_pct = round((odd_count / total) * 100, 1) if total > 0 else 0
-        even_pct = round(100 - odd_pct, 1)
+    def get_seconds_to_next_digit(self):
+        """
+        Retorna quantos segundos faltam para o próximo dígito lento.
+        Usado pelo deriv_client para definir a duração do contrato.
+        """
+        remaining = max(1, int(self._next_capture_time - time.time()) + 1)
+        return remaining
 
-        with self._lock:
-            self.last_analysis_data.update({
-                'streak': streak,
-                'streak_parity': streak_parity,
-                'recommended_action': action,
-                'confidence': confidence,
-                'pattern': pattern,
-                'alert': alert,
-                'reason': reason,
-                'last_digit': self.current_display_digit,
-                'last_parity': self.current_display_parity,
-                'recent_parity': ['IMPAR' if d % 2 != 0 else 'PAR' for d in digits_snapshot[-20:]],
-                'odd_pct': odd_pct,
-                'even_pct': even_pct,
-                'countdown': self.countdown
-            })
-
-    def trigger_analysis(self):
-        # ✅ FIX: Guard duplo com lock
-        if self.analysis_in_progress:
-            return
-        self.analysis_in_progress = True
-        self.last_analysis = time.time()
-        try:
-            self._generate_recommendation()
-            with self._lock:
-                self.last_analysis_data['countdown'] = self.analysis_interval
-            logger.info(f"📊 ANÁLISE PERIÓDICA concluída. Streak: {self.last_analysis_data.get('streak')}")
-        except Exception as e:
-            logger.error(f"Erro na análise: {e}")
-        finally:
-            # ✅ FIX: sempre liberar o flag, mesmo em caso de erro
-            self.analysis_in_progress = False
-
-    def get_next_display_digit(self):
-        now = time.time()
-        remaining = max(0, int(self.next_display_time - now)) if self.next_display_time > 0 else 0
-        return self.current_display_digit, self.current_display_parity, remaining
-
-    def get_recent_digits(self, count=20):
-        with self._lock:
-            return list(self.slow_digits)[-count:] if self.slow_digits else []
+    def get_countdown(self):
+        return self.countdown
 
     def get_current_digit(self):
         return self.current_display_digit
@@ -207,35 +234,42 @@ class DigitAnalyzer:
     def get_current_parity(self):
         return self.current_display_parity
 
+    def get_next_display_digit(self):
+        return self.current_display_digit, self.current_display_parity, self.countdown
+
     def get_analysis(self):
         with self._lock:
             return dict(self.last_analysis_data)
 
+    def get_recent_digits(self, count=20):
+        with self._lock:
+            return list(self.slow_digits)[-count:]
+
+    def get_streak_info(self):
+        with self._lock:
+            snap = list(self.slow_digits)
+        return self._calc_streak(snap)
+
     def get_stats(self):
         with self._lock:
-            digits_snapshot = list(self.slow_digits)
-
-        if not digits_snapshot:
+            snap = list(self.slow_digits)
+        if not snap:
             return {
                 'total': 0, 'odd_pct': 0, 'even_pct': 0,
                 'current_streak': 0, 'streak_parity': '---', 'recent': []
             }
-
-        total = len(digits_snapshot)
-        odd_count = sum(1 for d in digits_snapshot if d % 2 != 0)
-        streak, streak_parity = self._calc_streak(digits_snapshot)
-
+        total = len(snap)
+        odd_count = sum(1 for d in snap if d % 2 != 0)
+        streak, streak_parity = self._calc_streak(snap)
         return {
             'total': total,
             'odd_pct': round((odd_count / total) * 100, 1),
             'even_pct': round(100 - (odd_count / total) * 100, 1),
             'current_streak': streak,
             'streak_parity': streak_parity,
-            'recent': digits_snapshot[-20:]
+            'recent': snap[-20:]
         }
 
-    def get_countdown(self):
-        return self.countdown
 
-digit_analyzer = DigitAnalyzer(max_digits=50, analysis_interval=15)
-                
+# Instância global
+digit_analyzer = DigitAnalyzer(max_digits=50)
