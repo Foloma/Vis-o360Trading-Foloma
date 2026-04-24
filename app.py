@@ -8,6 +8,7 @@ import json
 import os
 from collections import deque
 from datetime import datetime
+from functools import wraps   # ✅ FIX: necessário para require_auth funcionar corretamente
 import secrets
 import smtplib
 from email.mime.text import MIMEText
@@ -83,12 +84,13 @@ payment_system = None
 def on_tick_callback(tick):
     trading_bot.on_tick(tick)
 
+# ✅ FIX: usar @wraps para evitar conflitos de nomes de rotas no Flask
 def require_auth(f):
+    @wraps(f)
     def decorated(*args, **kwargs):
         if 'user_id' not in session:
             return jsonify({'error': 'Não autenticado'}), 401
         return f(*args, **kwargs)
-    decorated.__name__ = f.__name__
     return decorated
 
 # ========== ROTAS DE AUTENTICAÇÃO ==========
@@ -118,18 +120,17 @@ def api_register():
         email = data.get('email', '').strip().lower()
         password = data.get('password', '')
         referral_code = data.get('referral_code', '')
-        
+
         if not name or not email or not password:
             return jsonify({'error': 'Todos os campos são obrigatórios'}), 400
         if len(password) < 6:
             return jsonify({'error': 'Senha deve ter pelo menos 6 caracteres'}), 400
-        
         if email in users:
             return jsonify({'error': 'Email já registado'}), 400
-        
+
         user_id = str(int(time.time() * 1000))
         password_hash = hashlib.sha256(password.encode()).hexdigest()
-        
+
         users[email] = {
             'id': user_id, 'name': name, 'email': email, 'password': password_hash,
             'deriv_token': None, 'deriv_account_type': None,
@@ -138,13 +139,13 @@ def api_register():
             'active': True
         }
         save_users(users)
-        
+
         if referral_code:
             for u_email, u_data in users.items():
                 if u_data.get('referral_link_code') == referral_code:
                     affiliate.track_referral(u_data['id'], user_id)
                     break
-        
+
         return jsonify({'status': 'ok', 'message': 'Conta criada com sucesso!'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -163,14 +164,14 @@ def api_login():
         password_hash = hashlib.sha256(password.encode()).hexdigest()
         if user['password'] != password_hash:
             return jsonify({'error': 'Senha incorreta'}), 400
-        
+
         user['last_login'] = time.time()
         save_users(users)
-        
+
         session['user_id'] = user['id']
         session['user_name'] = user['name']
         session['user_email'] = user['email']
-        
+
         return jsonify({'status': 'ok', 'user': {
             'id': user['id'],
             'name': user['name'],
@@ -327,56 +328,27 @@ def api_connect():
         token = user.get('deriv_token')
         if not token:
             return jsonify({'error': 'Token não configurado. Configure o token nas definições.'}), 400
-        
+
         if account_type == 'real':
             config.REAL_API_TOKEN = token
             config.MARKUP_PERCENTAGE = 0.5
         else:
             config.DEMO_API_TOKEN = token
-        
-        # ════════════════════════════════════════════════════════════════
-# PATCH PARA app.py — dentro da função api_connect()
-# Adicione esta linha DEPOIS de criar o deriv_client e ANTES de connect()
-# ════════════════════════════════════════════════════════════════
 
-# Linha a adicionar em api_connect, depois de:
-#   deriv_client = DerivWebSocketClient(config, on_tick_callback)
-#   deriv_client.set_user_token(token)
-#   deriv_client.set_trading_bot(trading_bot)
-#
-# ADICIONAR:
-#   deriv_client.set_digit_analyzer(digit_analyzer)   # ← ESTA LINHA
-#
-# Exemplo do bloco completo em api_connect:
-
-"""
-deriv_client = DerivWebSocketClient(config, on_tick_callback)
-deriv_client.set_user_token(token)
-deriv_client.set_trading_bot(trading_bot)
-deriv_client.set_digit_analyzer(digit_analyzer)      # ← NOVA LINHA
-deriv_client.connect()
-time.sleep(2)
-deriv_client.subscribe_ticks(symbol)
-trading_bot.start(deriv_client)
-payment_system = PaymentSystem(deriv_client)
-deriv_client.set_payment_system(payment_system)
-"""
-
-# ════════════════════════════════════════════════════════════════
-# COMO FUNCIONA O FLUXO COMPLETO DOS DÍGITOS:
-#
-# 1. Cada tick da Deriv chega ao digit_analyzer via on_tick_callback
-# 2. digit_analyzer só captura 1 dígito a cada 15 segundos
-# 3. A interface exibe esses dígitos lentos + countdown até ao próximo
-# 4. Quando o utilizador clica em PAR ou ÍMPAR:
-#      → api_trade_digit é chamado
-#      → deriv_client.place_trade(is_digit=True) é chamado
-#      → deriv_client pergunta ao digit_analyzer: "quanto tempo falta?"
-#      → o contrato dura exatamente esse número de segundos
-#      → o contrato expira quando o próximo dígito de 15s aparece
-#      → a Deriv resolve o contrato nesse momento
-# ════════════════════════════════════════════════════════════════
-
+        deriv_client = DerivWebSocketClient(config, on_tick_callback)
+        deriv_client.set_user_token(token)
+        deriv_client.set_trading_bot(trading_bot)
+        deriv_client.set_digit_analyzer(digit_analyzer)  # ✅ Liga o digit_analyzer ao cliente
+        deriv_client.connect()
+        time.sleep(2)
+        deriv_client.subscribe_ticks(symbol)
+        trading_bot.start(deriv_client)
+        payment_system = PaymentSystem(deriv_client)
+        deriv_client.set_payment_system(payment_system)
+        return jsonify({'status': 'conectando', 'account_type': account_type, 'is_demo': account_type == 'demo'})
+    except Exception as e:
+        logger.error(f"❌ Erro: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/status')
 @require_auth
@@ -392,7 +364,8 @@ def api_status():
             'stats': digit_analyzer.get_stats(),
             'analysis': digit_analyzer.get_analysis(),
             'recent': digit_analyzer.get_recent_digits(20),
-            'countdown': digit_analyzer.get_countdown()
+            'countdown': digit_analyzer.get_countdown(),
+            'seconds_to_next': digit_analyzer.get_seconds_to_next_digit()  # ✅ para a interface
         }
         return jsonify({'bot': status, 'digits': digits, 'symbols': config.AVAILABLE_SYMBOLS})
     except Exception as e:
@@ -408,6 +381,7 @@ def api_display_digit():
             'digit': digit,
             'parity': parity,
             'countdown': countdown,
+            'seconds_to_next': digit_analyzer.get_seconds_to_next_digit(),  # ✅ para a interface
             'timestamp': time.time()
         })
     except Exception as e:
@@ -455,25 +429,48 @@ def api_trade():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ========== TRADE DE DÍGITO (PAR / ÍMPAR) ==========
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
 def api_trade_digit():
     try:
         data = request.json
-        prediction = data.get('prediction')
+        prediction = data.get('prediction')   # 'odd' ou 'even'
         amount = float(data.get('amount', 0.35))
+
         if not deriv_client or not deriv_client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
         if amount < 0.35 or amount > 100:
             return jsonify({'error': 'Valor inválido'}), 400
-        # Sem verificação de confiança (operação manual)
+        if prediction not in ('odd', 'even'):
+            return jsonify({'error': 'Previsão inválida. Use "odd" ou "even"'}), 400
+
+        # ✅ Verificar que há tempo suficiente para o próximo dígito
+        seconds_to_next = digit_analyzer.get_seconds_to_next_digit()
+        if seconds_to_next < 3:
+            return jsonify({
+                'error': f'Dígito a sair em {seconds_to_next}s. Aguarde o próximo ciclo de 15s.'
+            }), 400
+
+        # 'odd' → DIGITODD (ÍMPAR) → CALL
+        # 'even' → DIGITEVEN (PAR) → PUT
         contract_type = 'CALL' if prediction == 'odd' else 'PUT'
-        success = deriv_client.place_trade(contract_type=contract_type, amount=amount, is_digit=True)
+
+        success = deriv_client.place_trade(
+            contract_type=contract_type,
+            amount=amount,
+            is_digit=True   # ✅ duração sincronizada com o próximo dígito de 15s
+        )
+
         if success:
-            response = {'status': 'ok', 'message': f'Aposta em {prediction.upper()} enviada!'}
             if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
                 affiliate.calculate_commission(amount, deriv_client.markup_percentage)
-            return jsonify(response)
+            label = 'ÍMPAR' if prediction == 'odd' else 'PAR'
+            return jsonify({
+                'status': 'ok',
+                'message': f'✅ Aposta em {label} enviada! Resultado em ~{seconds_to_next}s.',
+                'seconds_to_next': seconds_to_next
+            })
         else:
             return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
@@ -513,7 +510,6 @@ def api_trade_hybrid():
 
         min_hybrid = config.ADVANCED_STRATEGY.get('hybrid_min_confidence', 60)
         if combined_conf < min_hybrid:
-            logger.info(f"❌ Híbrido: Confiança combinada baixa: {combined_conf:.1f}% (mínimo {min_hybrid}%)")
             return jsonify({'error': f'Confiança combinada baixa ({combined_conf:.1f}%)'}), 400
 
         contract_type = 'CALL' if action == 'BUY' else 'PUT'
@@ -521,7 +517,7 @@ def api_trade_hybrid():
         if success:
             if hasattr(deriv_client, 'markup_percentage') and deriv_client.markup_percentage > 0:
                 affiliate.calculate_commission(amount, deriv_client.markup_percentage)
-            logger.info(f"✅ Híbrido: Trade {action} executado com confiança {combined_conf:.1f}%")
+            logger.info(f"✅ Híbrido: Trade {action} com confiança {combined_conf:.1f}%")
             return jsonify({'status': 'ok', 'message': message, 'confidence': combined_conf})
         else:
             return jsonify({'error': 'Falha no trade'}), 500
