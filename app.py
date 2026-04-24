@@ -1,4 +1,7 @@
-from flask import Flask, render_template, jsonify, request, session
+
+# Criar app.py COMPLETO e funcional
+
+app_completo = '''from flask import Flask, render_template, jsonify, request, session
 import threading
 import time
 import logging
@@ -8,7 +11,7 @@ import json
 import os
 from collections import deque
 from datetime import datetime
-from functools import wraps   # ✅ FIX: necessário para require_auth funcionar corretamente
+from functools import wraps
 import secrets
 import smtplib
 from email.mime.text import MIMEText
@@ -84,7 +87,6 @@ payment_system = None
 def on_tick_callback(tick):
     trading_bot.on_tick(tick)
 
-# ✅ FIX: usar @wraps para evitar conflitos de nomes de rotas no Flask
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -255,8 +257,8 @@ def api_admin_toggle_user():
 # ========== RECUPERAÇÃO DE SENHA ==========
 SMTP_SERVER = 'smtp.gmail.com'
 SMTP_PORT = 587
-SMTP_USER = 'seuemail@gmail.com'      # ALTERE AQUI
-SMTP_PASSWORD = 'sua_senha_app'       # ALTERE AQUI
+SMTP_USER = 'seuemail@gmail.com'
+SMTP_PASSWORD = 'sua_senha_app'
 
 reset_tokens = {}
 
@@ -338,7 +340,7 @@ def api_connect():
         deriv_client = DerivWebSocketClient(config, on_tick_callback)
         deriv_client.set_user_token(token)
         deriv_client.set_trading_bot(trading_bot)
-        deriv_client.set_digit_analyzer(digit_analyzer)  # ✅ Liga o digit_analyzer ao cliente
+        deriv_client.set_digit_analyzer(digit_analyzer)
         deriv_client.connect()
         time.sleep(2)
         deriv_client.subscribe_ticks(symbol)
@@ -350,6 +352,7 @@ def api_connect():
         logger.error(f"❌ Erro: {e}")
         return jsonify({'error': str(e)}), 500
 
+# ✅ CORRIGIDO: /api/status com janela de execução para dígitos
 @app.route('/api/status')
 @require_auth
 def api_status():
@@ -358,14 +361,25 @@ def api_status():
             trading_bot.balance = deriv_client.balance
             trading_bot.currency = deriv_client.currency
         status = trading_bot.get_status()
+        
+        # Incluir janela de execução no status dos dígitos
+        digit_stats = digit_analyzer.get_stats()
+        digit_analysis = digit_analyzer.get_analysis()
+        
         digits = {
             'last': digit_analyzer.get_current_digit(),
             'parity': digit_analyzer.get_current_parity(),
-            'stats': digit_analyzer.get_stats(),
-            'analysis': digit_analyzer.get_analysis(),
+            'stats': digit_stats,
+            'analysis': digit_analysis,
             'recent': digit_analyzer.get_recent_digits(20),
             'countdown': digit_analyzer.get_countdown(),
-            'seconds_to_next': digit_analyzer.get_seconds_to_next_digit()  # ✅ para a interface
+            'seconds_to_next': digit_analyzer.get_seconds_to_next_digit(),
+            # Campos para controle de execução no frontend
+            'can_execute': digit_stats.get('can_execute', True),
+            'execution_time_remaining': digit_stats.get('execution_time_remaining', 0),
+            'execution_window': digit_stats.get('execution_window', 3),
+            'block_threshold': digit_stats.get('block_threshold', 3),
+            'display_interval': digit_stats.get('display_interval', 15)
         }
         return jsonify({'bot': status, 'digits': digits, 'symbols': config.AVAILABLE_SYMBOLS})
     except Exception as e:
@@ -377,11 +391,16 @@ def api_status():
 def api_display_digit():
     try:
         digit, parity, countdown = digit_analyzer.get_next_display_digit()
+        stats = digit_analyzer.get_stats()
         return jsonify({
             'digit': digit,
             'parity': parity,
             'countdown': countdown,
-            'seconds_to_next': digit_analyzer.get_seconds_to_next_digit(),  # ✅ para a interface
+            'seconds_to_next': digit_analyzer.get_seconds_to_next_digit(),
+            'can_execute': stats.get('can_execute', True),
+            'execution_time_remaining': stats.get('execution_time_remaining', 0),
+            'execution_window': stats.get('execution_window', 3),
+            'block_threshold': stats.get('block_threshold', 3),
             'timestamp': time.time()
         })
     except Exception as e:
@@ -429,7 +448,7 @@ def api_trade():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ========== TRADE DE DÍGITO (PAR / ÍMPAR) ==========
+# ✅ CORRIGIDO: /api/trade/digit com janela de execução
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
 def api_trade_digit():
@@ -445,11 +464,22 @@ def api_trade_digit():
         if prediction not in ('odd', 'even'):
             return jsonify({'error': 'Previsão inválida. Use "odd" ou "even"'}), 400
 
-        # ✅ Verificar que há tempo suficiente para o próximo dígito
+        # Verificar janela de execução
+        digit_stats = digit_analyzer.get_stats()
+        can_execute = digit_stats.get('can_execute', True)
+        execution_time_remaining = digit_stats.get('execution_time_remaining', 0)
         seconds_to_next = digit_analyzer.get_seconds_to_next_digit()
-        if seconds_to_next < 3:
+        
+        # Se não está na janela de execução (passaram mais de 3s desde o último dígito)
+        if not can_execute:
             return jsonify({
-                'error': f'Dígito a sair em {seconds_to_next}s. Aguarde o próximo ciclo de 15s.'
+                'error': f'⏱️ Janela de execução fechada. Aguarde {seconds_to_next}s pelo próximo dígito.'
+            }), 400
+        
+        # Se está muito perto do próximo dígito (faltam <= 3s)
+        if seconds_to_next <= digit_stats.get('block_threshold', 3):
+            return jsonify({
+                'error': f'⚠️ Muito perto do próximo dígito ({seconds_to_next}s). Aguarde o ciclo de 15s.'
             }), 400
 
         # 'odd' → DIGITODD (ÍMPAR) → CALL
@@ -459,7 +489,7 @@ def api_trade_digit():
         success = deriv_client.place_trade(
             contract_type=contract_type,
             amount=amount,
-            is_digit=True   # ✅ duração sincronizada com o próximo dígito de 15s
+            is_digit=True
         )
 
         if success:
@@ -469,7 +499,8 @@ def api_trade_digit():
             return jsonify({
                 'status': 'ok',
                 'message': f'✅ Aposta em {label} enviada! Resultado em ~{seconds_to_next}s.',
-                'seconds_to_next': seconds_to_next
+                'seconds_to_next': seconds_to_next,
+                'execution_time_remaining': execution_time_remaining
             })
         else:
             return jsonify({'error': 'Falha no trade'}), 500
@@ -670,3 +701,12 @@ def api_withdraw():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+'''
+
+with open('/mnt/agents/output/app.py', 'w') as f:
+    f.write(app_completo)
+
+print("✅ app.py COMPLETO criado!")
+print("   - /api/status: inclui can_execute, execution_time_remaining")
+print("   - /api/trade/digit: verifica janela antes de aceitar")
+print("   - /api/display_digit: inclui campos de controle de execução")
