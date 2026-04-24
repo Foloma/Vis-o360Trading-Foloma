@@ -1,4 +1,5 @@
 from collections import deque
+from decimal import Decimal
 import time
 import logging
 import threading
@@ -11,9 +12,7 @@ class DigitAnalyzer:
     Captura 1 dígito a cada 15 segundos (dígito lento).
     - Exibe apenas esses dígitos na interface.
     - Analisa padrões PAR/ÍMPAR nesses dígitos.
-    - Expõe o countdown preciso até ao próximo dígito.
-    - Quando o utilizador aposta em PAR/ÍMPAR, o contrato deve durar
-      exatamente `countdown` segundos para expirar no próximo dígito.
+    - Expõe countdown preciso até ao próximo dígito.
     """
 
     DISPLAY_INTERVAL = 15  # segundos entre cada dígito lento
@@ -28,7 +27,7 @@ class DigitAnalyzer:
         # Controlo de tempo para captura do próximo dígito lento
         self._next_capture_time = time.time() + self.DISPLAY_INTERVAL
 
-        # Countdown em segundos até ao próximo dígito (atualizado por thread)
+        # Countdown em segundos até ao próximo dígito
         self.countdown = self.DISPLAY_INTERVAL
 
         # Lock para thread safety
@@ -51,62 +50,84 @@ class DigitAnalyzer:
             'total_digits': 0
         }
 
-        # Iniciar thread de countdown
         self._running = True
         self._start_countdown_thread()
 
     # ─────────────────────────────────────────────────────────────
-    # THREAD DE COUNTDOWN (atualiza a cada segundo)
+    # THREAD DE COUNTDOWN
     # ─────────────────────────────────────────────────────────────
     def _start_countdown_thread(self):
         def _run():
             while self._running:
                 time.sleep(0.5)
                 now = time.time()
-                remaining = max(0.0, self._next_capture_time - now)
-                secs = int(remaining) + 1  # arredondar para cima
-
+                remaining = max(1, int(self._next_capture_time - now) + 1)
                 with self._lock:
-                    self.countdown = secs
-                    self.last_analysis_data['countdown'] = secs
-                    self.last_analysis_data['seconds_to_next'] = secs
-
+                    self.countdown = remaining
+                    self.last_analysis_data['countdown'] = remaining
+                    self.last_analysis_data['seconds_to_next'] = remaining
         threading.Thread(target=_run, daemon=True).start()
 
     # ─────────────────────────────────────────────────────────────
-    # RECEBER TICK DA DERIV (chamado a cada tick ~1s)
+    # EXTRAIR DÍGITO CORRETAMENTE DO PREÇO
+    # ─────────────────────────────────────────────────────────────
+    def _extract_last_digit(self, price):
+        """
+        ✅ FIX CRÍTICO: Extrai o último dígito do preço corretamente.
+
+        Problema anterior: f"{price:.5f}" → sempre 5 casas decimais →
+        preços com 3 casas (ex: 1234.567) ficavam 1234.56700 → último
+        dígito sempre 0 → sempre PAR.
+
+        Solução: usar Decimal(str(price)) que preserva as casas decimais
+        reais sem adicionar zeros extra.
+        """
+        try:
+            price_str = str(Decimal(str(price)))
+            if '.' in price_str:
+                last_digit = int(price_str[-1])
+            else:
+                last_digit = int(price_str[-1]) if price_str else 0
+            return last_digit
+        except Exception:
+            # Fallback: usar 3 casas decimais (R_100 padrão)
+            try:
+                return int(f"{price:.3f}"[-1])
+            except Exception:
+                return 0
+
+    # ─────────────────────────────────────────────────────────────
+    # RECEBER TICK DA DERIV
     # ─────────────────────────────────────────────────────────────
     def add_tick(self, price):
         """
-        Recebe cada tick da Deriv.
-        Só regista o dígito lento quando os 15 segundos passam.
-        O dígito exibido na interface só muda de 15 em 15 segundos.
+        Recebe cada tick da Deriv (~1s).
+        Só captura o dígito lento quando os 15 segundos passam.
         """
         try:
-            # Calcular dígito do tick atual
-            price_str = f"{price:.5f}"
-            last_digit = int(price_str[-1])
-            parity = 'IMPAR' if last_digit % 2 != 0 else 'PAR'
-
             now = time.time()
 
-            # ✅ Só captura dígito lento quando os 15 segundos terminam
+            # ✅ Extrair dígito corretamente
+            last_digit = self._extract_last_digit(price)
+            parity = 'IMPAR' if last_digit % 2 != 0 else 'PAR'
+
+            # Atualizar estado atual (para visualização em tempo real)
+            with self._lock:
+                self.current_display_digit = last_digit
+                self.current_display_parity = parity
+
+            # ✅ Só captura o dígito lento quando os 15 segundos terminam
             if now >= self._next_capture_time:
-                # Definir próxima captura exatamente 15s depois
                 self._next_capture_time = now + self.DISPLAY_INTERVAL
 
-                # Atualizar dígito exibido na interface
                 with self._lock:
-                    self.current_display_digit = last_digit
-                    self.current_display_parity = parity
                     self.slow_digits.append(last_digit)
                     digits_snap = list(self.slow_digits)
 
                 logger.info(
                     f"⏱️ [15s] Dígito capturado: {last_digit} ({parity}) "
-                    f"| Total: {len(digits_snap)}"
+                    f"| Total: {len(digits_snap)} | Streak: {self._calc_streak(digits_snap)}"
                 )
-                # Gerar análise com os novos dados
                 self._generate_recommendation(digits_snap)
 
             return True, last_digit
@@ -126,10 +147,8 @@ class DigitAnalyzer:
         recent_parity = ['IMPAR' if d % 2 != 0 else 'PAR' for d in digits_snap[-20:]]
 
         if total < 3:
-            self._set_no_signal(
-                digits_snap, odd_pct, even_pct, recent_parity,
-                reason=f'Aguardando mais dígitos ({total}/3 mínimo)...'
-            )
+            self._set_no_signal(digits_snap, odd_pct, even_pct, recent_parity,
+                reason=f'Aguardando mais dígitos ({total}/3 mínimo)...')
             return
 
         streak, streak_parity = self._calc_streak(digits_snap)
@@ -139,18 +158,14 @@ class DigitAnalyzer:
 
             if streak_parity == 'PAR':
                 action = 'BUY'   # → DIGITODD (próximo ÍMPAR)
-                reason = (
-                    f'🔥 {streak} PARES consecutivos! '
-                    f'Provável próximo: ÍMPAR. Confiança: {confidence}%'
-                )
-                pattern = f'{streak} PARES seguidos → próximo ÍMPAR'
+                reason = (f'🔥 {streak} PARES seguidos! '
+                          f'Aposte em ÍMPAR. Confiança: {confidence}%')
+                pattern = f'{streak} PARES consecutivos → próximo ÍMPAR'
             else:
                 action = 'SELL'  # → DIGITEVEN (próximo PAR)
-                reason = (
-                    f'🔥 {streak} ÍMPARES consecutivos! '
-                    f'Provável próximo: PAR. Confiança: {confidence}%'
-                )
-                pattern = f'{streak} ÍMPARES seguidos → próximo PAR'
+                reason = (f'🔥 {streak} ÍMPARES seguidos! '
+                          f'Aposte em PAR. Confiança: {confidence}%')
+                pattern = f'{streak} ÍMPARES consecutivos → próximo PAR'
 
             with self._lock:
                 self.last_analysis_data.update({
@@ -168,13 +183,11 @@ class DigitAnalyzer:
                     'even_pct': even_pct,
                     'total_digits': total
                 })
-            logger.info(f"⚡ Sinal: {reason}")
+            logger.info(f"⚡ {reason}")
         else:
-            self._set_no_signal(
-                digits_snap, odd_pct, even_pct, recent_parity,
+            self._set_no_signal(digits_snap, odd_pct, even_pct, recent_parity,
                 streak=streak, streak_parity=streak_parity,
-                reason=f'Streak: {streak} {streak_parity}. Aguarda 3+ consecutivos.'
-            )
+                reason=f'Streak atual: {streak} {streak_parity}. Aguarda 3+ consecutivos para sinal.')
 
     def _set_no_signal(self, digits_snap, odd_pct=0, even_pct=0,
                        recent_parity=None, streak=0, streak_parity='---', reason=''):
@@ -198,7 +211,7 @@ class DigitAnalyzer:
             })
 
     # ─────────────────────────────────────────────────────────────
-    # CÁLCULO DE STREAK
+    # STREAK
     # ─────────────────────────────────────────────────────────────
     def _calc_streak(self, digits_list):
         if not digits_list:
@@ -216,12 +229,7 @@ class DigitAnalyzer:
     # ─────────────────────────────────────────────────────────────
     # API PÚBLICA
     # ─────────────────────────────────────────────────────────────
-
     def get_seconds_to_next_digit(self):
-        """
-        Retorna quantos segundos faltam para o próximo dígito lento.
-        Usado pelo deriv_client para definir a duração do contrato.
-        """
         remaining = max(1, int(self._next_capture_time - time.time()) + 1)
         return remaining
 
@@ -254,10 +262,8 @@ class DigitAnalyzer:
         with self._lock:
             snap = list(self.slow_digits)
         if not snap:
-            return {
-                'total': 0, 'odd_pct': 0, 'even_pct': 0,
-                'current_streak': 0, 'streak_parity': '---', 'recent': []
-            }
+            return {'total': 0, 'odd_pct': 0, 'even_pct': 0,
+                    'current_streak': 0, 'streak_parity': '---', 'recent': []}
         total = len(snap)
         odd_count = sum(1 for d in snap if d % 2 != 0)
         streak, streak_parity = self._calc_streak(snap)
