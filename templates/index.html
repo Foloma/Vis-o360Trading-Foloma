@@ -5,184 +5,145 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Foloma Trading System</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-        body { background: #0a0e1a; color: #fff; min-height: 100vh; }
-        .top-bar { background: #1a1f2f; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2a3342; position: sticky; top: 0; z-index: 100; }
-        .logo { font-size: 20px; font-weight: bold; color: #00f0b5; }
-        .menu-btn { background: #2a3342; border: none; color: #fff; font-size: 24px; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
-        .side-menu { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: #1a1f2f; z-index: 1000; transition: left 0.3s ease; padding: 20px; border-right: 1px solid #2a3342; }
-        .side-menu.open { left: 0; }
-        .menu-header { display: flex; justify-content: space-between; margin-bottom: 30px; padding-bottom: 15px; border-bottom: 1px solid #2a3342; }
-        .menu-close { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }
-        .menu-item { padding: 12px 0; color: #fff; text-decoration: none; display: block; border-bottom: 1px solid #2a3342; cursor: pointer; }
-        .menu-item:hover { color: #00f0b5; }
-        .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999; display: none; }
-        .overlay.show { display: block; }
-        .container { max-width: 500px; margin: 0 auto; padding: 16px; }
-        .card { background: #1a1f2f; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid #2a3342; }
-        .card-title { color: #00f0b5; font-size: 14px; font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #2a3342; display: flex; justify-content: space-between; align-items: center; }
-        .mode-selector { display: flex; gap: 10px; margin-bottom: 15px; }
-        .mode-btn { flex: 1; padding: 10px; border-radius: 8px; font-weight: 600; cursor: pointer; text-align: center; background: #2a3342; color: #fff; border: none; }
-        .mode-btn.active { background: #00f0b5; color: #0b0e14; }
-        .status-row { display: flex; justify-content: space-between; align-items: center; }
-        .balance { font-size: 24px; font-weight: bold; color: #00f0b5; }
-        .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff4d4d; display: inline-block; }
-        .dot.connected { background: #00f0b5; box-shadow: 0 0 8px #00f0b5; }
-        .price-area { display: flex; justify-content: space-between; align-items: baseline; background: #0b0e14; padding: 12px; border-radius: 10px; margin-bottom: 10px; }
-        .price { font-size: 28px; font-weight: bold; color: #00f0b5; }
-        .signal-badge { display: inline-block; padding: 6px 16px; border-radius: 40px; font-size: 14px; font-weight: 600; }
-        .signal-badge.buy { background: #00f0b5; color: #0a0e1a; }
-        .signal-badge.sell { background: #ff4d4d; color: #fff; }
-        .signal-badge.neutral { background: #62748c; color: #fff; }
-        .signal-confidence { font-size: 20px; font-weight: bold; margin-left: 10px; }
-        .indicators-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
-        .indicator { background: #0b0e14; padding: 8px; border-radius: 8px; text-align: center; }
-        .indicator .label { font-size: 9px; color: #62748c; }
-        .indicator .value { font-size: 14px; font-weight: 600; }
-        .indicator .desc { font-size: 8px; color: #00f0b5; }
-        .symbol-row { display: flex; gap: 8px; flex-wrap: wrap; }
-        .symbol-btn { background: #0b0e14; border: 1px solid #2a3342; color: #fff; padding: 6px 12px; border-radius: 20px; cursor: pointer; font-size: 12px; }
-        .symbol-btn.active { background: #00f0b5; color: #0a0e1a; border-color: #00f0b5; }
-        .amount-input { width: 100%; padding: 12px; background: #0b0e14; border: 1px solid #2a3342; border-radius: 10px; color: #fff; font-size: 16px; text-align: center; margin-bottom: 12px; }
-        .trade-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-        .btn-buy { background: #00f0b5; color: #0a0e1a; padding: 14px; border: none; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; }
-        .btn-sell { background: #ff4d4d; color: #fff; padding: 14px; border: none; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; }
-        .btn-buy:disabled, .btn-sell:disabled { opacity: 0.5; cursor: not-allowed; }
+        * { margin:0; padding:0; box-sizing:border-box; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+        body { background:#0a0e1a; color:#fff; min-height:100vh; }
+        .top-bar { background:#1a1f2f; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #2a3342; position:sticky; top:0; z-index:100; }
+        .logo { font-size:20px; font-weight:bold; color:#00f0b5; }
+        .menu-btn { background:#2a3342; border:none; color:#fff; font-size:24px; padding:8px 12px; border-radius:8px; cursor:pointer; }
+        .side-menu { position:fixed; top:0; left:-280px; width:280px; height:100%; background:#1a1f2f; z-index:1000; transition:left 0.3s ease; padding:20px; border-right:1px solid #2a3342; }
+        .side-menu.open { left:0; }
+        .menu-header { display:flex; justify-content:space-between; margin-bottom:30px; padding-bottom:15px; border-bottom:1px solid #2a3342; }
+        .menu-close { background:none; border:none; color:#fff; font-size:24px; cursor:pointer; }
+        .menu-item { padding:12px 0; color:#fff; display:block; border-bottom:1px solid #2a3342; cursor:pointer; }
+        .menu-item:hover { color:#00f0b5; }
+        .overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:999; display:none; }
+        .overlay.show { display:block; }
+        .container { max-width:500px; margin:0 auto; padding:16px; }
+        .card { background:#1a1f2f; border-radius:12px; padding:16px; margin-bottom:16px; border:1px solid #2a3342; }
+        .card-title { color:#00f0b5; font-size:14px; font-weight:600; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid #2a3342; display:flex; justify-content:space-between; align-items:center; }
+        .mode-selector { display:flex; gap:10px; margin-bottom:15px; }
+        .mode-btn { flex:1; padding:10px; border-radius:8px; font-weight:600; cursor:pointer; text-align:center; background:#2a3342; color:#fff; border:none; }
+        .mode-btn.active { background:#00f0b5; color:#0b0e14; }
+        .status-row { display:flex; justify-content:space-between; align-items:center; }
+        .balance { font-size:24px; font-weight:bold; color:#00f0b5; }
+        .dot { width:10px; height:10px; border-radius:50%; background:#ff4d4d; display:inline-block; }
+        .dot.connected { background:#00f0b5; box-shadow:0 0 8px #00f0b5; }
+        .price-area { display:flex; justify-content:space-between; align-items:baseline; background:#0b0e14; padding:12px; border-radius:10px; margin-bottom:10px; }
+        .price { font-size:28px; font-weight:bold; color:#00f0b5; }
+        .signal-badge { display:inline-block; padding:6px 16px; border-radius:40px; font-size:14px; font-weight:600; }
+        .signal-badge.buy { background:#00f0b5; color:#0a0e1a; }
+        .signal-badge.sell { background:#ff4d4d; color:#fff; }
+        .signal-badge.neutral { background:#62748c; color:#fff; }
+        .signal-confidence { font-size:20px; font-weight:bold; margin-left:10px; }
+        .indicators-row { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:12px; }
+        .indicator { background:#0b0e14; padding:8px; border-radius:8px; text-align:center; }
+        .indicator .label { font-size:9px; color:#62748c; }
+        .indicator .value { font-size:14px; font-weight:600; }
+        .indicator .desc { font-size:8px; color:#00f0b5; }
+        .symbol-row { display:flex; gap:8px; flex-wrap:wrap; }
+        .symbol-btn { background:#0b0e14; border:1px solid #2a3342; color:#fff; padding:6px 12px; border-radius:20px; cursor:pointer; font-size:12px; }
+        .symbol-btn.active { background:#00f0b5; color:#0a0e1a; border-color:#00f0b5; }
+        .amount-input { width:100%; padding:12px; background:#0b0e14; border:1px solid #2a3342; border-radius:10px; color:#fff; font-size:16px; text-align:center; margin-bottom:12px; }
+        .trade-buttons { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+        .btn-buy  { background:#00f0b5; color:#0a0e1a; padding:14px; border:none; border-radius:10px; font-weight:bold; font-size:16px; cursor:pointer; }
+        .btn-sell { background:#ff4d4d; color:#fff; padding:14px; border:none; border-radius:10px; font-weight:bold; font-size:16px; cursor:pointer; }
+        .btn-buy:active, .btn-sell:active { transform:scale(0.97); }
 
-        /* ===== PAINEL DE DÍGITOS ===== */
-        .digit-main-box {
-            background: #0b0e14;
-            border-radius: 14px;
-            padding: 20px;
-            text-align: center;
-            margin-bottom: 14px;
-            border: 2px solid #2a3342;
-        }
-        .digit-timer-label {
-            font-size: 11px;
-            color: #62748c;
-            margin-bottom: 6px;
-            letter-spacing: 1px;
-        }
-        .digit-timer-bar-wrap {
-            background: #1a1f2f;
-            border-radius: 6px;
-            height: 6px;
-            margin-bottom: 14px;
-            overflow: hidden;
-        }
-        .digit-timer-bar {
-            height: 6px;
-            background: #00f0b5;
-            border-radius: 6px;
-            transition: width 0.9s linear;
-        }
-        .digit-big {
-            font-size: 72px;
-            font-weight: 900;
-            line-height: 1;
-            transition: all 0.3s;
-        }
-        .digit-big.odd  { color: #00f0b5; text-shadow: 0 0 18px #00f0b540; }
-        .digit-big.even { color: #ff4d4d;  text-shadow: 0 0 18px #ff4d4d40; }
-        .digit-big.waiting { color: #2a3342; }
-        .digit-parity-label {
-            font-size: 16px;
-            font-weight: 600;
-            margin-top: 4px;
-            letter-spacing: 2px;
-        }
-        .digit-parity-label.odd  { color: #00f0b5; }
-        .digit-parity-label.even { color: #ff4d4d; }
-        .digit-parity-label.waiting { color: #62748c; }
-        .digit-countdown-txt {
-            font-size: 13px;
-            color: #ffaa00;
-            margin-top: 10px;
-            font-weight: 600;
-        }
-        .digit-streak-info {
-            background: #1a1f2f;
-            border-radius: 8px;
-            padding: 10px 14px;
-            margin-bottom: 14px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 13px;
-        }
-        .streak-val { font-weight: bold; font-size: 18px; }
-        .streak-val.odd  { color: #00f0b5; }
-        .streak-val.even { color: #ff4d4d; }
-        .streak-val.none { color: #62748c; }
-
-        .digits-history { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; justify-content: center; }
-        .digit-box { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 15px; font-weight: 700; background: #0b0e14; }
-        .digit-box.odd  { color: #00f0b5; border: 1.5px solid #00f0b5; }
-        .digit-box.even { color: #ff4d4d;  border: 1.5px solid #ff4d4d; }
-        .digit-box.new  { animation: popIn 0.4s ease; }
+        /* ===== DÍGITOS ===== */
+        .digit-main-box { background:#0b0e14; border-radius:14px; padding:20px; text-align:center; margin-bottom:14px; border:2px solid #2a3342; }
+        .digit-timer-label { font-size:11px; color:#62748c; margin-bottom:6px; letter-spacing:1px; }
+        .digit-timer-bar-wrap { background:#1a1f2f; border-radius:6px; height:6px; margin-bottom:14px; overflow:hidden; }
+        .digit-timer-bar { height:6px; background:#00f0b5; border-radius:6px; transition:width 0.9s linear; }
+        .digit-big { font-size:72px; font-weight:900; line-height:1; transition:transform 0.3s; }
+        .digit-big.odd  { color:#00f0b5; text-shadow:0 0 18px #00f0b540; }
+        .digit-big.even { color:#ff4d4d; text-shadow:0 0 18px #ff4d4d40; }
+        .digit-big.wait { color:#2a3342; }
+        .digit-parity-label { font-size:16px; font-weight:600; margin-top:4px; letter-spacing:2px; }
+        .digit-parity-label.odd  { color:#00f0b5; }
+        .digit-parity-label.even { color:#ff4d4d; }
+        .digit-parity-label.wait { color:#62748c; }
+        .digit-countdown-txt { font-size:13px; color:#ffaa00; margin-top:10px; font-weight:600; }
+        .digit-streak-info { background:#1a1f2f; border-radius:8px; padding:10px 14px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; font-size:13px; }
+        .streak-val { font-weight:bold; font-size:18px; }
+        .streak-val.odd  { color:#00f0b5; }
+        .streak-val.even { color:#ff4d4d; }
+        .streak-val.none { color:#62748c; }
+        .digits-history { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; justify-content:center; }
+        .digit-box { width:34px; height:34px; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:15px; font-weight:700; background:#0b0e14; }
+        .digit-box.odd  { color:#00f0b5; border:1.5px solid #00f0b5; }
+        .digit-box.even { color:#ff4d4d; border:1.5px solid #ff4d4d; }
+        .digit-box.new  { animation:popIn 0.4s ease; }
         @keyframes popIn { 0%{transform:scale(0.5);opacity:0} 60%{transform:scale(1.2)} 100%{transform:scale(1);opacity:1} }
 
-        .percent-stats { background: #0b0e14; border-radius: 8px; padding: 12px; margin: 10px 0; }
-        .percent-row { display: flex; justify-content: space-between; font-size: 14px; font-weight: bold; margin-bottom: 8px; }
-        .percent-odd-value { color: #00f0b5; }
-        .percent-even-value { color: #ff4d4d; }
-        .percent-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; }
-        .percent-odd-bar  { background: #00f0b5; transition: width 0.3s; }
-        .percent-even-bar { background: #ff4d4d; transition: width 0.3s; }
+        /* Sinais múltiplos */
+        .signals-list { margin-top:8px; }
+        .signal-item { background:#0b0e14; border-radius:8px; padding:8px 12px; margin-bottom:6px; font-size:12px; border-left:3px solid #2a3342; }
+        .signal-item.streak     { border-left-color:#ffaa00; }
+        .signal-item.dominance  { border-left-color:#00f0b5; }
+        .signal-item.alternating{ border-left-color:#a855f7; }
+        .signal-item.imbalance  { border-left-color:#62748c; }
+        .signal-item .sig-conf  { float:right; font-weight:bold; }
+        .signal-item.streak     .sig-conf { color:#ffaa00; }
+        .signal-item.dominance  .sig-conf { color:#00f0b5; }
+        .signal-item.alternating.sig-conf { color:#a855f7; }
 
-        .signal-box {
-            border-radius: 10px;
-            padding: 12px 14px;
-            margin-bottom: 14px;
-            text-align: center;
-            font-size: 13px;
-            font-weight: 600;
-        }
-        .signal-box.active { background: linear-gradient(135deg, #00f0b540, #00f0b510); border: 1px solid #00f0b5; color: #00f0b5; animation: pulse 1.5s infinite; }
-        .signal-box.none   { background: #0b0e14; border: 1px solid #2a3342; color: #62748c; }
+        .signal-box-main { border-radius:10px; padding:12px 14px; margin-bottom:14px; text-align:center; font-size:13px; font-weight:600; }
+        .signal-box-main.active { background:linear-gradient(135deg,#00f0b540,#00f0b510); border:1px solid #00f0b5; color:#00f0b5; animation:pulse 1.5s infinite; }
+        .signal-box-main.warn   { background:linear-gradient(135deg,#ffaa0040,#ffaa0010); border:1px solid #ffaa00; color:#ffaa00; }
+        .signal-box-main.none   { background:#0b0e14; border:1px solid #2a3342; color:#62748c; }
         @keyframes pulse { 0%{opacity:1} 50%{opacity:0.7} 100%{opacity:1} }
 
-        .digit-bet-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
-        .btn-odd  { background: #00f0b5; color: #0a0e1a; padding: 16px; border: none; border-radius: 10px; font-weight: bold; font-size: 17px; cursor: pointer; }
-        .btn-even { background: #ff4d4d;  color: #fff;    padding: 16px; border: none; border-radius: 10px; font-weight: bold; font-size: 17px; cursor: pointer; }
-        .btn-odd:disabled, .btn-even:disabled { opacity: 0.4; cursor: not-allowed; }
-        .btn-odd:active, .btn-even:active { transform: scale(0.97); }
+        .percent-stats { background:#0b0e14; border-radius:8px; padding:12px; margin:10px 0; }
+        .percent-row { display:flex; justify-content:space-between; font-size:14px; font-weight:bold; margin-bottom:8px; }
+        .percent-odd-value { color:#00f0b5; }
+        .percent-even-value { color:#ff4d4d; }
+        .percent-bar { display:flex; height:8px; border-radius:4px; overflow:hidden; }
+        .percent-odd-bar  { background:#00f0b5; transition:width 0.3s; }
+        .percent-even-bar { background:#ff4d4d; transition:width 0.3s; }
 
-        .too-close-warning { background: #ffaa0020; border: 1px solid #ffaa00; border-radius: 8px; padding: 8px 12px; font-size: 12px; color: #ffaa00; text-align: center; margin-bottom: 10px; display: none; }
+        .digit-bet-buttons { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:10px; }
+        .btn-odd  { background:#00f0b5; color:#0a0e1a; padding:16px; border:none; border-radius:10px; font-weight:bold; font-size:17px; cursor:pointer; }
+        .btn-even { background:#ff4d4d; color:#fff; padding:16px; border:none; border-radius:10px; font-weight:bold; font-size:17px; cursor:pointer; }
+        .btn-odd:active, .btn-even:active { transform:scale(0.97); }
+        .too-close-warning { background:#ffaa0020; border:1px solid #ffaa00; border-radius:8px; padding:8px 12px; font-size:12px; color:#ffaa00; text-align:center; margin-bottom:10px; display:none; }
 
-        /* ===== RESTO ===== */
-        .alert-box { background: linear-gradient(135deg, #ffaa00, #ff8800); border-radius: 10px; padding: 12px; margin: 12px 0; text-align: center; animation: pulse 1s infinite; }
-        .alert-box.hide-alert { display: none !important; }
-        .martingale-status { background: #0b0e14; border-radius: 8px; padding: 10px; font-size: 12px; margin: 10px 0; }
-        .btn-martingale { background: #ffaa00; color: #0a0e1a; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; flex: 1; }
-        .btn-martingale-reset { background: #2a3342; color: #fff; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; flex: 1; }
-        .trade-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #2a3342; font-size: 12px; }
-        .win { color: #00f0b5; } .loss { color: #ff4d4d; } .pending { color: #ffaa00; }
-        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; }
-        .stat-value { font-size: 18px; font-weight: bold; }
-        .stat-label { font-size: 10px; color: #62748c; }
-        .btn-primary { background: #00f0b5; color: #0a0e14; width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .btn-secondary { background: #2a3342; color: #fff; width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .btn-small { background: #2a3342; border: none; padding: 8px 12px; border-radius: 6px; color: #fff; cursor: pointer; }
-        .btn-clear-history { background: #2a3342; border: none; padding: 6px 12px; border-radius: 6px; color: #ffaa00; cursor: pointer; font-size: 11px; margin-left: 8px; }
-        .manual-mode-checkbox { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 12px; color: #62748c; }
-        .hybrid-status { background: #0b0e14; border-radius: 8px; padding: 10px; margin-bottom: 12px; text-align: center; font-size: 12px; }
-        .hidden { display: none; }
-        .link-copy { display: flex; gap: 8px; }
-        .link-copy input { flex: 1; padding: 8px; background: #0b0e14; border: 1px solid #2a3342; border-radius: 6px; color: #fff; font-size: 12px; }
-        .account-selector { display: flex; gap: 10px; margin: 10px 0; }
-        .account-btn { flex: 1; padding: 10px; border-radius: 8px; font-weight: 600; cursor: pointer; text-align: center; background: #2a3342; color: #fff; border: none; }
-        .account-btn.active { background: #00f0b5; color: #0b0e14; }
-        .modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.95); z-index: 1100; display: flex; align-items: center; justify-content: center; }
-        .modal-content { background: #1a1f2f; padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
-        .modal input { width: 100%; padding: 10px; margin: 8px 0; background: #0b0e14; border: 1px solid #2a3342; border-radius: 8px; color: #fff; }
-        .user-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        .user-table th, .user-table td { padding: 8px; text-align: left; border-bottom: 1px solid #2a3342; font-size: 12px; }
-        .user-table th { color: #00f0b5; }
-        .btn-toggle { background: #2a3342; border: none; padding: 4px 8px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; }
-        .btn-toggle.disabled-user { background: #ff4d4d; }
-        .text-center { text-align: center; } .mt-2 { margin-top: 8px; } .mb-2 { margin-bottom: 8px; } .flex { display: flex; gap: 8px; }
+        /* ===== GERAL ===== */
+        .martingale-status { background:#0b0e14; border-radius:8px; padding:10px; font-size:12px; margin:10px 0; }
+        .btn-martingale       { background:#ffaa00; color:#0a0e1a; border:none; padding:8px; border-radius:6px; font-weight:600; cursor:pointer; flex:1; }
+        .btn-martingale-reset { background:#2a3342; color:#fff; border:none; padding:8px; border-radius:6px; font-weight:600; cursor:pointer; flex:1; }
+        .hybrid-status { background:#0b0e14; border-radius:8px; padding:10px; margin-bottom:12px; text-align:center; font-size:12px; }
+        .trade-item { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid #2a3342; font-size:12px; }
+        .win { color:#00f0b5; } .loss { color:#ff4d4d; } .pending { color:#ffaa00; }
+        .stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; text-align:center; }
+        .stat-value { font-size:18px; font-weight:bold; }
+        .stat-label { font-size:10px; color:#62748c; }
+        .btn-primary   { background:#00f0b5; color:#0a0e14; width:100%; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; }
+        .btn-secondary { background:#2a3342; color:#fff; width:100%; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; }
+        .btn-small     { background:#2a3342; border:none; padding:8px 12px; border-radius:6px; color:#fff; cursor:pointer; }
+        .btn-clear-history { background:#2a3342; border:none; padding:6px 12px; border-radius:6px; color:#ffaa00; cursor:pointer; font-size:11px; margin-left:8px; }
+        .manual-mode-checkbox { display:flex; align-items:center; gap:8px; margin:10px 0; font-size:12px; color:#62748c; }
+        .hidden { display:none; }
+        .link-copy { display:flex; gap:8px; }
+        .link-copy input { flex:1; padding:8px; background:#0b0e14; border:1px solid #2a3342; border-radius:6px; color:#fff; font-size:12px; }
+        .account-selector { display:flex; gap:10px; margin:10px 0; }
+        .account-btn { flex:1; padding:10px; border-radius:8px; font-weight:600; cursor:pointer; text-align:center; background:#2a3342; color:#fff; border:none; }
+        .account-btn.active { background:#00f0b5; color:#0b0e14; }
+        .modal { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.95); z-index:1100; display:flex; align-items:center; justify-content:center; }
+        .modal-content { background:#1a1f2f; padding:24px; border-radius:16px; width:90%; max-width:350px; }
+        .modal input { width:100%; padding:10px; margin:8px 0; background:#0b0e14; border:1px solid #2a3342; border-radius:8px; color:#fff; }
+        .user-table { width:100%; border-collapse:collapse; margin-top:10px; }
+        .user-table th, .user-table td { padding:8px; text-align:left; border-bottom:1px solid #2a3342; font-size:12px; }
+        .user-table th { color:#00f0b5; }
+        .btn-toggle { background:#2a3342; border:none; padding:4px 8px; border-radius:4px; color:#fff; cursor:pointer; font-size:11px; }
+        .btn-toggle.disabled-user { background:#ff4d4d; }
+        .text-center { text-align:center; } .mt-2 { margin-top:8px; } .mb-2 { margin-bottom:8px; } .flex { display:flex; gap:8px; }
+
+        /* Notificação de trade */
+        .trade-toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#1a1f2f; border:1px solid #00f0b5; border-radius:12px; padding:12px 20px; font-size:13px; z-index:2000; display:none; text-align:center; max-width:300px; box-shadow:0 4px 20px rgba(0,240,181,0.2); }
+        .trade-toast.show { display:block; animation:slideUp 0.3s ease; }
+        .trade-toast.win  { border-color:#00f0b5; }
+        .trade-toast.loss { border-color:#ff4d4d; }
+        @keyframes slideUp { from{transform:translateX(-50%) translateY(20px);opacity:0} to{transform:translateX(-50%) translateY(0);opacity:1} }
     </style>
 </head>
 <body>
@@ -193,17 +154,20 @@
     </div>
     <div class="side-menu" id="sideMenu">
         <div class="menu-header">
-            <span style="color:#00f0b5; font-weight:bold;">MENU</span>
+            <span style="color:#00f0b5;font-weight:bold;">MENU</span>
             <button class="menu-close" onclick="toggleMenu()">✕</button>
         </div>
         <div class="menu-item" onclick="showSection('dashboard')">📊 Dashboard</div>
         <div class="menu-item" onclick="showSection('affiliate')">🔗 Afiliado</div>
         <div class="menu-item" onclick="showSection('payment')">💰 Depósito/Saque</div>
         <div class="menu-item" onclick="showSection('settings')">⚙️ Configurações</div>
-        <div class="menu-item admin-only" id="adminMenuItem" onclick="showSection('admin')" style="display:none;">👑 Administração</div>
+        <div class="menu-item" id="adminMenuItem" style="display:none;" onclick="showSection('admin')">👑 Administração</div>
         <div class="menu-item" onclick="logout()">🚪 Sair</div>
     </div>
     <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
+
+    <!-- Notificação flutuante -->
+    <div class="trade-toast" id="tradeToast"></div>
 
     <div class="container" id="mainContent" style="display:none;">
         <div id="dashboard-section">
@@ -216,7 +180,7 @@
                     <div class="balance"><span id="balance">0.00</span> <span id="currency">USD</span></div>
                 </div>
                 <button class="btn-primary" id="connectBtn" onclick="conectar()">🔌 CONECTAR</button>
-                <div id="connectStatus" class="text-center mt-2" style="font-size:11px; color:#ffaa00;"></div>
+                <div id="connectStatus" class="text-center mt-2" style="font-size:11px;color:#ffaa00;"></div>
             </div>
 
             <!-- MODO -->
@@ -249,23 +213,23 @@
                 </div>
             </div>
 
-            <!-- ===== PAINEL DÍGITOS ===== -->
+            <!-- PAINEL DÍGITOS -->
             <div id="modoDigitosPanel" class="hidden">
                 <div class="card">
                     <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
 
-                    <!-- DÍGITO PRINCIPAL -->
+                    <!-- Dígito principal -->
                     <div class="digit-main-box">
                         <div class="digit-timer-label">PRÓXIMO DÍGITO EM</div>
                         <div class="digit-timer-bar-wrap">
                             <div class="digit-timer-bar" id="timerBar" style="width:100%"></div>
                         </div>
-                        <div class="digit-big waiting" id="bigDigit">—</div>
-                        <div class="digit-parity-label waiting" id="bigParity">AGUARDANDO</div>
+                        <div class="digit-big wait" id="bigDigit">—</div>
+                        <div class="digit-parity-label wait" id="bigParity">AGUARDANDO</div>
                         <div class="digit-countdown-txt" id="bigCountdown">⏱ 15s</div>
                     </div>
 
-                    <!-- STREAK -->
+                    <!-- Streak -->
                     <div class="digit-streak-info">
                         <div>
                             <div style="font-size:11px;color:#62748c;">SEQUÊNCIA ATUAL</div>
@@ -278,39 +242,56 @@
                         </div>
                     </div>
 
-                    <!-- SINAL -->
-                    <div class="signal-box none" id="digitSignalBox">
-                        <div id="digitSignalText">Aguardando padrão (mínimo 3 consecutivos)...</div>
+                    <!-- Sinal principal -->
+                    <div class="signal-box-main none" id="digitSignalBox">
+                        <div id="digitSignalText">Aguardando dados para análise...</div>
                     </div>
 
-                    <!-- AVISO SE MUITO PERTO DO PRÓXIMO DÍGITO -->
+                    <!-- Todos os sinais detectados -->
+                    <div class="signals-list" id="allSignalsList"></div>
+
+                    <!-- Aviso se muito perto -->
                     <div class="too-close-warning" id="tooCloseWarning">
                         ⚠️ Dígito a sair em menos de 3s! Aguarde o próximo ciclo.
                     </div>
 
-                    <!-- BOTÕES DE APOSTA -->
+                    <!-- Botões de aposta — SEMPRE ACTIVOS, ao critério do utilizador -->
                     <div class="digit-bet-buttons">
                         <button class="btn-odd"  id="btnOdd"  onclick="executeDigitTrade('odd')">🎲 ÍMPAR</button>
                         <button class="btn-even" id="btnEven" onclick="executeDigitTrade('even')">🎲 PAR</button>
                     </div>
 
-                    <!-- HISTORIAL DE DÍGITOS LENTOS -->
+                    <!-- Historial -->
                     <div style="margin-top:16px;">
                         <div style="font-size:11px;color:#62748c;margin-bottom:8px;">📜 ÚLTIMOS DÍGITOS (15s cada)</div>
                         <div id="slowDigitsHistory" class="digits-history">
-                            <div style="color:#62748c;font-size:12px;">Aguardando dados...</div>
+                            <div style="color:#62748c;font-size:12px;">Aguardando...</div>
                         </div>
                     </div>
 
-                    <!-- PERCENTAGENS -->
+                    <!-- Percentagens -->
                     <div class="percent-stats" style="margin-top:12px;">
                         <div class="percent-row">
                             <span class="percent-odd-value">ÍMPAR: <span id="oddPercent">0%</span></span>
                             <span class="percent-even-value">PAR: <span id="evenPercent">0%</span></span>
                         </div>
                         <div class="percent-bar">
-                            <div class="percent-odd-bar"  id="oddBar"  style="width:50%"></div>
+                            <div class="percent-odd-bar" id="oddBar" style="width:50%"></div>
                             <div class="percent-even-bar" id="evenBar" style="width:50%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Valor da aposta (modo dígitos) -->
+                    <div style="margin-top:14px;">
+                        <div style="font-size:11px;color:#62748c;margin-bottom:6px;">💰 VALOR DA APOSTA</div>
+                        <input type="number" id="amountDigit" class="amount-input" value="0.35" step="0.01" min="0.35" max="100">
+                        <div class="flex">
+                            <button class="btn-martingale"       onclick="aplicarMartingaleDigit()">🎲 MARTINGALE</button>
+                            <button class="btn-martingale-reset" onclick="resetarMartingale()">🔄 RESETAR</button>
+                        </div>
+                        <div class="martingale-status">
+                            <div>Martingale: <span id="martingaleActiveDigit">DESATIVADO</span></div>
+                            <div>Próximo: <span id="martingaleNextDigit">$0.35</span></div>
                         </div>
                     </div>
                 </div>
@@ -323,13 +304,15 @@
                 <div class="manual-mode-checkbox">
                     <input type="checkbox" id="manualMode"> <span>🔓 Modo Manual (ignorar sinais)</span>
                 </div>
+                <!-- ✅ Híbrido: sinal informativo mas botões SEMPRE ativos -->
                 <div id="hybridStatus" class="hybrid-status hidden">
                     <div id="hybridSignal"></div>
                     <div id="hybridConfidence"></div>
                 </div>
                 <div class="trade-buttons">
-                    <button class="btn-buy"  id="hybridBuyBtn"  onclick="executeTrade('BUY')">📈 COMPRAR</button>
-                    <button class="btn-sell" id="hybridSellBtn" onclick="executeTrade('SELL')">📉 VENDER</button>
+                    <!-- ✅ Botões NUNCA bloqueados — ao critério do utilizador -->
+                    <button class="btn-buy"  onclick="executeTrade('BUY')">📈 COMPRAR</button>
+                    <button class="btn-sell" onclick="executeTrade('SELL')">📉 VENDER</button>
                 </div>
                 <div class="flex">
                     <button class="btn-martingale"       onclick="aplicarMartingale()">🎲 MARTINGALE</button>
@@ -337,23 +320,9 @@
                 </div>
                 <div class="martingale-status">
                     <div>Martingale: <span id="martingaleActive">DESATIVADO</span></div>
-                    <div>Próximo valor: <span id="martingaleNext">$0.35</span></div>
+                    <div>Próximo: <span id="martingaleNext">$0.35</span></div>
                 </div>
-                <button class="btn-small" style="width:100%; margin-top:8px;" onclick="togglePause()" id="pauseBtn">⏸️ PAUSAR</button>
-            </div>
-
-            <!-- PAINEL DE TRADE DE DÍGITOS (valor + martingale) -->
-            <div class="card hidden" id="digitTradePanel">
-                <div class="card-title">🎯 CONFIGURAR APOSTA</div>
-                <input type="number" id="amountDigit" class="amount-input" value="0.35" step="0.01" min="0.35" max="100" placeholder="Valor da aposta">
-                <div class="flex">
-                    <button class="btn-martingale"       onclick="aplicarMartingaleDigit()">🎲 MARTINGALE</button>
-                    <button class="btn-martingale-reset" onclick="resetarMartingale()">🔄 RESETAR</button>
-                </div>
-                <div class="martingale-status">
-                    <div>Martingale: <span id="martingaleActiveDigit">DESATIVADO</span></div>
-                    <div>Próximo valor: <span id="martingaleNextDigit">$0.35</span></div>
-                </div>
+                <button class="btn-small" style="width:100%;margin-top:8px;" onclick="togglePause()" id="pauseBtn">⏸️ PAUSAR</button>
             </div>
         </div>
 
@@ -396,13 +365,13 @@
                     <button id="btnDemo" class="account-btn active" onclick="selectAccount('demo')">🎮 DEMO</button>
                     <button id="btnReal" class="account-btn" onclick="selectAccount('real')">💰 REAL</button>
                 </div>
-                <div id="accountInfo" class="text-center mt-2" style="font-size:11px; color:#62748c;"></div>
+                <div id="accountInfo" class="text-center mt-2" style="font-size:11px;color:#62748c;"></div>
             </div>
             <div class="card">
                 <div class="card-title">🔑 TOKEN DERIV</div>
                 <input type="password" id="tokenInput" placeholder="Cole seu token aqui" class="amount-input">
                 <button class="btn-primary" onclick="saveToken()">💾 SALVAR</button>
-                <div id="tokenStatus" style="font-size:11px; color:#ffaa00; margin-top:8px;"></div>
+                <div id="tokenStatus" style="font-size:11px;color:#ffaa00;margin-top:8px;"></div>
             </div>
             <div class="card">
                 <div class="card-title">📊 ESTATÍSTICAS</div>
@@ -433,15 +402,15 @@
                 <span>📋 ÚLTIMOS TRADES</span>
                 <button class="btn-clear-history" onclick="limparHistorico()">🗑️ LIMPAR</button>
             </div>
-            <div id="tradesList"><div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div></div>
+            <div id="tradesList"><div class="text-center" style="color:#62748c;padding:20px;">Nenhum trade</div></div>
         </div>
     </div>
 
     <!-- MODAL LOGIN -->
     <div id="authModal" class="modal">
         <div class="modal-content">
-            <h2 style="color:#00f0b5; text-align:center;">FOLOMA</h2>
-            <div style="display:flex; gap:10px; margin:15px 0;">
+            <h2 style="color:#00f0b5;text-align:center;">FOLOMA</h2>
+            <div style="display:flex;gap:10px;margin:15px 0;">
                 <button class="btn-small" style="flex:1;" onclick="showAuthTab('login')">ENTRAR</button>
                 <button class="btn-small" style="flex:1;" onclick="showAuthTab('register')">REGISTAR</button>
                 <button class="btn-small" style="flex:1;" onclick="showForgotPassword()">RECUPERAR</button>
@@ -463,12 +432,11 @@
                 <button class="btn-primary" onclick="requestPasswordReset()">ENVIAR LINK</button>
                 <div id="forgotMessage" class="text-center mt-2" style="color:#ffaa00;"></div>
             </div>
-            <div id="authError" class="text-center mt-2" style="color:#ff4d4d; font-size:12px;"></div>
+            <div id="authError" class="text-center mt-2" style="color:#ff4d4d;font-size:12px;"></div>
         </div>
     </div>
 
     <script>
-        // ===== VARIÁVEIS GLOBAIS =====
         let currentSection = 'dashboard';
         let selectedAccount = 'demo';
         let paused = false;
@@ -476,15 +444,22 @@
         let currentSymbol = 'R_100';
         let modoAtual = 'ativos';
         let isAdmin = false;
-        const symbols = { 'R_100': 'Volatility 100', 'R_75': 'Volatility 75', 'R_50': 'Volatility 50' };
+        const symbols = {'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
+        let secondsToNext = 15;
+        let lastShownDigit = null;
+        let lastHistoryLen = 0;
+        const INTERVAL = 15;
 
-        // Estado dos dígitos lentos
-        let slowDigitHistory  = [];   // lista de dígitos capturados a cada 15s
-        let lastShownDigit    = null; // último dígito exibido
-        let secondsToNext     = 15;   // countdown do servidor
-        const INTERVAL_SEC    = 15;   // duração do ciclo
+        // ── Notificação toast ─────────────────────────────────
+        function showToast(msg, type='info', duration=4000) {
+            const t = document.getElementById('tradeToast');
+            t.className = 'trade-toast show ' + type;
+            t.innerHTML = msg;
+            t.style.display = 'block';
+            setTimeout(() => { t.className = 'trade-toast'; t.style.display = 'none'; }, duration);
+        }
 
-        // ===== MENU =====
+        // ── Menu ───────────────────────────────────────────────
         function toggleMenu() {
             document.getElementById('sideMenu').classList.toggle('open');
             document.getElementById('overlay').classList.toggle('show');
@@ -499,342 +474,352 @@
             if (section === 'admin') carregarAdminUsers();
         }
 
-        // ===== MODO =====
+        // ── Modo ───────────────────────────────────────────────
         function setModo(modo) {
             modoAtual = modo;
-            ['ativos','digitos','hybrid'].forEach(m =>
-                document.getElementById('mode' + m.charAt(0).toUpperCase() + m.slice(1))?.classList.remove('active'));
-            document.getElementById('mode' + modo.charAt(0).toUpperCase() + modo.slice(1))?.classList.add('active');
-
-            document.getElementById('modoAtivosPanel').classList.toggle('hidden', modo !== 'ativos');
+            document.getElementById('modeAtivos').classList.toggle('active', modo === 'ativos');
+            document.getElementById('modeDigitos').classList.toggle('active', modo === 'digitos');
+            document.getElementById('modeHybrid').classList.toggle('active', modo === 'hybrid');
+            document.getElementById('modoAtivosPanel').classList.toggle('hidden', modo === 'digitos');
             document.getElementById('modoDigitosPanel').classList.toggle('hidden', modo !== 'digitos');
             document.getElementById('ativoTradePanel').classList.toggle('hidden', modo === 'digitos');
-            document.getElementById('digitTradePanel').classList.toggle('hidden', modo !== 'digitos');
             document.getElementById('hybridStatus').classList.toggle('hidden', modo !== 'hybrid');
         }
 
-        // ===== ATUALIZAÇÃO DOS DÍGITOS (coração do sistema) =====
+        // ── Painel de dígitos ──────────────────────────────────
         function updateDigitPanel(digits) {
             if (!digits) return;
-
-            // 1. Countdown e barra de progresso
             secondsToNext = digits.seconds_to_next || digits.countdown || 15;
-            document.getElementById('bigCountdown').textContent = `⏱ ${secondsToNext}s para o próximo dígito`;
-            const pct = Math.min(100, (secondsToNext / INTERVAL_SEC) * 100);
+
+            // Barra e countdown
+            const pct = Math.min(100, (secondsToNext / INTERVAL) * 100);
             document.getElementById('timerBar').style.width = pct + '%';
             document.getElementById('timerBar').style.background = secondsToNext <= 3 ? '#ff4d4d' : '#00f0b5';
+            document.getElementById('bigCountdown').textContent = `⏱ ${secondsToNext}s para o próximo dígito`;
+            document.getElementById('tooCloseWarning').style.display = secondsToNext <= 3 ? 'block' : 'none';
 
-            // Aviso se muito perto
-            const warning = document.getElementById('tooCloseWarning');
-            warning.style.display = secondsToNext <= 3 ? 'block' : 'none';
-            document.getElementById('btnOdd').disabled  = secondsToNext <= 3;
-            document.getElementById('btnEven').disabled = secondsToNext <= 3;
-
-            // 2. Dígito principal (só atualiza quando sai novo dígito lento)
+            // Historial
             const recent = digits.recent || [];
             if (recent.length > 0) {
                 const newest = recent[recent.length - 1];
-
-                // Verificar se é novo dígito lento
                 if (newest !== lastShownDigit) {
                     lastShownDigit = newest;
                     const isOdd = newest % 2 !== 0;
-
-                    const bigDigit = document.getElementById('bigDigit');
+                    const bigDigit  = document.getElementById('bigDigit');
                     const bigParity = document.getElementById('bigParity');
                     bigDigit.textContent = newest;
                     bigDigit.className = 'digit-big ' + (isOdd ? 'odd' : 'even');
                     bigParity.textContent = isOdd ? 'ÍMPAR' : 'PAR';
                     bigParity.className = 'digit-parity-label ' + (isOdd ? 'odd' : 'even');
-
-                    // Animação de entrada
                     bigDigit.style.transform = 'scale(1.3)';
                     setTimeout(() => bigDigit.style.transform = 'scale(1)', 300);
                 }
-
-                // 3. Historial dos dígitos lentos
-                if (recent.length !== slowDigitHistory.length ||
-                    recent[recent.length-1] !== slowDigitHistory[slowDigitHistory.length-1]) {
-                    slowDigitHistory = [...recent];
+                if (recent.length !== lastHistoryLen) {
+                    lastHistoryLen = recent.length;
                     let html = '';
                     recent.forEach((d, i) => {
                         const isOdd = d % 2 !== 0;
                         const isNew = i === recent.length - 1;
-                        html += `<div class="digit-box ${isOdd ? 'odd' : 'even'}${isNew ? ' new' : ''}">${d}</div>`;
+                        html += `<div class="digit-box ${isOdd?'odd':'even'}${isNew?' new':''}">${d}</div>`;
                     });
                     document.getElementById('slowDigitsHistory').innerHTML = html;
                 }
-            } else {
-                document.getElementById('slowDigitsHistory').innerHTML =
-                    '<div style="color:#62748c;font-size:12px;">Aguardando primeiros dígitos (15s)...</div>';
             }
 
-            // 4. Streak e análise
+            // Streak
             const analysis = digits.analysis || {};
             const streak = analysis.streak || 0;
-            const streakParity = analysis.streak_parity || '---';
-
-            const streakVal = document.getElementById('streakVal');
-            streakVal.textContent = streak > 0 ? streak : '—';
-            streakVal.className = 'streak-val ' + (streak === 0 ? 'none' : (streakParity === 'PAR' ? 'even' : 'odd'));
+            const sp = analysis.streak_parity || '---';
+            const sv = document.getElementById('streakVal');
+            sv.textContent = streak > 0 ? streak : '—';
+            sv.className = 'streak-val ' + (streak === 0 ? 'none' : sp === 'PAR' ? 'even' : 'odd');
             document.getElementById('streakLabel').textContent =
-                streak > 0 ? `${streakParity} consecutivo${streak > 1 ? 's' : ''}` : 'aguardando...';
+                streak > 0 ? `${sp} consecutivo${streak>1?'s':''}` : 'aguardando...';
             document.getElementById('totalDigits').textContent = analysis.total_digits || recent.length || 0;
 
-            // 5. Sinal de recomendação
-            const signalBox  = document.getElementById('digitSignalBox');
-            const signalText = document.getElementById('digitSignalText');
+            // Sinal principal
+            const sb = document.getElementById('digitSignalBox');
+            const st = document.getElementById('digitSignalText');
+            const allSignals = analysis.all_signals || [];
             if (analysis.recommended_action && analysis.confidence > 0) {
                 const isOddRec = analysis.recommended_action === 'BUY';
-                signalBox.className = 'signal-box active';
-                signalText.innerHTML =
-                    `⚡ ${analysis.reason || ''}<br>` +
-                    `<span style="font-size:12px;opacity:0.8;">Sugestão: aposte em <strong>${isOddRec ? 'ÍMPAR' : 'PAR'}</strong></span>`;
+                const cls = analysis.confidence >= 60 ? 'active' : 'warn';
+                sb.className = 'signal-box-main ' + cls;
+                st.innerHTML =
+                    `⚡ ${analysis.reason}<br>` +
+                    `<span style="font-size:12px;opacity:0.85;">→ Sugestão: aposte em <strong>${isOddRec?'ÍMPAR':'PAR'}</strong></span>`;
             } else {
-                signalBox.className = 'signal-box none';
-                signalText.textContent = analysis.reason || 'Aguardando padrão (mínimo 3 consecutivos)...';
+                sb.className = 'signal-box-main none';
+                st.textContent = analysis.reason || 'Distribuição equilibrada. Sem sinal claro.';
             }
 
-            // 6. Percentagens
+            // Todos os sinais detectados
+            let sigHtml = '';
+            allSignals.forEach(s => {
+                const label = s.action === 'BUY' ? '→ ÍMPAR' : '→ PAR';
+                const typeLabel = {streak:'Streak',dominance:'Dominância',alternating:'Alternância',imbalance:'Desequilíbrio'}[s.type] || s.type;
+                sigHtml += `<div class="signal-item ${s.type}">
+                    <span>${typeLabel}: ${s.reason.split('→')[0].trim()}</span>
+                    <span class="sig-conf">${s.confidence}% ${label}</span>
+                </div>`;
+            });
+            document.getElementById('allSignalsList').innerHTML = sigHtml;
+
+            // Percentagens
             document.getElementById('oddPercent').textContent  = (analysis.odd_pct  || 0) + '%';
             document.getElementById('evenPercent').textContent = (analysis.even_pct || 0) + '%';
             document.getElementById('oddBar').style.width  = (analysis.odd_pct  || 50) + '%';
             document.getElementById('evenBar').style.width = (analysis.even_pct || 50) + '%';
         }
 
-        // ===== ATUALIZAÇÃO GERAL =====
+        // ── Actualização geral ─────────────────────────────────
         function updateAll() {
-            fetch('/api/status')
-                .then(r => r.json())
-                .then(data => {
-                    if (data.error) return;
-                    const bot = data.bot;
-                    if (!bot) return;
+            fetch('/api/status').then(r => r.json()).then(data => {
+                if (data.error) return;
+                const bot = data.bot;
+                if (!bot) return;
 
-                    // Status
-                    const dot  = document.getElementById('statusDot');
-                    const text = document.getElementById('statusText');
-                    const btn  = document.getElementById('connectBtn');
-                    if (bot.connected && bot.authorized) {
-                        dot.className = 'dot connected';
-                        text.textContent = 'Conectado';
-                        btn.textContent = '✅ CONECTADO';
-                        btn.style.background = '#2a3342';
-                        isConnected = true;
+                const dot = document.getElementById('statusDot');
+                const txt = document.getElementById('statusText');
+                const btn = document.getElementById('connectBtn');
+                if (bot.connected && bot.authorized) {
+                    dot.className = 'dot connected'; txt.textContent = 'Conectado';
+                    btn.textContent = '✅ CONECTADO'; btn.style.background = '#2a3342'; isConnected = true;
+                } else {
+                    dot.className = 'dot'; txt.textContent = 'Desconectado';
+                    if (isConnected) { btn.textContent = '🔌 CONECTAR'; btn.style.background = '#00f0b5'; }
+                    isConnected = false;
+                }
+
+                document.getElementById('balance').textContent  = (bot.balance || 0).toFixed(2);
+                document.getElementById('currency').textContent = bot.currency || 'USD';
+                document.getElementById('price').textContent    = (bot.price || 0).toFixed(4);
+
+                const signal = bot.signal || 'NEUTRAL';
+                const badge = document.getElementById('signalBadge');
+                badge.textContent = signal;
+                badge.className = 'signal-badge ' + signal.toLowerCase();
+                document.getElementById('signalConfidence').textContent = (bot.confidence || 0) + '%';
+
+                if (bot.analysis) {
+                    document.getElementById('trendScore').textContent = (bot.analysis.trend?.score||0).toFixed(1);
+                    document.getElementById('trendDesc').textContent  = bot.analysis.trend?.desc||'---';
+                    document.getElementById('rsiScore').textContent   = (bot.analysis.rsi?.score||0).toFixed(1);
+                    document.getElementById('rsiDesc').textContent    = bot.analysis.rsi?.desc||'---';
+                    document.getElementById('macdScore').textContent  = (bot.analysis.macd?.score||0).toFixed(1);
+                    document.getElementById('macdDesc').textContent   = bot.analysis.macd?.desc||'---';
+                    document.getElementById('bbScore').textContent    = (bot.analysis.bollinger?.score||0).toFixed(1);
+                    document.getElementById('bbDesc').textContent     = bot.analysis.bollinger?.desc||'---';
+                }
+
+                document.getElementById('totalTrades').textContent = bot.stats?.total || 0;
+                document.getElementById('winRate').textContent     = (bot.stats?.win_rate||0).toFixed(1)+'%';
+                const pl = bot.stats?.profit_loss || 0;
+                const plEl = document.getElementById('profitLoss');
+                plEl.textContent = (pl>=0?'+':'')+'$'+pl.toFixed(2);
+                plEl.style.color = pl >= 0 ? '#00f0b5' : '#ff4d4d';
+                document.getElementById('totalReturn').textContent = (bot.stats?.total_return||0).toFixed(1)+'%';
+                paused = bot.paused || false;
+                document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
+
+                // Dígitos
+                if (data.digits) updateDigitPanel(data.digits);
+
+                // Híbrido — apenas informativo, botões nunca bloqueados
+                if (modoAtual === 'hybrid' && data.digits) {
+                    const da = data.digits.analysis;
+                    const dr = da?.recommended_action;
+                    const dc = da?.confidence || 0;
+                    let msg = '', color = '#ffaa00';
+                    if (bot.signal === 'BUY' && dr === 'BUY') {
+                        msg = `✅ COMPRA CONFIRMADA – Confiança: ${((bot.confidence+dc)/2).toFixed(1)}%`;
+                        color = '#00f0b5';
+                    } else if (bot.signal === 'SELL' && dr === 'SELL') {
+                        msg = `✅ VENDA CONFIRMADA – Confiança: ${((bot.confidence+dc)/2).toFixed(1)}%`;
+                        color = '#00f0b5';
                     } else {
-                        dot.className = 'dot';
-                        text.textContent = 'Desconectado';
-                        if (isConnected) { btn.textContent = '🔌 CONECTAR'; btn.style.background = '#00f0b5'; }
-                        isConnected = false;
+                        msg = `⚠️ Sinais divergentes (Ativo: ${bot.signal}, Dígitos: ${dr||'NEUTRO'})`;
                     }
-
-                    // Saldo e preço
-                    document.getElementById('balance').textContent  = (bot.balance || 0).toFixed(2);
-                    document.getElementById('currency').textContent = bot.currency || 'USD';
-                    document.getElementById('price').textContent    = (bot.price || 0).toFixed(4);
-
-                    const signal = bot.signal || 'NEUTRAL';
-                    const badge  = document.getElementById('signalBadge');
-                    badge.textContent = signal;
-                    badge.className = 'signal-badge ' + signal.toLowerCase();
-                    document.getElementById('signalConfidence').textContent = (bot.confidence || 0) + '%';
-
-                    if (bot.analysis) {
-                        document.getElementById('trendScore').textContent = (bot.analysis.trend?.score || 0).toFixed(1);
-                        document.getElementById('trendDesc').textContent  = bot.analysis.trend?.desc  || '---';
-                        document.getElementById('rsiScore').textContent   = (bot.analysis.rsi?.score  || 0).toFixed(1);
-                        document.getElementById('rsiDesc').textContent    = bot.analysis.rsi?.desc    || '---';
-                        document.getElementById('macdScore').textContent  = (bot.analysis.macd?.score || 0).toFixed(1);
-                        document.getElementById('macdDesc').textContent   = bot.analysis.macd?.desc   || '---';
-                        document.getElementById('bbScore').textContent    = (bot.analysis.bollinger?.score || 0).toFixed(1);
-                        document.getElementById('bbDesc').textContent     = bot.analysis.bollinger?.desc   || '---';
-                    }
-
-                    document.getElementById('totalTrades').textContent = bot.stats?.total || 0;
-                    document.getElementById('winRate').textContent  = (bot.stats?.win_rate || 0).toFixed(1) + '%';
-                    const pl = bot.stats?.profit_loss || 0;
-                    const plElem = document.getElementById('profitLoss');
-                    plElem.textContent = (pl >= 0 ? '+' : '') + '$' + pl.toFixed(2);
-                    plElem.style.color = pl >= 0 ? '#00f0b5' : '#ff4d4d';
-                    document.getElementById('totalReturn').textContent = (bot.stats?.total_return || 0).toFixed(1) + '%';
-                    paused = bot.paused || false;
-                    document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
-
-                    // ✅ Painel de dígitos
-                    if (data.digits) {
-                        updateDigitPanel(data.digits);
-                    }
-
-                    // Modo híbrido
-                    if (modoAtual === 'hybrid') {
-                        const digitAnalysis = data.digits?.analysis;
-                        const digitRecommend = digitAnalysis?.recommended_action;
-                        const digitConf = digitAnalysis?.confidence || 0;
-                        const ativoSignal = bot.signal;
-                        const ativoConf = bot.confidence;
-                        let canTrade = false, combinedConf = 0, hybridMsg = '', hybridColor = '#ffaa00';
-
-                        if (ativoSignal === 'BUY' && digitRecommend === 'BUY') {
-                            combinedConf = (ativoConf + digitConf) / 2;
-                            hybridMsg = `✅ COMPRA CONFIRMADA – Confiança: ${combinedConf.toFixed(1)}%`;
-                            hybridColor = '#00f0b5'; canTrade = true;
-                        } else if (ativoSignal === 'SELL' && digitRecommend === 'SELL') {
-                            combinedConf = (ativoConf + digitConf) / 2;
-                            hybridMsg = `✅ VENDA CONFIRMADA – Confiança: ${combinedConf.toFixed(1)}%`;
-                            hybridColor = '#00f0b5'; canTrade = true;
-                        } else {
-                            hybridMsg = `⚠️ Sinais divergentes (Ativo: ${ativoSignal}, Dígitos: ${digitRecommend||'NEUTRO'})`;
-                            hybridColor = '#ff4d4d';
-                        }
-                        document.getElementById('hybridSignal').innerHTML = hybridMsg;
-                        document.getElementById('hybridSignal').style.color = hybridColor;
-                        document.getElementById('hybridConfidence').textContent = canTrade ? 'Pronto para trade!' : 'Aguarde convergência...';
-                        document.getElementById('hybridBuyBtn').disabled  = !canTrade;
-                        document.getElementById('hybridSellBtn').disabled = !canTrade;
-                        document.getElementById('hybridBuyBtn').style.opacity  = canTrade ? '1' : '0.5';
-                        document.getElementById('hybridSellBtn').style.opacity = canTrade ? '1' : '0.5';
-                    }
-                })
-                .catch(() => {});
+                    document.getElementById('hybridSignal').innerHTML = msg;
+                    document.getElementById('hybridSignal').style.color = color;
+                    document.getElementById('hybridConfidence').textContent = 'Botões sempre disponíveis — decisão sua.';
+                }
+            }).catch(() => {});
         }
 
-        // ===== AUTENTICAÇÃO =====
+        // ── Histórico ─────────────────────────────────────────
+        let lastTradeCount = 0;
+        function carregarHistorico() {
+            fetch('/api/report').then(r => r.json()).then(data => {
+                const hist = data.historico || [];
+                const tradesList = document.getElementById('tradesList');
+                if (!hist.length) {
+                    tradesList.innerHTML = '<div class="text-center" style="color:#62748c;padding:20px;">Nenhum trade</div>';
+                    return;
+                }
+                // Mostrar toast se novo trade foi registado
+                if (hist.length > lastTradeCount && lastTradeCount > 0) {
+                    const last = hist[hist.length - 1];
+                    if (last.result === 'win') {
+                        showToast(`✅ GANHOU! +$${(last.profit||0).toFixed(2)}`, 'win', 5000);
+                    } else if (last.result === 'loss') {
+                        showToast(`❌ PERDEU -$${(last.amount||0).toFixed(2)}`, 'loss', 5000);
+                    }
+                }
+                lastTradeCount = hist.length;
+
+                let html = '';
+                hist.slice(-10).reverse().forEach(t => {
+                    const isWin  = t.result === 'win';
+                    const isLoss = t.result === 'loss';
+                    const amt    = t.amount || 0;
+                    const profit = isWin ? (t.profit || amt * 0.85) : (isLoss ? -amt : 0);
+                    const color  = isWin ? '#00f0b5' : (isLoss ? '#ff4d4d' : '#ffaa00');
+                    const res    = isWin ? `✅ +$${profit.toFixed(2)}` : (isLoss ? `❌ -$${amt.toFixed(2)}` : '⏳');
+                    let action = t.action || '';
+                    if (action === 'DIGITODD')  action = '🎲 ÍMPAR';
+                    else if (action === 'DIGITEVEN') action = '🎲 PAR';
+                    else if (action === 'CALL') action = '📈 COMPRA';
+                    else if (action === 'PUT')  action = '📉 VENDA';
+                    html += `<div class="trade-item">
+                        <div>${t.time?.slice(5,16)||'---'}</div>
+                        <div>${action}</div>
+                        <div>$${amt.toFixed(2)}</div>
+                        <div style="color:${color}">${res}</div>
+                    </div>`;
+                });
+                tradesList.innerHTML = html;
+            }).catch(() => {});
+        }
+
+        // ── Autenticação ───────────────────────────────────────
         function showAuthTab(tab) {
             ['loginForm','registerForm','forgotForm'].forEach(f =>
                 document.getElementById(f).style.display = 'none');
-            if (tab === 'login')    document.getElementById('loginForm').style.display    = 'block';
-            if (tab === 'register') document.getElementById('registerForm').style.display = 'block';
-            if (tab === 'forgot')   document.getElementById('forgotForm').style.display   = 'block';
+            document.getElementById(tab === 'login' ? 'loginForm' : tab === 'register' ? 'registerForm' : 'forgotForm').style.display = 'block';
         }
         function showForgotPassword() { showAuthTab('forgot'); }
         function register() {
-            const data = {
-                name: document.getElementById('regName').value,
-                email: document.getElementById('regEmail').value,
-                password: document.getElementById('regPassword').value,
-                referral_code: document.getElementById('regReferral').value
-            };
-            fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
-                .then(r=>r.json()).then(data => {
-                    if (data.error) document.getElementById('authError').textContent = data.error;
-                    else { alert('✅ Conta criada! Faça login.'); showAuthTab('login'); }
-                });
+            const d = {name:document.getElementById('regName').value,email:document.getElementById('regEmail').value,
+                password:document.getElementById('regPassword').value,referral_code:document.getElementById('regReferral').value};
+            fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
+                .then(r=>r.json()).then(d => { if(d.error) document.getElementById('authError').textContent=d.error; else { alert('✅ Conta criada!'); showAuthTab('login'); }});
         }
         function login() {
             const email = document.getElementById('loginEmail').value;
             const password = document.getElementById('loginPassword').value;
-            fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
-                .then(r=>r.json()).then(data => {
-                    if (data.error) { document.getElementById('authError').textContent = data.error; return; }
+            fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
+                .then(r=>r.json()).then(d => {
+                    if (d.error) { document.getElementById('authError').textContent = d.error; return; }
                     document.getElementById('authModal').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';
-                    if (email === 'admin@foloma.com') {
-                        isAdmin = true;
-                        document.getElementById('adminMenuItem').style.display = 'block';
-                    }
+                    if (email === 'admin@foloma.com') { isAdmin=true; document.getElementById('adminMenuItem').style.display='block'; }
                     initPlatform();
                 });
         }
         function requestPasswordReset() {
             const email = document.getElementById('forgotEmail').value;
-            fetch('/api/auth/reset-password', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})
-                .then(r=>r.json()).then(data => {
-                    const msgDiv = document.getElementById('forgotMessage');
-                    msgDiv.innerHTML = data.error ? '❌ '+data.error : '✅ '+(data.message||'Link enviado!');
+            fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})
+                .then(r=>r.json()).then(d => {
+                    document.getElementById('forgotMessage').innerHTML = d.error ? '❌ '+d.error : '✅ '+(d.message||'Link enviado!');
                 });
         }
         function logout() { fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload()); }
 
-        // ===== PLATAFORMA =====
+        // ── Plataforma ─────────────────────────────────────────
         function initPlatform() {
             initSymbolSelector();
             selectAccount('demo');
             setModo('ativos');
             updateAll();
+            carregarHistorico();
             setInterval(updateAll, 2000);
-            setInterval(carregarHistorico, 5000);
+            setInterval(carregarHistorico, 3000);
             setInterval(atualizarMartingale, 5000);
             carregarLinkAfiliado();
         }
         function initSymbolSelector() {
             let html = '';
-            for (let [key, value] of Object.entries(symbols)) {
-                html += `<button class="symbol-btn ${key===currentSymbol?'active':''}" onclick="changeSymbol('${key}')">${value}</button>`;
-            }
+            for (let [k,v] of Object.entries(symbols))
+                html += `<button class="symbol-btn ${k===currentSymbol?'active':''}" onclick="changeSymbol('${k}')">${v}</button>`;
             document.getElementById('symbol-selector').innerHTML = html;
         }
         function changeSymbol(symbol) {
             currentSymbol = symbol;
             fetch('/api/symbol/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})});
-            document.querySelectorAll('.symbol-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.symbol-btn').forEach(b=>b.classList.remove('active'));
             event.target.classList.add('active');
         }
         function selectAccount(account) {
             selectedAccount = account;
-            document.getElementById('btnDemo').classList.toggle('active', account === 'demo');
-            document.getElementById('btnReal').classList.toggle('active', account === 'real');
-            document.getElementById('accountInfo').innerHTML = account === 'demo'
+            document.getElementById('btnDemo').classList.toggle('active', account==='demo');
+            document.getElementById('btnReal').classList.toggle('active', account==='real');
+            document.getElementById('accountInfo').innerHTML = account==='demo'
                 ? '🎮 Conta Demo - Saldo virtual, sem risco'
-                : '💰 Conta Real - Ganhe comissão de 0.5% por trade';
+                : '💰 Conta Real - Comissão de 0.5% por trade';
         }
         function saveToken() {
             const token = document.getElementById('tokenInput').value;
             if (!token) { alert('Insira o token'); return; }
             fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,account_type:selectedAccount})})
-                .then(r=>r.json()).then(data => {
-                    if (data.error) alert('❌ '+data.error);
-                    else { alert('✅ Token guardado!'); document.getElementById('tokenStatus').innerHTML = '✅ Token configurado'; }
+                .then(r=>r.json()).then(d => {
+                    if(d.error) alert('❌ '+d.error);
+                    else { alert('✅ Token guardado!'); document.getElementById('tokenStatus').innerHTML='✅ Token configurado'; }
                 });
         }
         function conectar() {
             if (isConnected) { alert('Já conectado!'); return; }
             const btn = document.getElementById('connectBtn');
-            const statusDiv = document.getElementById('connectStatus');
             btn.disabled = true; btn.textContent = '🔄 CONECTANDO...';
-            statusDiv.innerHTML = '⏳ Conectando à Deriv...';
+            document.getElementById('connectStatus').innerHTML = '⏳ Conectando...';
             fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:selectedAccount,symbol:currentSymbol})})
-                .then(r=>r.json()).then(data => {
-                    if (data.error) {
-                        statusDiv.innerHTML = '❌ '+data.error;
-                        btn.disabled = false; btn.textContent = '🔌 CONECTAR';
+                .then(r=>r.json()).then(d => {
+                    if (d.error) {
+                        document.getElementById('connectStatus').innerHTML = '❌ '+d.error;
+                        btn.disabled=false; btn.textContent='🔌 CONECTAR';
                     } else {
-                        statusDiv.innerHTML = '✅ Conectado!';
-                        setTimeout(() => statusDiv.innerHTML = '', 3000);
-                        btn.disabled = false; btn.textContent = '✅ CONECTADO'; btn.style.background = '#2a3342';
-                        isConnected = true;
+                        document.getElementById('connectStatus').innerHTML = '✅ Conectado!';
+                        setTimeout(()=>document.getElementById('connectStatus').innerHTML='', 3000);
+                        btn.disabled=false; btn.textContent='✅ CONECTADO'; btn.style.background='#2a3342'; isConnected=true;
                     }
                 });
         }
 
-        // ===== TRADES =====
+        // ── Trades ATIVOS ─────────────────────────────────────
         function executeTrade(action) {
             const amount = parseFloat(document.getElementById('amount').value);
             if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
             const isManual = document.getElementById('manualMode').checked;
-            let url = isManual ? '/api/trade/manual' : (modoAtual === 'hybrid' ? '/api/trade/hybrid' : '/api/trade');
+            const url = isManual ? '/api/trade/manual' : (modoAtual === 'hybrid' ? '/api/trade/hybrid' : '/api/trade');
             fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,amount})})
-                .then(r=>r.json()).then(data => {
-                    if (data.error) alert('❌ '+data.error);
-                    else alert(data.message || '✅ Trade executado!');
+                .then(r=>r.json()).then(d => {
+                    if (d.error) showToast('❌ '+d.error, 'loss');
+                    else showToast('⏳ '+(d.message||'Trade enviado! Aguardando resultado...'), 'info', 3000);
                 });
         }
 
-        // ✅ APOSTA NOS DÍGITOS — aposta no que SAIRÁ no próximo dígito de 15s
+        // ── Trade DÍGITOS ──────────────────────────────────────
         function executeDigitTrade(prediction) {
             if (secondsToNext <= 3) {
-                alert('⚠️ Dígito a sair em menos de 3s! Aguarde o próximo ciclo.');
+                showToast('⚠️ Dígito a sair em menos de 3s! Aguarde.', 'loss', 3000);
                 return;
             }
-            const amount = parseFloat(document.getElementById('amountDigit').value || document.getElementById('amount').value);
+            const amountEl = document.getElementById('amountDigit');
+            const amount = parseFloat(amountEl.value || '0.35');
             if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
-
             const label = prediction === 'odd' ? 'ÍMPAR' : 'PAR';
-            if (!confirm(`Apostar $${amount.toFixed(2)} em ${label}?\nO resultado sairá em ~${secondsToNext}s.`)) return;
 
             fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction,amount})})
-                .then(r=>r.json()).then(data => {
-                    if (data.error) alert('❌ '+data.error);
-                    else alert(`✅ Aposta em ${label} enviada!\n${data.message||''}`);
+                .then(r=>r.json()).then(d => {
+                    if (d.error) {
+                        showToast('❌ '+d.error, 'loss', 4000);
+                    } else {
+                        showToast(`⏳ Apostado $${amount.toFixed(2)} em ${label}!\nResultado em ~${secondsToNext}s`, 'info', 4000);
+                        // Recarregar histórico logo após envio para mostrar trade pendente
+                        setTimeout(carregarHistorico, 1000);
+                        setTimeout(carregarHistorico, 5000);
+                        setTimeout(carregarHistorico, 15000);
+                    }
                 });
         }
 
@@ -843,40 +828,20 @@
             fetch('/api/pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused})});
             document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
         }
-        function aplicarMartingale() {
+
+        function aplicarMartingale() { _aplicarMartingale('amount'); }
+        function aplicarMartingaleDigit() { _aplicarMartingale('amountDigit'); }
+        function _aplicarMartingale(fieldId) {
             fetch('/api/report').then(r=>r.json()).then(data => {
-                const historico = data.historico || [];
-                if (!historico.length) { alert('⚠️ Nenhum trade anterior'); return; }
-                const ultimo = historico[historico.length-1];
-                if (ultimo.result === 'win') { alert('✅ Último foi GANHO. Martingale só após perda.'); return; }
-                if (confirm(`⚠️ Último trade PERDA de $${ultimo.amount}\nAplicar Martingale (2x)?`)) {
-                    fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:ultimo.amount})})
-                        .then(r=>r.json()).then(data => {
-                            if (data.error) alert('❌ '+data.error);
-                            else {
-                                alert(data.martingale.message);
-                                document.getElementById('amount').value = data.martingale.next_amount.toFixed(2);
-                                atualizarMartingale();
-                            }
-                        });
-                }
-            });
-        }
-        function aplicarMartingaleDigit() {
-            fetch('/api/report').then(r=>r.json()).then(data => {
-                const historico = data.historico || [];
-                if (!historico.length) { alert('⚠️ Nenhum trade anterior'); return; }
-                const ultimo = historico[historico.length-1];
-                if (ultimo.result === 'win') { alert('✅ Último foi GANHO. Martingale só após perda.'); return; }
-                if (confirm(`⚠️ Último PERDA de $${ultimo.amount}\nAplicar Martingale (2x)?`)) {
-                    fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:ultimo.amount})})
-                        .then(r=>r.json()).then(data => {
-                            if (data.error) alert('❌ '+data.error);
-                            else {
-                                alert(data.martingale.message);
-                                document.getElementById('amountDigit').value = data.martingale.next_amount.toFixed(2);
-                                atualizarMartingale();
-                            }
+                const hist = data.historico || [];
+                if (!hist.length) { alert('⚠️ Nenhum trade anterior'); return; }
+                const last = hist[hist.length-1];
+                if (last.result === 'win') { alert('✅ Último foi GANHO. Martingale só após perda.'); return; }
+                if (confirm(`⚠️ Último PERDA $${last.amount}\nAplicar Martingale (2x)?`)) {
+                    fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:last.amount})})
+                        .then(r=>r.json()).then(d => {
+                            if (d.error) alert('❌ '+d.error);
+                            else { alert(d.martingale.message); document.getElementById(fieldId).value=d.martingale.next_amount.toFixed(2); atualizarMartingale(); }
                         });
                 }
             });
@@ -892,125 +857,74 @@
             }
         }
         function atualizarMartingale() {
-            fetch('/api/martingale/status').then(r=>r.json()).then(data => {
-                const activeSpan = document.getElementById('martingaleActive');
-                const nextSpan   = document.getElementById('martingaleNext');
-                const activeSpanD = document.getElementById('martingaleActiveDigit');
-                const nextSpanD   = document.getElementById('martingaleNextDigit');
-                if (data.active) {
-                    const txt = `ATIVO (PASSO ${data.step}/${data.max_steps})`;
-                    if (activeSpan) { activeSpan.textContent = txt; activeSpan.style.color = '#00f0b5'; }
-                    if (activeSpanD){ activeSpanD.textContent = txt; activeSpanD.style.color = '#00f0b5'; }
-                } else {
-                    if (activeSpan) { activeSpan.textContent = 'DESATIVADO'; activeSpan.style.color = '#ffaa00'; }
-                    if (activeSpanD){ activeSpanD.textContent = 'DESATIVADO'; activeSpanD.style.color = '#ffaa00'; }
-                }
-                const nextTxt = '$' + data.next_amount.toFixed(2);
-                if (nextSpan)  nextSpan.textContent  = nextTxt;
-                if (nextSpanD) nextSpanD.textContent = nextTxt;
+            fetch('/api/martingale/status').then(r=>r.json()).then(d => {
+                const txt = d.active ? `ATIVO (PASSO ${d.step}/${d.max_steps})` : 'DESATIVADO';
+                const color = d.active ? '#00f0b5' : '#ffaa00';
+                const next = '$'+d.next_amount.toFixed(2);
+                ['martingaleActive','martingaleActiveDigit'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { el.textContent=txt; el.style.color=color; }
+                });
+                ['martingaleNext','martingaleNextDigit'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = next;
+                });
             });
         }
         function limparHistorico() {
-            if (confirm('⚠️ Apagar todo o histórico? Esta ação não pode ser desfeita.')) {
+            if (confirm('⚠️ Apagar todo o histórico?')) {
                 fetch('/api/clear_history',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-                    .then(r=>r.json()).then(data => {
-                        if (data.error) alert('❌ '+data.error);
-                        else { alert('✅ Histórico apagado!'); carregarHistorico(); }
-                    });
+                    .then(r=>r.json()).then(d => { if(d.error) alert('❌ '+d.error); else { showToast('✅ Histórico apagado!','info'); carregarHistorico(); lastTradeCount=0; }});
             }
         }
-        function carregarHistorico() {
-            fetch('/api/report').then(r=>r.json()).then(data => {
-                const historico = data.historico || [];
-                const tradesList = document.getElementById('tradesList');
-                if (!historico.length) { tradesList.innerHTML = '<div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>'; return; }
-                let html = '';
-                historico.slice(-10).reverse().forEach(trade => {
-                    const isWin  = trade.result === 'win';
-                    const isLoss = trade.result === 'loss';
-                    const displayAmount = trade.amount || 0;
-                    const profitAmount  = isWin ? (trade.profit || displayAmount * 0.85) : (isLoss ? -displayAmount : 0);
-                    const resultColor   = isWin ? '#00f0b5' : (isLoss ? '#ff4d4d' : '#ffaa00');
-                    const resultText    = isWin ? `✅ +$${profitAmount.toFixed(2)}` : (isLoss ? `❌ -$${displayAmount.toFixed(2)}` : '⏳ PENDENTE');
-                    let action = trade.action || '';
-                    if (action === 'DIGITODD')  action = '🎲 ÍMPAR';
-                    else if (action === 'DIGITEVEN') action = '🎲 PAR';
-                    else if (action === 'CALL')  action = '📈 COMPRA';
-                    else if (action === 'PUT')   action = '📉 VENDA';
-                    html += `<div class="trade-item">
-                        <div>${trade.time?.slice(5,16)||'---'}</div>
-                        <div>${action}</div>
-                        <div>$${displayAmount.toFixed(2)}</div>
-                        <div style="color:${resultColor}">${resultText}</div>
-                    </div>`;
-                });
-                tradesList.innerHTML = html;
-            });
-        }
         function carregarLinkAfiliado() {
-            fetch('/api/affiliate/link').then(r=>r.json()).then(data => {
-                if (data.link) document.getElementById('referralLink').value = data.link;
-            }).catch(() => {});
-            fetch('/api/affiliate/stats').then(r=>r.json()).then(data => {
-                document.getElementById('refCount').textContent = data.total_referrals || 0;
-                document.getElementById('refCommission').textContent = '$'+(data.total_commission||0);
-            }).catch(() => {});
+            fetch('/api/affiliate/link').then(r=>r.json()).then(d => { if(d.link) document.getElementById('referralLink').value=d.link; }).catch(()=>{});
+            fetch('/api/affiliate/stats').then(r=>r.json()).then(d => {
+                document.getElementById('refCount').textContent = d.total_referrals||0;
+                document.getElementById('refCommission').textContent = '$'+(d.total_commission||0);
+            }).catch(()=>{});
         }
-        function copiarLink() {
-            const link = document.getElementById('referralLink');
-            link.select(); document.execCommand('copy'); alert('✅ Link copiado!');
-        }
+        function copiarLink() { const l=document.getElementById('referralLink'); l.select(); document.execCommand('copy'); alert('✅ Link copiado!'); }
         function realizarDeposito() {
-            const amount = parseFloat(document.getElementById('depositAmount').value);
-            const method = document.getElementById('depositMethod').value;
-            if (!amount || amount < 10) { alert('Valor mínimo $10'); return; }
+            const amount=parseFloat(document.getElementById('depositAmount').value);
+            const method=document.getElementById('depositMethod').value;
+            if (!amount||amount<10) { alert('Valor mínimo $10'); return; }
             fetch('/api/payment/deposit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount,currency:'USD',method})})
-                .then(r=>r.json()).then(data => {
-                    if (data.error) alert('❌ '+data.error);
-                    else { alert('✅ '+(data.message||'Depósito solicitado!')); document.getElementById('depositAmount').value=''; }
-                });
+                .then(r=>r.json()).then(d => { if(d.error) alert('❌ '+d.error); else { alert('✅ '+(d.message||'Depósito solicitado!')); document.getElementById('depositAmount').value=''; }});
         }
         function realizarSaque() {
-            const amount = parseFloat(document.getElementById('withdrawAmount').value);
-            const method = document.getElementById('withdrawMethod').value;
-            if (!amount || amount < 10) { alert('Valor mínimo $10'); return; }
+            const amount=parseFloat(document.getElementById('withdrawAmount').value);
+            const method=document.getElementById('withdrawMethod').value;
+            if (!amount||amount<10) { alert('Valor mínimo $10'); return; }
             fetch('/api/payment/withdraw',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount,currency:'USD',method})})
-                .then(r=>r.json()).then(data => {
-                    if (data.error) alert('❌ '+data.error);
-                    else { alert('✅ '+(data.message||'Saque solicitado!')); document.getElementById('withdrawAmount').value=''; }
-                });
+                .then(r=>r.json()).then(d => { if(d.error) alert('❌ '+d.error); else { alert('✅ '+(d.message||'Saque solicitado!')); document.getElementById('withdrawAmount').value=''; }});
         }
         function carregarAdminUsers() {
             fetch('/api/admin/users').then(r=>r.json()).then(data => {
-                const container = document.getElementById('adminUsersList');
-                if (data.error) { container.innerHTML = '<div style="color:#ff4d4d;">Erro ao carregar.</div>'; return; }
-                if (!data.users?.length) { container.innerHTML = '<div>Nenhum utilizador.</div>'; return; }
-                let html = '<table class="user-table"><tr><th>Email</th><th>Nome</th><th>Status</th><th>Ação</th></tr>';
+                const c=document.getElementById('adminUsersList');
+                if (data.error) { c.innerHTML='<div style="color:#ff4d4d;">Erro.</div>'; return; }
+                if (!data.users?.length) { c.innerHTML='<div>Nenhum utilizador.</div>'; return; }
+                let html='<table class="user-table"><tr><th>Email</th><th>Nome</th><th>Status</th><th>Ação</th></tr>';
                 data.users.forEach(u => {
-                    const isActive = u.active !== false;
-                    html += `<tr><td>${u.email}</td><td>${u.name}</td><td>${isActive?'✅':'⛔'}</td>
-                        <td><button class="btn-toggle ${!isActive?'disabled-user':''}" onclick="toggleUserStatus('${u.email}',${!isActive})">${isActive?'Desativar':'Ativar'}</button></td></tr>`;
+                    const a=u.active!==false;
+                    html+=`<tr><td>${u.email}</td><td>${u.name}</td><td>${a?'✅':'⛔'}</td>
+                        <td><button class="btn-toggle ${!a?'disabled-user':''}" onclick="toggleUserStatus('${u.email}',${!a})">${a?'Desativar':'Ativar'}</button></td></tr>`;
                 });
-                html += '</table>';
-                container.innerHTML = html;
+                c.innerHTML=html+'</table>';
             });
         }
-        function toggleUserStatus(email, enable) {
+        function toggleUserStatus(email,enable) {
             fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,enable})})
-                .then(r=>r.json()).then(data => {
-                    if (data.error) alert('❌ '+data.error);
-                    else { alert('✅ '+data.message); carregarAdminUsers(); }
-                });
+                .then(r=>r.json()).then(d=>{ if(d.error) alert('❌ '+d.error); else { alert('✅ '+d.message); carregarAdminUsers(); }});
         }
 
-        // ===== ARRANQUE =====
+        // ── Arranque ───────────────────────────────────────────
         fetch('/api/auth/status').then(r=>r.json()).then(data => {
             if (data.authenticated) {
                 document.getElementById('authModal').style.display = 'none';
                 document.getElementById('mainContent').style.display = 'block';
                 if (data.user?.email === 'admin@foloma.com') {
-                    isAdmin = true;
-                    document.getElementById('adminMenuItem').style.display = 'block';
+                    isAdmin=true; document.getElementById('adminMenuItem').style.display='block';
                 }
                 initPlatform();
             }
