@@ -334,19 +334,49 @@ def api_connect():
         else:
             config.DEMO_API_TOKEN = token
         
-        deriv_client = DerivWebSocketClient(config, on_tick_callback)
-        deriv_client.set_user_token(token)
-        deriv_client.set_trading_bot(trading_bot)
-        deriv_client.connect()
-        time.sleep(2)
-        deriv_client.subscribe_ticks(symbol)
-        trading_bot.start(deriv_client)
-        payment_system = PaymentSystem(deriv_client)
-        deriv_client.set_payment_system(payment_system)
-        return jsonify({'status': 'conectando', 'account_type': account_type, 'is_demo': account_type == 'demo'})
-    except Exception as e:
-        logger.error(f"❌ Erro: {e}")
-        return jsonify({'error': str(e)}), 500
+        # ════════════════════════════════════════════════════════════════
+# PATCH PARA app.py — dentro da função api_connect()
+# Adicione esta linha DEPOIS de criar o deriv_client e ANTES de connect()
+# ════════════════════════════════════════════════════════════════
+
+# Linha a adicionar em api_connect, depois de:
+#   deriv_client = DerivWebSocketClient(config, on_tick_callback)
+#   deriv_client.set_user_token(token)
+#   deriv_client.set_trading_bot(trading_bot)
+#
+# ADICIONAR:
+#   deriv_client.set_digit_analyzer(digit_analyzer)   # ← ESTA LINHA
+#
+# Exemplo do bloco completo em api_connect:
+
+"""
+deriv_client = DerivWebSocketClient(config, on_tick_callback)
+deriv_client.set_user_token(token)
+deriv_client.set_trading_bot(trading_bot)
+deriv_client.set_digit_analyzer(digit_analyzer)      # ← NOVA LINHA
+deriv_client.connect()
+time.sleep(2)
+deriv_client.subscribe_ticks(symbol)
+trading_bot.start(deriv_client)
+payment_system = PaymentSystem(deriv_client)
+deriv_client.set_payment_system(payment_system)
+"""
+
+# ════════════════════════════════════════════════════════════════
+# COMO FUNCIONA O FLUXO COMPLETO DOS DÍGITOS:
+#
+# 1. Cada tick da Deriv chega ao digit_analyzer via on_tick_callback
+# 2. digit_analyzer só captura 1 dígito a cada 15 segundos
+# 3. A interface exibe esses dígitos lentos + countdown até ao próximo
+# 4. Quando o utilizador clica em PAR ou ÍMPAR:
+#      → api_trade_digit é chamado
+#      → deriv_client.place_trade(is_digit=True) é chamado
+#      → deriv_client pergunta ao digit_analyzer: "quanto tempo falta?"
+#      → o contrato dura exatamente esse número de segundos
+#      → o contrato expira quando o próximo dígito de 15s aparece
+#      → a Deriv resolve o contrato nesse momento
+# ════════════════════════════════════════════════════════════════
+
 
 @app.route('/api/status')
 @require_auth
