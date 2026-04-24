@@ -5,624 +5,184 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Foloma Trading System</title>
     <style>
-        /* (mantenha o CSS igual ao da versão anterior, incluindo .alert-box, .hybrid-status, etc.) */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        }
-        body {
-            background: #0a0e1a;
-            color: #fff;
-            min-height: 100vh;
-        }
-        .top-bar {
-            background: #1a1f2f;
-            padding: 12px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #2a3342;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-        .logo {
-            font-size: 20px;
-            font-weight: bold;
-            color: #00f0b5;
-        }
-        .menu-btn {
-            background: #2a3342;
-            border: none;
-            color: #fff;
-            font-size: 24px;
-            padding: 8px 12px;
-            border-radius: 8px;
-            cursor: pointer;
-        }
-        .side-menu {
-            position: fixed;
-            top: 0;
-            left: -280px;
-            width: 280px;
-            height: 100%;
-            background: #1a1f2f;
-            z-index: 1000;
-            transition: left 0.3s ease;
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        body { background: #0a0e1a; color: #fff; min-height: 100vh; }
+        .top-bar { background: #1a1f2f; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2a3342; position: sticky; top: 0; z-index: 100; }
+        .logo { font-size: 20px; font-weight: bold; color: #00f0b5; }
+        .menu-btn { background: #2a3342; border: none; color: #fff; font-size: 24px; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+        .side-menu { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: #1a1f2f; z-index: 1000; transition: left 0.3s ease; padding: 20px; border-right: 1px solid #2a3342; }
+        .side-menu.open { left: 0; }
+        .menu-header { display: flex; justify-content: space-between; margin-bottom: 30px; padding-bottom: 15px; border-bottom: 1px solid #2a3342; }
+        .menu-close { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }
+        .menu-item { padding: 12px 0; color: #fff; text-decoration: none; display: block; border-bottom: 1px solid #2a3342; cursor: pointer; }
+        .menu-item:hover { color: #00f0b5; }
+        .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999; display: none; }
+        .overlay.show { display: block; }
+        .container { max-width: 500px; margin: 0 auto; padding: 16px; }
+        .card { background: #1a1f2f; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid #2a3342; }
+        .card-title { color: #00f0b5; font-size: 14px; font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #2a3342; display: flex; justify-content: space-between; align-items: center; }
+        .mode-selector { display: flex; gap: 10px; margin-bottom: 15px; }
+        .mode-btn { flex: 1; padding: 10px; border-radius: 8px; font-weight: 600; cursor: pointer; text-align: center; background: #2a3342; color: #fff; border: none; }
+        .mode-btn.active { background: #00f0b5; color: #0b0e14; }
+        .status-row { display: flex; justify-content: space-between; align-items: center; }
+        .balance { font-size: 24px; font-weight: bold; color: #00f0b5; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff4d4d; display: inline-block; }
+        .dot.connected { background: #00f0b5; box-shadow: 0 0 8px #00f0b5; }
+        .price-area { display: flex; justify-content: space-between; align-items: baseline; background: #0b0e14; padding: 12px; border-radius: 10px; margin-bottom: 10px; }
+        .price { font-size: 28px; font-weight: bold; color: #00f0b5; }
+        .signal-badge { display: inline-block; padding: 6px 16px; border-radius: 40px; font-size: 14px; font-weight: 600; }
+        .signal-badge.buy { background: #00f0b5; color: #0a0e1a; }
+        .signal-badge.sell { background: #ff4d4d; color: #fff; }
+        .signal-badge.neutral { background: #62748c; color: #fff; }
+        .signal-confidence { font-size: 20px; font-weight: bold; margin-left: 10px; }
+        .indicators-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+        .indicator { background: #0b0e14; padding: 8px; border-radius: 8px; text-align: center; }
+        .indicator .label { font-size: 9px; color: #62748c; }
+        .indicator .value { font-size: 14px; font-weight: 600; }
+        .indicator .desc { font-size: 8px; color: #00f0b5; }
+        .symbol-row { display: flex; gap: 8px; flex-wrap: wrap; }
+        .symbol-btn { background: #0b0e14; border: 1px solid #2a3342; color: #fff; padding: 6px 12px; border-radius: 20px; cursor: pointer; font-size: 12px; }
+        .symbol-btn.active { background: #00f0b5; color: #0a0e1a; border-color: #00f0b5; }
+        .amount-input { width: 100%; padding: 12px; background: #0b0e14; border: 1px solid #2a3342; border-radius: 10px; color: #fff; font-size: 16px; text-align: center; margin-bottom: 12px; }
+        .trade-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+        .btn-buy { background: #00f0b5; color: #0a0e1a; padding: 14px; border: none; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; }
+        .btn-sell { background: #ff4d4d; color: #fff; padding: 14px; border: none; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; }
+        .btn-buy:disabled, .btn-sell:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ===== PAINEL DE DÍGITOS ===== */
+        .digit-main-box {
+            background: #0b0e14;
+            border-radius: 14px;
             padding: 20px;
-            border-right: 1px solid #2a3342;
-        }
-        .side-menu.open {
-            left: 0;
-        }
-        .menu-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 30px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid #2a3342;
-        }
-        .menu-close {
-            background: none;
-            border: none;
-            color: #fff;
-            font-size: 24px;
-            cursor: pointer;
-        }
-        .menu-item {
-            padding: 12px 0;
-            color: #fff;
-            text-decoration: none;
-            display: block;
-            border-bottom: 1px solid #2a3342;
-            cursor: pointer;
-        }
-        .menu-item:hover {
-            color: #00f0b5;
-        }
-        .menu-item.admin-only {
-            display: none;
-        }
-        .overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            z-index: 999;
-            display: none;
-        }
-        .overlay.show {
-            display: block;
-        }
-        .container {
-            max-width: 500px;
-            margin: 0 auto;
-            padding: 16px;
-        }
-        .card {
-            background: #1a1f2f;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
-            border: 1px solid #2a3342;
-        }
-        .card-title {
-            color: #00f0b5;
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #2a3342;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .mode-selector {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-        .mode-btn {
-            flex: 1;
-            padding: 10px;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
             text-align: center;
-            background: #2a3342;
-            color: #fff;
-            border: none;
+            margin-bottom: 14px;
+            border: 2px solid #2a3342;
         }
-        .mode-btn.active {
-            background: #00f0b5;
-            color: #0b0e14;
-        }
-        .status-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .balance {
-            font-size: 24px;
-            font-weight: bold;
-            color: #00f0b5;
-        }
-        .dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #ff4d4d;
-            display: inline-block;
-        }
-        .dot.connected {
-            background: #00f0b5;
-            box-shadow: 0 0 8px #00f0b5;
-        }
-        .price-area {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            background: #0b0e14;
-            padding: 12px;
-            border-radius: 10px;
-            margin-bottom: 10px;
-        }
-        .price {
-            font-size: 28px;
-            font-weight: bold;
-            color: #00f0b5;
-        }
-        .signal-badge {
-            display: inline-block;
-            padding: 6px 16px;
-            border-radius: 40px;
-            font-size: 14px;
-            font-weight: 600;
-        }
-        .signal-badge.buy {
-            background: #00f0b5;
-            color: #0a0e1a;
-        }
-        .signal-badge.sell {
-            background: #ff4d4d;
-            color: #fff;
-        }
-        .signal-badge.neutral {
-            background: #62748c;
-            color: #fff;
-        }
-        .signal-confidence {
-            font-size: 20px;
-            font-weight: bold;
-            margin-left: 10px;
-        }
-        .indicators-row {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        .indicator {
-            background: #0b0e14;
-            padding: 8px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .indicator .label {
-            font-size: 9px;
+        .digit-timer-label {
+            font-size: 11px;
             color: #62748c;
+            margin-bottom: 6px;
+            letter-spacing: 1px;
         }
-        .indicator .value {
-            font-size: 14px;
-            font-weight: 600;
-        }
-        .indicator .desc {
-            font-size: 8px;
-            color: #00f0b5;
-        }
-        .symbol-row {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        .symbol-btn {
-            background: #0b0e14;
-            border: 1px solid #2a3342;
-            color: #fff;
-            padding: 6px 12px;
-            border-radius: 20px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        .symbol-btn.active {
-            background: #00f0b5;
-            color: #0a0e1a;
-            border-color: #00f0b5;
-        }
-        .amount-input {
-            width: 100%;
-            padding: 12px;
-            background: #0b0e14;
-            border: 1px solid #2a3342;
-            border-radius: 10px;
-            color: #fff;
-            font-size: 16px;
-            text-align: center;
-            margin-bottom: 12px;
-        }
-        .trade-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-        .btn-buy {
-            background: #00f0b5;
-            color: #0a0e1a;
-            padding: 14px;
-            border: none;
-            border-radius: 10px;
-            font-weight: bold;
-            font-size: 16px;
-            cursor: pointer;
-        }
-        .btn-sell {
-            background: #ff4d4d;
-            color: #fff;
-            padding: 14px;
-            border: none;
-            border-radius: 10px;
-            font-weight: bold;
-            font-size: 16px;
-            cursor: pointer;
-        }
-        .btn-buy:disabled, .btn-sell:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .digits-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-        .last-digit {
-            font-size: 32px;
-            font-weight: bold;
-            color: #00f0b5;
-        }
-        .digits-history {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            margin: 12px 0;
-        }
-        .digit-box {
-            width: 32px;
-            height: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            background: #0b0e14;
-        }
-        .digit-box.odd {
-            color: #00f0b5;
-            border: 1px solid #00f0b5;
-        }
-        .digit-box.even {
-            color: #ff4d4d;
-            border: 1px solid #ff4d4d;
-        }
-        .percent-stats {
-            background: #0b0e14;
-            border-radius: 8px;
-            padding: 12px;
-            margin: 12px 0;
-        }
-        .percent-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 8px;
-        }
-        .percent-odd-value {
-            color: #00f0b5;
-        }
-        .percent-even-value {
-            color: #ff4d4d;
-        }
-        .percent-bar {
-            display: flex;
-            height: 8px;
-            border-radius: 4px;
+        .digit-timer-bar-wrap {
+            background: #1a1f2f;
+            border-radius: 6px;
+            height: 6px;
+            margin-bottom: 14px;
             overflow: hidden;
         }
-        .percent-odd-bar {
+        .digit-timer-bar {
+            height: 6px;
             background: #00f0b5;
-            transition: width 0.3s;
-        }
-        .percent-even-bar {
-            background: #ff4d4d;
-            transition: width 0.3s;
-        }
-        .alert-box {
-            background: linear-gradient(135deg, #ffaa00, #ff8800);
-            border-radius: 10px;
-            padding: 12px;
-            margin: 12px 0;
-            text-align: center;
-            animation: pulse 1s infinite;
-            transition: opacity 0.3s;
-        }
-        .alert-box.hide-alert {
-            display: none !important;
-        }
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.02); }
-            100% { transform: scale(1); }
-        }
-        .digit-countdown {
-            text-align: center;
-            font-size: 12px;
-            color: #ffaa00;
-            margin: 8px 0;
-        }
-        .display-digit-container {
-            background: #0b0e14;
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 15px;
-            text-align: center;
-            border: 1px solid #2a3342;
-        }
-        .display-digit-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-            color: #62748c;
-            font-size: 12px;
-        }
-        .countdown {
-            color: #ffaa00;
-            font-weight: bold;
-        }
-        .display-digit-value {
-            display: flex;
-            justify-content: center;
-            align-items: baseline;
-            gap: 15px;
-            margin: 10px 0;
-        }
-        .display-digit {
-            font-size: 48px;
-            font-weight: bold;
-            color: #00f0b5;
-        }
-        .display-parity {
-            font-size: 18px;
-            color: #62748c;
-        }
-        .pulse {
-            animation: pulse-digit 0.5s ease-in-out;
-        }
-        @keyframes pulse-digit {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.2); text-shadow: 0 0 10px #00f0b5; }
-            100% { transform: scale(1); }
-        }
-        .display-note {
-            font-size: 10px;
-            color: #62748c;
-            margin-top: 8px;
-        }
-        .martingale-status {
-            background: #0b0e14;
-            border-radius: 8px;
-            padding: 10px;
-            font-size: 12px;
-            margin: 10px 0;
-        }
-        .btn-martingale {
-            background: #ffaa00;
-            color: #0a0e1a;
-            border: none;
-            padding: 8px;
             border-radius: 6px;
+            transition: width 0.9s linear;
+        }
+        .digit-big {
+            font-size: 72px;
+            font-weight: 900;
+            line-height: 1;
+            transition: all 0.3s;
+        }
+        .digit-big.odd  { color: #00f0b5; text-shadow: 0 0 18px #00f0b540; }
+        .digit-big.even { color: #ff4d4d;  text-shadow: 0 0 18px #ff4d4d40; }
+        .digit-big.waiting { color: #2a3342; }
+        .digit-parity-label {
+            font-size: 16px;
             font-weight: 600;
-            cursor: pointer;
-            flex: 1;
+            margin-top: 4px;
+            letter-spacing: 2px;
         }
-        .btn-martingale-reset {
-            background: #2a3342;
-            color: #fff;
-            border: none;
-            padding: 8px;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            flex: 1;
-        }
-        .trade-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid #2a3342;
-            font-size: 12px;
-        }
-        .win { color: #00f0b5; }
-        .loss { color: #ff4d4d; }
-        .pending { color: #ffaa00; }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            text-align: center;
-        }
-        .stat-value {
-            font-size: 18px;
-            font-weight: bold;
-        }
-        .stat-label {
-            font-size: 10px;
-            color: #62748c;
-        }
-        .btn-primary {
-            background: #00f0b5;
-            color: #0a0e14;
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .btn-secondary {
-            background: #2a3342;
-            color: #fff;
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .btn-small {
-            background: #2a3342;
-            border: none;
-            padding: 8px 12px;
-            border-radius: 6px;
-            color: #fff;
-            cursor: pointer;
-        }
-        .btn-clear-history {
-            background: #2a3342;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 6px;
+        .digit-parity-label.odd  { color: #00f0b5; }
+        .digit-parity-label.even { color: #ff4d4d; }
+        .digit-parity-label.waiting { color: #62748c; }
+        .digit-countdown-txt {
+            font-size: 13px;
             color: #ffaa00;
-            cursor: pointer;
-            font-size: 11px;
-            margin-left: 8px;
-        }
-        .manual-mode-checkbox {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin: 10px 0;
-            font-size: 12px;
-            color: #62748c;
-        }
-        .hybrid-status {
-            background: #0b0e14;
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 12px;
-            text-align: center;
-            font-size: 12px;
-        }
-        .hidden {
-            display: none;
-        }
-        .link-copy {
-            display: flex;
-            gap: 8px;
-        }
-        .link-copy input {
-            flex: 1;
-            padding: 8px;
-            background: #0b0e14;
-            border: 1px solid #2a3342;
-            border-radius: 6px;
-            color: #fff;
-            font-size: 12px;
-        }
-        .account-selector {
-            display: flex;
-            gap: 10px;
-            margin: 10px 0;
-        }
-        .account-btn {
-            flex: 1;
-            padding: 10px;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            text-align: center;
-            background: #2a3342;
-            color: #fff;
-            border: none;
-        }
-        .account-btn.active {
-            background: #00f0b5;
-            color: #0b0e14;
-        }
-        .modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.95);
-            z-index: 1100;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .modal-content {
-            background: #1a1f2f;
-            padding: 24px;
-            border-radius: 16px;
-            width: 90%;
-            max-width: 350px;
-        }
-        .modal input {
-            width: 100%;
-            padding: 10px;
-            margin: 8px 0;
-            background: #0b0e14;
-            border: 1px solid #2a3342;
-            border-radius: 8px;
-            color: #fff;
-        }
-        .user-table {
-            width: 100%;
-            border-collapse: collapse;
             margin-top: 10px;
+            font-weight: 600;
         }
-        .user-table th, .user-table td {
-            padding: 8px;
-            text-align: left;
-            border-bottom: 1px solid #2a3342;
-            font-size: 12px;
+        .digit-streak-info {
+            background: #1a1f2f;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
         }
-        .user-table th {
-            color: #00f0b5;
+        .streak-val { font-weight: bold; font-size: 18px; }
+        .streak-val.odd  { color: #00f0b5; }
+        .streak-val.even { color: #ff4d4d; }
+        .streak-val.none { color: #62748c; }
+
+        .digits-history { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; justify-content: center; }
+        .digit-box { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 15px; font-weight: 700; background: #0b0e14; }
+        .digit-box.odd  { color: #00f0b5; border: 1.5px solid #00f0b5; }
+        .digit-box.even { color: #ff4d4d;  border: 1.5px solid #ff4d4d; }
+        .digit-box.new  { animation: popIn 0.4s ease; }
+        @keyframes popIn { 0%{transform:scale(0.5);opacity:0} 60%{transform:scale(1.2)} 100%{transform:scale(1);opacity:1} }
+
+        .percent-stats { background: #0b0e14; border-radius: 8px; padding: 12px; margin: 10px 0; }
+        .percent-row { display: flex; justify-content: space-between; font-size: 14px; font-weight: bold; margin-bottom: 8px; }
+        .percent-odd-value { color: #00f0b5; }
+        .percent-even-value { color: #ff4d4d; }
+        .percent-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; }
+        .percent-odd-bar  { background: #00f0b5; transition: width 0.3s; }
+        .percent-even-bar { background: #ff4d4d; transition: width 0.3s; }
+
+        .signal-box {
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 14px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 600;
         }
-        .btn-toggle {
-            background: #2a3342;
-            border: none;
-            padding: 4px 8px;
-            border-radius: 4px;
-            color: #fff;
-            cursor: pointer;
-            font-size: 11px;
-        }
-        .btn-toggle.disabled-user {
-            background: #ff4d4d;
-        }
-        .text-center { text-align: center; }
-        .mt-2 { margin-top: 8px; }
-        .mb-2 { margin-bottom: 8px; }
-        .flex { display: flex; gap: 8px; }
+        .signal-box.active { background: linear-gradient(135deg, #00f0b540, #00f0b510); border: 1px solid #00f0b5; color: #00f0b5; animation: pulse 1.5s infinite; }
+        .signal-box.none   { background: #0b0e14; border: 1px solid #2a3342; color: #62748c; }
+        @keyframes pulse { 0%{opacity:1} 50%{opacity:0.7} 100%{opacity:1} }
+
+        .digit-bet-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+        .btn-odd  { background: #00f0b5; color: #0a0e1a; padding: 16px; border: none; border-radius: 10px; font-weight: bold; font-size: 17px; cursor: pointer; }
+        .btn-even { background: #ff4d4d;  color: #fff;    padding: 16px; border: none; border-radius: 10px; font-weight: bold; font-size: 17px; cursor: pointer; }
+        .btn-odd:disabled, .btn-even:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-odd:active, .btn-even:active { transform: scale(0.97); }
+
+        .too-close-warning { background: #ffaa0020; border: 1px solid #ffaa00; border-radius: 8px; padding: 8px 12px; font-size: 12px; color: #ffaa00; text-align: center; margin-bottom: 10px; display: none; }
+
+        /* ===== RESTO ===== */
+        .alert-box { background: linear-gradient(135deg, #ffaa00, #ff8800); border-radius: 10px; padding: 12px; margin: 12px 0; text-align: center; animation: pulse 1s infinite; }
+        .alert-box.hide-alert { display: none !important; }
+        .martingale-status { background: #0b0e14; border-radius: 8px; padding: 10px; font-size: 12px; margin: 10px 0; }
+        .btn-martingale { background: #ffaa00; color: #0a0e1a; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; flex: 1; }
+        .btn-martingale-reset { background: #2a3342; color: #fff; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; flex: 1; }
+        .trade-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #2a3342; font-size: 12px; }
+        .win { color: #00f0b5; } .loss { color: #ff4d4d; } .pending { color: #ffaa00; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; }
+        .stat-value { font-size: 18px; font-weight: bold; }
+        .stat-label { font-size: 10px; color: #62748c; }
+        .btn-primary { background: #00f0b5; color: #0a0e14; width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .btn-secondary { background: #2a3342; color: #fff; width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .btn-small { background: #2a3342; border: none; padding: 8px 12px; border-radius: 6px; color: #fff; cursor: pointer; }
+        .btn-clear-history { background: #2a3342; border: none; padding: 6px 12px; border-radius: 6px; color: #ffaa00; cursor: pointer; font-size: 11px; margin-left: 8px; }
+        .manual-mode-checkbox { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 12px; color: #62748c; }
+        .hybrid-status { background: #0b0e14; border-radius: 8px; padding: 10px; margin-bottom: 12px; text-align: center; font-size: 12px; }
+        .hidden { display: none; }
+        .link-copy { display: flex; gap: 8px; }
+        .link-copy input { flex: 1; padding: 8px; background: #0b0e14; border: 1px solid #2a3342; border-radius: 6px; color: #fff; font-size: 12px; }
+        .account-selector { display: flex; gap: 10px; margin: 10px 0; }
+        .account-btn { flex: 1; padding: 10px; border-radius: 8px; font-weight: 600; cursor: pointer; text-align: center; background: #2a3342; color: #fff; border: none; }
+        .account-btn.active { background: #00f0b5; color: #0b0e14; }
+        .modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.95); z-index: 1100; display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: #1a1f2f; padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
+        .modal input { width: 100%; padding: 10px; margin: 8px 0; background: #0b0e14; border: 1px solid #2a3342; border-radius: 8px; color: #fff; }
+        .user-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .user-table th, .user-table td { padding: 8px; text-align: left; border-bottom: 1px solid #2a3342; font-size: 12px; }
+        .user-table th { color: #00f0b5; }
+        .btn-toggle { background: #2a3342; border: none; padding: 4px 8px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; }
+        .btn-toggle.disabled-user { background: #ff4d4d; }
+        .text-center { text-align: center; } .mt-2 { margin-top: 8px; } .mb-2 { margin-bottom: 8px; } .flex { display: flex; gap: 8px; }
     </style>
 </head>
 <body>
@@ -640,13 +200,15 @@
         <div class="menu-item" onclick="showSection('affiliate')">🔗 Afiliado</div>
         <div class="menu-item" onclick="showSection('payment')">💰 Depósito/Saque</div>
         <div class="menu-item" onclick="showSection('settings')">⚙️ Configurações</div>
-        <div class="menu-item admin-only" id="adminMenuItem" onclick="showSection('admin')">👑 Administração</div>
+        <div class="menu-item admin-only" id="adminMenuItem" onclick="showSection('admin')" style="display:none;">👑 Administração</div>
         <div class="menu-item" onclick="logout()">🚪 Sair</div>
     </div>
     <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
+
     <div class="container" id="mainContent" style="display:none;">
         <div id="dashboard-section">
-            <!-- Status -->
+
+            <!-- STATUS -->
             <div class="card">
                 <div class="card-title">📡 STATUS</div>
                 <div class="status-row">
@@ -656,16 +218,18 @@
                 <button class="btn-primary" id="connectBtn" onclick="conectar()">🔌 CONECTAR</button>
                 <div id="connectStatus" class="text-center mt-2" style="font-size:11px; color:#ffaa00;"></div>
             </div>
-            <!-- Modo de operação (3 modos) -->
+
+            <!-- MODO -->
             <div class="card">
                 <div class="card-title">🎮 MODO DE OPERAÇÃO</div>
                 <div class="mode-selector">
-                    <button id="modeAtivos" class="mode-btn active" onclick="setModo('ativos')">📈 ATIVOS</button>
-                    <button id="modeDigitos" class="mode-btn" onclick="setModo('digitos')">🎲 DÍGITOS</button>
-                    <button id="modeHybrid" class="mode-btn" onclick="setModo('hybrid')">🔗 HÍBRIDO</button>
+                    <button id="modeAtivos"  class="mode-btn active" onclick="setModo('ativos')">📈 ATIVOS</button>
+                    <button id="modeDigitos" class="mode-btn"        onclick="setModo('digitos')">🎲 DÍGITOS</button>
+                    <button id="modeHybrid"  class="mode-btn"        onclick="setModo('hybrid')">🔗 HÍBRIDO</button>
                 </div>
             </div>
-            <!-- Painel Ativos -->
+
+            <!-- PAINEL ATIVOS -->
             <div id="modoAtivosPanel">
                 <div class="card">
                     <div class="card-title">📊 ATIVOS</div>
@@ -684,46 +248,76 @@
                     </div>
                 </div>
             </div>
-            <!-- Painel Dígitos -->
+
+            <!-- ===== PAINEL DÍGITOS ===== -->
             <div id="modoDigitosPanel" class="hidden">
                 <div class="card">
                     <div class="card-title">🎲 DÍGITOS LENTOS (15s)</div>
-                    <div class="display-digit-container">
-                        <div class="display-digit-header">
-                            <span>📺 PRÓXIMO DÍGITO EM</span>
-                            <span id="display-countdown" class="countdown">15s</span>
+
+                    <!-- DÍGITO PRINCIPAL -->
+                    <div class="digit-main-box">
+                        <div class="digit-timer-label">PRÓXIMO DÍGITO EM</div>
+                        <div class="digit-timer-bar-wrap">
+                            <div class="digit-timer-bar" id="timerBar" style="width:100%"></div>
                         </div>
-                        <div class="display-digit-value">
-                            <span id="display-digit" class="display-digit">-</span>
-                            <span id="display-parity" class="display-parity">---</span>
+                        <div class="digit-big waiting" id="bigDigit">—</div>
+                        <div class="digit-parity-label waiting" id="bigParity">AGUARDANDO</div>
+                        <div class="digit-countdown-txt" id="bigCountdown">⏱ 15s</div>
+                    </div>
+
+                    <!-- STREAK -->
+                    <div class="digit-streak-info">
+                        <div>
+                            <div style="font-size:11px;color:#62748c;">SEQUÊNCIA ATUAL</div>
+                            <span class="streak-val none" id="streakVal">—</span>
+                            <span id="streakLabel" style="font-size:13px;color:#62748c;margin-left:6px;">aguardando...</span>
                         </div>
-                    </div>
-                    <div class="manual-mode-checkbox">
-                        <input type="checkbox" id="toggleAlerts" checked> <span>🔔 Mostrar alertas automáticos (recomendações)</span>
-                    </div>
-                    <div id="alertBox" class="alert-box">
-                        <div id="alertMessage"></div>
-                        <div class="flex" style="justify-content: center; margin-top: 8px;">
-                            <button class="btn-buy" style="padding: 6px 12px; font-size: 12px;" id="alertOddBtn" onclick="executarAlerta('odd')">🎲 ÍMPAR</button>
-                            <button class="btn-sell" style="padding: 6px 12px; font-size: 12px;" id="alertEvenBtn" onclick="executarAlerta('even')">🎲 PAR</button>
-                            <button class="btn-primary" style="padding: 6px 12px; font-size: 12px;" id="alertFollowBtn" onclick="seguirRecomendacao()">⚡ Seguir</button>
-                        </div>
-                        <div id="alertConfidence" style="font-size: 11px; margin-top: 5px;"></div>
-                    </div>
-                    <div style="margin: 12px 0;">
-                        <div style="font-size: 11px; color: #62748c; margin-bottom: 6px;">📜 ÚLTIMOS 10 DÍGITOS</div>
-                        <div id="slowDigitsHistory" class="digits-history" style="justify-content: center;">
-                            <div style="color:#62748c;">Aguardando dados...</div>
+                        <div style="text-align:right;">
+                            <div style="font-size:11px;color:#62748c;">TOTAL DÍGITOS</div>
+                            <span id="totalDigits" style="font-weight:bold;font-size:18px;">0</span>
                         </div>
                     </div>
-                    <div class="trade-buttons" style="margin-top: 12px;">
-                        <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR (manual)</button>
-                        <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR (manual)</button>
+
+                    <!-- SINAL -->
+                    <div class="signal-box none" id="digitSignalBox">
+                        <div id="digitSignalText">Aguardando padrão (mínimo 3 consecutivos)...</div>
+                    </div>
+
+                    <!-- AVISO SE MUITO PERTO DO PRÓXIMO DÍGITO -->
+                    <div class="too-close-warning" id="tooCloseWarning">
+                        ⚠️ Dígito a sair em menos de 3s! Aguarde o próximo ciclo.
+                    </div>
+
+                    <!-- BOTÕES DE APOSTA -->
+                    <div class="digit-bet-buttons">
+                        <button class="btn-odd"  id="btnOdd"  onclick="executeDigitTrade('odd')">🎲 ÍMPAR</button>
+                        <button class="btn-even" id="btnEven" onclick="executeDigitTrade('even')">🎲 PAR</button>
+                    </div>
+
+                    <!-- HISTORIAL DE DÍGITOS LENTOS -->
+                    <div style="margin-top:16px;">
+                        <div style="font-size:11px;color:#62748c;margin-bottom:8px;">📜 ÚLTIMOS DÍGITOS (15s cada)</div>
+                        <div id="slowDigitsHistory" class="digits-history">
+                            <div style="color:#62748c;font-size:12px;">Aguardando dados...</div>
+                        </div>
+                    </div>
+
+                    <!-- PERCENTAGENS -->
+                    <div class="percent-stats" style="margin-top:12px;">
+                        <div class="percent-row">
+                            <span class="percent-odd-value">ÍMPAR: <span id="oddPercent">0%</span></span>
+                            <span class="percent-even-value">PAR: <span id="evenPercent">0%</span></span>
+                        </div>
+                        <div class="percent-bar">
+                            <div class="percent-odd-bar"  id="oddBar"  style="width:50%"></div>
+                            <div class="percent-even-bar" id="evenBar" style="width:50%"></div>
+                        </div>
                     </div>
                 </div>
             </div>
-            <!-- Trading panel -->
-            <div class="card">
+
+            <!-- PAINEL DE TRADE (ATIVOS + HÍBRIDO) -->
+            <div class="card" id="ativoTradePanel">
                 <div class="card-title">🎯 EXECUTAR TRADE</div>
                 <input type="number" id="amount" class="amount-input" value="0.35" step="0.01" min="0.35" max="100">
                 <div class="manual-mode-checkbox">
@@ -733,20 +327,12 @@
                     <div id="hybridSignal"></div>
                     <div id="hybridConfidence"></div>
                 </div>
-                <div id="ativosButtons">
-                    <div class="trade-buttons">
-                        <button class="btn-buy" id="hybridBuyBtn" onclick="executeTrade('BUY')">📈 COMPRAR</button>
-                        <button class="btn-sell" id="hybridSellBtn" onclick="executeTrade('SELL')">📉 VENDER</button>
-                    </div>
-                </div>
-                <div id="digitosButtons" class="hidden">
-                    <div class="trade-buttons">
-                        <button class="btn-buy" onclick="executeDigitTrade('odd')">🎲 ÍMPAR</button>
-                        <button class="btn-sell" onclick="executeDigitTrade('even')">🎲 PAR</button>
-                    </div>
+                <div class="trade-buttons">
+                    <button class="btn-buy"  id="hybridBuyBtn"  onclick="executeTrade('BUY')">📈 COMPRAR</button>
+                    <button class="btn-sell" id="hybridSellBtn" onclick="executeTrade('SELL')">📉 VENDER</button>
                 </div>
                 <div class="flex">
-                    <button class="btn-martingale" onclick="aplicarMartingale()">🎲 MARTINGALE</button>
+                    <button class="btn-martingale"       onclick="aplicarMartingale()">🎲 MARTINGALE</button>
                     <button class="btn-martingale-reset" onclick="resetarMartingale()">🔄 RESETAR</button>
                 </div>
                 <div class="martingale-status">
@@ -755,8 +341,23 @@
                 </div>
                 <button class="btn-small" style="width:100%; margin-top:8px;" onclick="togglePause()" id="pauseBtn">⏸️ PAUSAR</button>
             </div>
+
+            <!-- PAINEL DE TRADE DE DÍGITOS (valor + martingale) -->
+            <div class="card hidden" id="digitTradePanel">
+                <div class="card-title">🎯 CONFIGURAR APOSTA</div>
+                <input type="number" id="amountDigit" class="amount-input" value="0.35" step="0.01" min="0.35" max="100" placeholder="Valor da aposta">
+                <div class="flex">
+                    <button class="btn-martingale"       onclick="aplicarMartingaleDigit()">🎲 MARTINGALE</button>
+                    <button class="btn-martingale-reset" onclick="resetarMartingale()">🔄 RESETAR</button>
+                </div>
+                <div class="martingale-status">
+                    <div>Martingale: <span id="martingaleActiveDigit">DESATIVADO</span></div>
+                    <div>Próximo valor: <span id="martingaleNextDigit">$0.35</span></div>
+                </div>
+            </div>
         </div>
-        <!-- Afiliado -->
+
+        <!-- AFILIADO -->
         <div id="affiliate-section" class="hidden">
             <div class="card">
                 <div class="card-title">🔗 SEU LINK</div>
@@ -770,28 +371,24 @@
                 </div>
             </div>
         </div>
-        <!-- Pagamento -->
+
+        <!-- PAGAMENTO -->
         <div id="payment-section" class="hidden">
             <div class="card">
                 <div class="card-title">💰 DEPOSITAR</div>
                 <input type="number" id="depositAmount" placeholder="Valor" min="10" class="amount-input">
-                <select id="depositMethod" class="btn-small" style="width:100%;">
-                    <option value="cryptocurrency">💎 Criptomoedas</option>
-                    <option value="bank_transfer">🏦 Transferência</option>
-                </select>
+                <select id="depositMethod" class="btn-small" style="width:100%;"><option value="cryptocurrency">💎 Criptomoedas</option><option value="bank_transfer">🏦 Transferência</option></select>
                 <button class="btn-primary mt-2" onclick="realizarDeposito()">DEPOSITAR</button>
             </div>
             <div class="card">
                 <div class="card-title">💸 SACAR</div>
                 <input type="number" id="withdrawAmount" placeholder="Valor" min="10" class="amount-input">
-                <select id="withdrawMethod" class="btn-small" style="width:100%;">
-                    <option value="cryptocurrency">💎 Criptomoedas</option>
-                    <option value="bank_transfer">🏦 Transferência</option>
-                </select>
+                <select id="withdrawMethod" class="btn-small" style="width:100%;"><option value="cryptocurrency">💎 Criptomoedas</option><option value="bank_transfer">🏦 Transferência</option></select>
                 <button class="btn-primary mt-2" onclick="realizarSaque()">SACAR</button>
             </div>
         </div>
-        <!-- Configurações -->
+
+        <!-- CONFIGURAÇÕES -->
         <div id="settings-section" class="hidden">
             <div class="card">
                 <div class="card-title">🏦 CONTA</div>
@@ -821,27 +418,26 @@
                 <button class="btn-secondary" onclick="showForgotPassword()">Esqueci a senha</button>
             </div>
         </div>
-        <!-- Administração (apenas admin) -->
+
+        <!-- ADMIN -->
         <div id="admin-section" class="hidden">
             <div class="card">
                 <div class="card-title">👑 GERIR UTILIZADORES</div>
-                <div id="adminUsersList">
-                    <div class="text-center" style="padding:20px;">Carregando...</div>
-                </div>
+                <div id="adminUsersList"><div class="text-center" style="padding:20px;">Carregando...</div></div>
             </div>
         </div>
-        <!-- Últimos trades -->
+
+        <!-- ÚLTIMOS TRADES -->
         <div class="card">
             <div class="card-title">
                 <span>📋 ÚLTIMOS TRADES</span>
-                <button class="btn-clear-history" onclick="limparHistorico()">🗑️ LIMPAR HISTÓRICO</button>
+                <button class="btn-clear-history" onclick="limparHistorico()">🗑️ LIMPAR</button>
             </div>
-            <div id="tradesList">
-                <div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>
-            </div>
+            <div id="tradesList"><div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div></div>
         </div>
     </div>
-    <!-- Modal de login -->
+
+    <!-- MODAL LOGIN -->
     <div id="authModal" class="modal">
         <div class="modal-content">
             <h2 style="color:#00f0b5; text-align:center;">FOLOMA</h2>
@@ -870,452 +466,143 @@
             <div id="authError" class="text-center mt-2" style="color:#ff4d4d; font-size:12px;"></div>
         </div>
     </div>
+
     <script>
-        // ========== VARIÁVEIS GLOBAIS ==========
+        // ===== VARIÁVEIS GLOBAIS =====
         let currentSection = 'dashboard';
         let selectedAccount = 'demo';
         let paused = false;
         let isConnected = false;
         let currentSymbol = 'R_100';
         let modoAtual = 'ativos';
-        let digitCountdown = 5;
-        let digitTimer = null;
-        let lastKnownDigit = null;
-        let currentAlertTimeout = null;
-        let displayCountdown = 15;
-        let displayDigit = null;
-        let alertsEnabled = true;
         let isAdmin = false;
         const symbols = { 'R_100': 'Volatility 100', 'R_75': 'Volatility 75', 'R_50': 'Volatility 50' };
 
-        // ========== MENU ==========
+        // Estado dos dígitos lentos
+        let slowDigitHistory  = [];   // lista de dígitos capturados a cada 15s
+        let lastShownDigit    = null; // último dígito exibido
+        let secondsToNext     = 15;   // countdown do servidor
+        const INTERVAL_SEC    = 15;   // duração do ciclo
+
+        // ===== MENU =====
         function toggleMenu() {
             document.getElementById('sideMenu').classList.toggle('open');
             document.getElementById('overlay').classList.toggle('show');
         }
         function showSection(section) {
-            document.getElementById('dashboard-section').classList.add('hidden');
-            document.getElementById('affiliate-section').classList.add('hidden');
-            document.getElementById('payment-section').classList.add('hidden');
-            document.getElementById('settings-section').classList.add('hidden');
-            document.getElementById('admin-section').classList.add('hidden');
-            document.getElementById(section + '-section').classList.remove('hidden');
+            ['dashboard','affiliate','payment','settings','admin'].forEach(s =>
+                document.getElementById(s+'-section').classList.add('hidden'));
+            document.getElementById(section+'-section').classList.remove('hidden');
             currentSection = section;
             toggleMenu();
             if (section === 'affiliate') carregarLinkAfiliado();
             if (section === 'admin') carregarAdminUsers();
         }
 
-        // ========== MODO ==========
+        // ===== MODO =====
         function setModo(modo) {
             modoAtual = modo;
-            const btnAtivos = document.getElementById('modeAtivos');
-            const btnDigitos = document.getElementById('modeDigitos');
-            const btnHybrid = document.getElementById('modeHybrid');
-            const panelAtivos = document.getElementById('modoAtivosPanel');
-            const panelDigitos = document.getElementById('modoDigitosPanel');
-            const ativosButtons = document.getElementById('ativosButtons');
-            const digitosButtons = document.getElementById('digitosButtons');
-            const hybridStatus = document.getElementById('hybridStatus');
-            
-            btnAtivos.classList.remove('active');
-            btnDigitos.classList.remove('active');
-            btnHybrid.classList.remove('active');
-            if (modo === 'ativos') btnAtivos.classList.add('active');
-            else if (modo === 'digitos') btnDigitos.classList.add('active');
-            else btnHybrid.classList.add('active');
-            
-            panelAtivos.classList.toggle('hidden', modo !== 'ativos');
-            panelDigitos.classList.toggle('hidden', modo !== 'digitos');
-            
-            if (modo === 'hybrid') {
-                ativosButtons.classList.remove('hidden');
-                digitosButtons.classList.add('hidden');
-                if (hybridStatus) hybridStatus.classList.remove('hidden');
-            } else {
-                ativosButtons.classList.remove('hidden');
-                digitosButtons.classList.add('hidden');
-                if (hybridStatus) hybridStatus.classList.add('hidden');
-                const buyBtn = document.getElementById('hybridBuyBtn');
-                const sellBtn = document.getElementById('hybridSellBtn');
-                if (buyBtn && sellBtn) {
-                    buyBtn.disabled = false;
-                    sellBtn.disabled = false;
-                    buyBtn.style.opacity = '1';
-                    sellBtn.style.opacity = '1';
+            ['ativos','digitos','hybrid'].forEach(m =>
+                document.getElementById('mode' + m.charAt(0).toUpperCase() + m.slice(1))?.classList.remove('active'));
+            document.getElementById('mode' + modo.charAt(0).toUpperCase() + modo.slice(1))?.classList.add('active');
+
+            document.getElementById('modoAtivosPanel').classList.toggle('hidden', modo !== 'ativos');
+            document.getElementById('modoDigitosPanel').classList.toggle('hidden', modo !== 'digitos');
+            document.getElementById('ativoTradePanel').classList.toggle('hidden', modo === 'digitos');
+            document.getElementById('digitTradePanel').classList.toggle('hidden', modo !== 'digitos');
+            document.getElementById('hybridStatus').classList.toggle('hidden', modo !== 'hybrid');
+        }
+
+        // ===== ATUALIZAÇÃO DOS DÍGITOS (coração do sistema) =====
+        function updateDigitPanel(digits) {
+            if (!digits) return;
+
+            // 1. Countdown e barra de progresso
+            secondsToNext = digits.seconds_to_next || digits.countdown || 15;
+            document.getElementById('bigCountdown').textContent = `⏱ ${secondsToNext}s para o próximo dígito`;
+            const pct = Math.min(100, (secondsToNext / INTERVAL_SEC) * 100);
+            document.getElementById('timerBar').style.width = pct + '%';
+            document.getElementById('timerBar').style.background = secondsToNext <= 3 ? '#ff4d4d' : '#00f0b5';
+
+            // Aviso se muito perto
+            const warning = document.getElementById('tooCloseWarning');
+            warning.style.display = secondsToNext <= 3 ? 'block' : 'none';
+            document.getElementById('btnOdd').disabled  = secondsToNext <= 3;
+            document.getElementById('btnEven').disabled = secondsToNext <= 3;
+
+            // 2. Dígito principal (só atualiza quando sai novo dígito lento)
+            const recent = digits.recent || [];
+            if (recent.length > 0) {
+                const newest = recent[recent.length - 1];
+
+                // Verificar se é novo dígito lento
+                if (newest !== lastShownDigit) {
+                    lastShownDigit = newest;
+                    const isOdd = newest % 2 !== 0;
+
+                    const bigDigit = document.getElementById('bigDigit');
+                    const bigParity = document.getElementById('bigParity');
+                    bigDigit.textContent = newest;
+                    bigDigit.className = 'digit-big ' + (isOdd ? 'odd' : 'even');
+                    bigParity.textContent = isOdd ? 'ÍMPAR' : 'PAR';
+                    bigParity.className = 'digit-parity-label ' + (isOdd ? 'odd' : 'even');
+
+                    // Animação de entrada
+                    bigDigit.style.transform = 'scale(1.3)';
+                    setTimeout(() => bigDigit.style.transform = 'scale(1)', 300);
                 }
-            }
-            if (modo === 'digitos') {
-                ativosButtons.classList.add('hidden');
-                digitosButtons.classList.remove('hidden');
-            }
-        }
 
-        // ========== ALERTA ==========
-        function hideCurrentAlert() {
-            const alertBox = document.getElementById('alertBox');
-            if (alertBox) {
-                alertBox.classList.add('hide-alert');
-                if (currentAlertTimeout) {
-                    clearTimeout(currentAlertTimeout);
-                    currentAlertTimeout = null;
-                }
-            }
-        }
-        function showDigitAlert(message, confidence, recommended) {
-            if (!alertsEnabled) return;
-            const alertBox = document.getElementById('alertBox');
-            const alertMessage = document.getElementById('alertMessage');
-            const alertConfidence = document.getElementById('alertConfidence');
-            const alertOddBtn = document.getElementById('alertOddBtn');
-            const alertEvenBtn = document.getElementById('alertEvenBtn');
-            const alertFollowBtn = document.getElementById('alertFollowBtn');
-            alertBox.classList.remove('hide-alert');
-            alertMessage.innerHTML = message;
-            alertConfidence.innerHTML = `Confiança: ${confidence}%`;
-            window.currentRecommendation = recommended; // guarda para o botão "Seguir"
-            if (recommended === 'odd') {
-                alertOddBtn.style.display = 'inline-block';
-                alertEvenBtn.style.display = 'none';
-                alertFollowBtn.style.display = 'inline-block';
-            } else if (recommended === 'even') {
-                alertOddBtn.style.display = 'none';
-                alertEvenBtn.style.display = 'inline-block';
-                alertFollowBtn.style.display = 'inline-block';
-            } else {
-                alertOddBtn.style.display = 'inline-block';
-                alertEvenBtn.style.display = 'inline-block';
-                alertFollowBtn.style.display = 'none';
-            }
-            if (currentAlertTimeout) clearTimeout(currentAlertTimeout);
-            currentAlertTimeout = setTimeout(() => {
-                alertBox.classList.add('hide-alert');
-            }, 15000);
-        }
-
-        function seguirRecomendacao() {
-            if (window.currentRecommendation === 'odd') {
-                executeDigitTrade('odd');
-            } else if (window.currentRecommendation === 'even') {
-                executeDigitTrade('even');
-            } else {
-                alert('Nenhuma recomendação ativa.');
-            }
-        }
-
-        document.getElementById('toggleAlerts')?.addEventListener('change', function(e) {
-            alertsEnabled = e.target.checked;
-            if (!alertsEnabled) hideCurrentAlert();
-        });
-
-        // ========== CONTADOR ==========
-        function startDigitCountdown() {
-            if (digitTimer) clearInterval(digitTimer);
-            digitTimer = setInterval(() => {
-                digitCountdown--;
-                if (digitCountdown <= 0) digitCountdown = 5;
-                const countdownSpan = document.getElementById('digitCountdown');
-                if (countdownSpan) countdownSpan.textContent = digitCountdown + 's';
-            }, 1000);
-        }
-
-        // ========== EXIBIÇÃO LENTA ==========
-        function fetchDisplayDigit() {
-            fetch('/api/display_digit')
-                .then(r => r.json())
-                .then(data => {
-                    if (data.error) return;
-                    if (data.digit !== null && data.digit !== displayDigit) {
-                        displayDigit = data.digit;
-                        document.getElementById('display-digit').textContent = displayDigit;
-                        document.getElementById('display-parity').textContent = data.parity || '---';
-                        const digitElement = document.getElementById('display-digit');
-                        digitElement.classList.add('pulse');
-                        setTimeout(() => digitElement.classList.remove('pulse'), 500);
-                    }
-                    if (data.countdown !== undefined) {
-                        displayCountdown = data.countdown;
-                        document.getElementById('display-countdown').textContent = displayCountdown + 's';
-                    }
-                });
-        }
-
-        // ========== AUTENTICAÇÃO ==========
-        function showAuthTab(tab) {
-            document.getElementById('loginForm').style.display = 'none';
-            document.getElementById('registerForm').style.display = 'none';
-            document.getElementById('forgotForm').style.display = 'none';
-            if (tab === 'login') document.getElementById('loginForm').style.display = 'block';
-            else if (tab === 'register') document.getElementById('registerForm').style.display = 'block';
-            else if (tab === 'forgot') document.getElementById('forgotForm').style.display = 'block';
-        }
-        function showForgotPassword() {
-            showAuthTab('forgot');
-        }
-        function register() {
-            const data = {
-                name: document.getElementById('regName').value,
-                email: document.getElementById('regEmail').value,
-                password: document.getElementById('regPassword').value,
-                referral_code: document.getElementById('regReferral').value
-            };
-            fetch('/api/auth/register', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            }).then(r => r.json()).then(data => {
-                if (data.error) document.getElementById('authError').textContent = data.error;
-                else { alert('✅ Conta criada! Faça login.'); showAuthTab('login'); }
-            }).catch(err => console.error(err));
-        }
-        function login() {
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-            fetch('/api/auth/login', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({email, password})
-            }).then(r => r.json()).then(data => {
-                if (data.error) document.getElementById('authError').textContent = data.error;
-                else {
-                    document.getElementById('authModal').style.display = 'none';
-                    document.getElementById('mainContent').style.display = 'block';
-                    if (email === 'admin@foloma.com') {
-                        isAdmin = true;
-                        document.getElementById('adminMenuItem').style.display = 'block';
-                    } else {
-                        isAdmin = false;
-                        document.getElementById('adminMenuItem').style.display = 'none';
-                    }
-                    initPlatform();
-                }
-            }).catch(err => console.error(err));
-        }
-        function requestPasswordReset() {
-            const email = document.getElementById('forgotEmail').value;
-            fetch('/api/auth/reset-password', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({email})
-            }).then(r => r.json()).then(data => {
-                const msgDiv = document.getElementById('forgotMessage');
-                if (data.error) msgDiv.innerHTML = '❌ ' + data.error;
-                else msgDiv.innerHTML = '✅ ' + (data.message || 'Link enviado para o email.');
-            });
-        }
-        function logout() { fetch('/api/auth/logout', {method: 'POST'}).then(() => location.reload()); }
-
-        // ========== ADMIN ==========
-        function carregarAdminUsers() {
-            fetch('/api/admin/users')
-                .then(r => r.json())
-                .then(data => {
-                    const container = document.getElementById('adminUsersList');
-                    if (data.error) {
-                        container.innerHTML = '<div class="text-center" style="color:#ff4d4d;">Erro ao carregar utilizadores.</div>';
-                        return;
-                    }
-                    if (!data.users || data.users.length === 0) {
-                        container.innerHTML = '<div class="text-center">Nenhum utilizador registado.</div>';
-                        return;
-                    }
-                    let html = '<table class="user-table"><tr><th>Email</th><th>Nome</th><th>Status</th><th>Ação</th></tr>';
-                    data.users.forEach(u => {
-                        const isActive = u.active !== false;
-                        html += `<tr>
-                            <td>${u.email}</td>
-                            <td>${u.name}</td>
-                            <td>${isActive ? '✅ Ativo' : '⛔ Desativado'}</td>
-                            <td><button class="btn-toggle ${!isActive ? 'disabled-user' : ''}" onclick="toggleUserStatus('${u.email}', ${!isActive})">${isActive ? 'Desativar' : 'Ativar'}</button></td>
-                        </tr>`;
+                // 3. Historial dos dígitos lentos
+                if (recent.length !== slowDigitHistory.length ||
+                    recent[recent.length-1] !== slowDigitHistory[slowDigitHistory.length-1]) {
+                    slowDigitHistory = [...recent];
+                    let html = '';
+                    recent.forEach((d, i) => {
+                        const isOdd = d % 2 !== 0;
+                        const isNew = i === recent.length - 1;
+                        html += `<div class="digit-box ${isOdd ? 'odd' : 'even'}${isNew ? ' new' : ''}">${d}</div>`;
                     });
-                    html += '</table>';
-                    container.innerHTML = html;
-                });
-        }
-        function toggleUserStatus(email, enable) {
-            fetch('/api/admin/toggle-user', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({email, enable})
-            }).then(r => r.json()).then(data => {
-                if (data.error) alert('❌ ' + data.error);
-                else { alert('✅ ' + data.message); carregarAdminUsers(); }
-            });
-        }
-
-        // ========== PLATAFORMA ==========
-        function initPlatform() {
-            initSymbolSelector();
-            selectAccount('demo');
-            setModo('ativos');
-            startDigitCountdown();
-            setInterval(fetchDisplayDigit, 1000);
-            updateAll();
-            setInterval(updateAll, 2000);
-            setInterval(carregarHistorico, 3000);
-            setInterval(atualizarMartingale, 5000);
-            carregarLinkAfiliado();
-        }
-        function initSymbolSelector() {
-            let html = '';
-            for (let [key, value] of Object.entries(symbols)) {
-                html += `<button class="symbol-btn ${key === currentSymbol ? 'active' : ''}" onclick="changeSymbol('${key}')">${value}</button>`;
-            }
-            document.getElementById('symbol-selector').innerHTML = html;
-        }
-        function changeSymbol(symbol) {
-            currentSymbol = symbol;
-            fetch('/api/symbol/change', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({symbol: symbol})
-            });
-            document.querySelectorAll('.symbol-btn').forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
-        }
-        function selectAccount(account) {
-            selectedAccount = account;
-            const btnDemo = document.getElementById('btnDemo');
-            const btnReal = document.getElementById('btnReal');
-            const info = document.getElementById('accountInfo');
-            if (account === 'demo') {
-                btnDemo.classList.add('active');
-                btnReal.classList.remove('active');
-                info.innerHTML = '🎮 Conta Demo - Saldo virtual, sem risco';
+                    document.getElementById('slowDigitsHistory').innerHTML = html;
+                }
             } else {
-                btnDemo.classList.remove('active');
-                btnReal.classList.add('active');
-                info.innerHTML = '💰 Conta Real - Ganhe comissão de 0.5% por trade';
+                document.getElementById('slowDigitsHistory').innerHTML =
+                    '<div style="color:#62748c;font-size:12px;">Aguardando primeiros dígitos (15s)...</div>';
             }
-        }
-        function saveToken() {
-            const token = document.getElementById('tokenInput').value;
-            if (!token) { alert('Insira o token'); return; }
-            fetch('/api/auth/save_token', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({token: token, account_type: selectedAccount})
-            }).then(r => r.json()).then(data => {
-                if (data.error) alert('❌ ' + data.error);
-                else { alert('✅ Token guardado!'); document.getElementById('tokenStatus').innerHTML = '✅ Token configurado'; document.getElementById('tokenStatus').style.color = '#00f0b5'; }
-            });
-        }
-        function conectar() {
-            if (isConnected) { alert('Já conectado!'); return; }
-            const btn = document.getElementById('connectBtn');
-            const statusDiv = document.getElementById('connectStatus');
-            btn.disabled = true;
-            btn.textContent = '🔄 CONECTANDO...';
-            statusDiv.innerHTML = '⏳ Conectando à Deriv...';
-            fetch('/api/connect', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({account_type: selectedAccount, symbol: currentSymbol})
-            }).then(r => r.json()).then(data => {
-                if (data.error) {
-                    statusDiv.innerHTML = '❌ ' + data.error;
-                    btn.disabled = false;
-                    btn.textContent = '🔌 CONECTAR';
-                } else {
-                    statusDiv.innerHTML = '✅ Conectado!';
-                    setTimeout(() => statusDiv.innerHTML = '', 3000);
-                    btn.disabled = false;
-                    btn.textContent = '✅ CONECTADO';
-                    btn.style.background = '#2a3342';
-                    isConnected = true;
-                }
-            });
+
+            // 4. Streak e análise
+            const analysis = digits.analysis || {};
+            const streak = analysis.streak || 0;
+            const streakParity = analysis.streak_parity || '---';
+
+            const streakVal = document.getElementById('streakVal');
+            streakVal.textContent = streak > 0 ? streak : '—';
+            streakVal.className = 'streak-val ' + (streak === 0 ? 'none' : (streakParity === 'PAR' ? 'even' : 'odd'));
+            document.getElementById('streakLabel').textContent =
+                streak > 0 ? `${streakParity} consecutivo${streak > 1 ? 's' : ''}` : 'aguardando...';
+            document.getElementById('totalDigits').textContent = analysis.total_digits || recent.length || 0;
+
+            // 5. Sinal de recomendação
+            const signalBox  = document.getElementById('digitSignalBox');
+            const signalText = document.getElementById('digitSignalText');
+            if (analysis.recommended_action && analysis.confidence > 0) {
+                const isOddRec = analysis.recommended_action === 'BUY';
+                signalBox.className = 'signal-box active';
+                signalText.innerHTML =
+                    `⚡ ${analysis.reason || ''}<br>` +
+                    `<span style="font-size:12px;opacity:0.8;">Sugestão: aposte em <strong>${isOddRec ? 'ÍMPAR' : 'PAR'}</strong></span>`;
+            } else {
+                signalBox.className = 'signal-box none';
+                signalText.textContent = analysis.reason || 'Aguardando padrão (mínimo 3 consecutivos)...';
+            }
+
+            // 6. Percentagens
+            document.getElementById('oddPercent').textContent  = (analysis.odd_pct  || 0) + '%';
+            document.getElementById('evenPercent').textContent = (analysis.even_pct || 0) + '%';
+            document.getElementById('oddBar').style.width  = (analysis.odd_pct  || 50) + '%';
+            document.getElementById('evenBar').style.width = (analysis.even_pct || 50) + '%';
         }
 
-        // ========== TRADES ==========
-        function executeTrade(action) {
-            const amount = parseFloat(document.getElementById('amount').value);
-            if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
-            const isManual = document.getElementById('manualMode').checked;
-            let url = isManual ? '/api/trade/manual' : '/api/trade';
-            if (modoAtual === 'hybrid') {
-                url = '/api/trade/hybrid';
-            }
-            fetch(url, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({action: action, amount: amount})
-            }).then(r => r.json()).then(data => {
-                if (data.error) alert('❌ ' + data.error);
-                else alert(data.message || '✅ Trade executado!');
-            });
-        }
-        function executeDigitTrade(prediction) {
-            const amount = parseFloat(document.getElementById('amount').value);
-            if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
-            fetch('/api/trade/digit', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({prediction: prediction, amount: amount})
-            }).then(r => r.json()).then(data => {
-                if (data.error) alert('❌ ' + data.error);
-                else alert('✅ Aposta enviada!');
-            });
-        }
-        function executarAlerta(prediction) {
-            const amount = parseFloat(document.getElementById('amount').value);
-            if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
-            if (confirm(`Confirmar aposta em ${prediction === 'odd' ? 'ÍMPAR' : 'PAR'}?`)) executeDigitTrade(prediction);
-        }
-
-        function togglePause() {
-            paused = !paused;
-            fetch('/api/pause', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({paused: paused})});
-            document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
-        }
-        function aplicarMartingale() {
-            fetch('/api/report').then(r => r.json()).then(data => {
-                const historico = data.historico || [];
-                if (historico.length === 0) { alert('⚠️ Nenhum trade anterior'); return; }
-                const ultimo = historico[historico.length - 1];
-                if (ultimo.result === 'win') { alert('✅ Último trade foi GANHO. Martingale só após perda.'); return; }
-                if (confirm(`⚠️ Último trade PERDA de $${ultimo.amount}\nAplicar Martingale (2x)?`)) {
-                    fetch('/api/martingale/apply', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({last_amount: ultimo.amount})
-                    }).then(r => r.json()).then(data => {
-                        if (data.error) alert('❌ ' + data.error);
-                        else { alert(data.martingale.message); document.getElementById('amount').value = data.martingale.next_amount.toFixed(2); atualizarMartingale(); }
-                    });
-                }
-            });
-        }
-        function resetarMartingale() {
-            if (confirm('Resetar Martingale?')) {
-                fetch('/api/martingale/reset', {method: 'POST'}).then(() => { alert('✅ Martingale resetado!'); document.getElementById('amount').value = '0.35'; atualizarMartingale(); });
-            }
-        }
-        function atualizarMartingale() {
-            fetch('/api/martingale/status').then(r => r.json()).then(data => {
-                const activeSpan = document.getElementById('martingaleActive');
-                const nextSpan = document.getElementById('martingaleNext');
-                if (data.active) { activeSpan.textContent = `ATIVO (PASSO ${data.step}/${data.max_steps})`; activeSpan.style.color = '#00f0b5'; }
-                else { activeSpan.textContent = 'DESATIVADO'; activeSpan.style.color = '#ffaa00'; }
-                nextSpan.textContent = '$' + data.next_amount.toFixed(2);
-            });
-        }
-
-        function limparHistorico() {
-            if (confirm('⚠️ Tem certeza que deseja apagar todo o histórico de trades? Esta ação não pode ser desfeita.')) {
-                fetch('/api/clear_history', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({})
-                }).then(r => r.json()).then(data => {
-                    if (data.error) alert('❌ ' + data.error);
-                    else { alert('✅ Histórico apagado!'); carregarHistorico(); updateAll(); }
-                }).catch(err => console.error(err));
-            }
-        }
-
-        // ========== ATUALIZAÇÃO EM TEMPO REAL ==========
+        // ===== ATUALIZAÇÃO GERAL =====
         function updateAll() {
             fetch('/api/status')
                 .then(r => r.json())
@@ -1323,14 +610,16 @@
                     if (data.error) return;
                     const bot = data.bot;
                     if (!bot) return;
+
                     // Status
-                    const dot = document.getElementById('statusDot');
+                    const dot  = document.getElementById('statusDot');
                     const text = document.getElementById('statusText');
-                    const btn = document.getElementById('connectBtn');
+                    const btn  = document.getElementById('connectBtn');
                     if (bot.connected && bot.authorized) {
                         dot.className = 'dot connected';
                         text.textContent = 'Conectado';
-                        if (btn.textContent !== '✅ CONECTADO') { btn.textContent = '✅ CONECTADO'; btn.style.background = '#2a3342'; }
+                        btn.textContent = '✅ CONECTADO';
+                        btn.style.background = '#2a3342';
                         isConnected = true;
                     } else {
                         dot.className = 'dot';
@@ -1338,27 +627,31 @@
                         if (isConnected) { btn.textContent = '🔌 CONECTAR'; btn.style.background = '#00f0b5'; }
                         isConnected = false;
                     }
+
                     // Saldo e preço
-                    document.getElementById('balance').textContent = (bot.balance || 0).toFixed(2);
+                    document.getElementById('balance').textContent  = (bot.balance || 0).toFixed(2);
                     document.getElementById('currency').textContent = bot.currency || 'USD';
-                    document.getElementById('price').textContent = (bot.price || 0).toFixed(4);
+                    document.getElementById('price').textContent    = (bot.price || 0).toFixed(4);
+
                     const signal = bot.signal || 'NEUTRAL';
-                    const badge = document.getElementById('signalBadge');
+                    const badge  = document.getElementById('signalBadge');
                     badge.textContent = signal;
                     badge.className = 'signal-badge ' + signal.toLowerCase();
                     document.getElementById('signalConfidence').textContent = (bot.confidence || 0) + '%';
+
                     if (bot.analysis) {
                         document.getElementById('trendScore').textContent = (bot.analysis.trend?.score || 0).toFixed(1);
-                        document.getElementById('trendDesc').textContent = bot.analysis.trend?.desc || '---';
-                        document.getElementById('rsiScore').textContent = (bot.analysis.rsi?.score || 0).toFixed(1);
-                        document.getElementById('rsiDesc').textContent = bot.analysis.rsi?.desc || '---';
-                        document.getElementById('macdScore').textContent = (bot.analysis.macd?.score || 0).toFixed(1);
-                        document.getElementById('macdDesc').textContent = bot.analysis.macd?.desc || '---';
-                        document.getElementById('bbScore').textContent = (bot.analysis.bollinger?.score || 0).toFixed(1);
-                        document.getElementById('bbDesc').textContent = bot.analysis.bollinger?.desc || '---';
+                        document.getElementById('trendDesc').textContent  = bot.analysis.trend?.desc  || '---';
+                        document.getElementById('rsiScore').textContent   = (bot.analysis.rsi?.score  || 0).toFixed(1);
+                        document.getElementById('rsiDesc').textContent    = bot.analysis.rsi?.desc    || '---';
+                        document.getElementById('macdScore').textContent  = (bot.analysis.macd?.score || 0).toFixed(1);
+                        document.getElementById('macdDesc').textContent   = bot.analysis.macd?.desc   || '---';
+                        document.getElementById('bbScore').textContent    = (bot.analysis.bollinger?.score || 0).toFixed(1);
+                        document.getElementById('bbDesc').textContent     = bot.analysis.bollinger?.desc   || '---';
                     }
+
                     document.getElementById('totalTrades').textContent = bot.stats?.total || 0;
-                    document.getElementById('winRate').textContent = (bot.stats?.win_rate || 0).toFixed(1) + '%';
+                    document.getElementById('winRate').textContent  = (bot.stats?.win_rate || 0).toFixed(1) + '%';
                     const pl = bot.stats?.profit_loss || 0;
                     const plElem = document.getElementById('profitLoss');
                     plElem.textContent = (pl >= 0 ? '+' : '') + '$' + pl.toFixed(2);
@@ -1366,193 +659,356 @@
                     document.getElementById('totalReturn').textContent = (bot.stats?.total_return || 0).toFixed(1) + '%';
                     paused = bot.paused || false;
                     document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
-                    
-                    // ========== DÍGITOS ==========
+
+                    // ✅ Painel de dígitos
                     if (data.digits) {
-                        const d = data.digits;
-                        const newDigit = d.last;
-                        if (newDigit !== undefined && newDigit !== lastKnownDigit) {
-                            console.log("🔁 Dígito mudou de", lastKnownDigit, "para", newDigit);
-                            hideCurrentAlert();
-                            lastKnownDigit = newDigit;
-                        }
-                        if (d.recent && d.recent.length > 0) {
-                            let slowHtml = '';
-                            d.recent.forEach(digit => {
-                                const isOdd = digit % 2 !== 0;
-                                slowHtml += `<div class="digit-box ${isOdd ? 'odd' : 'even'}">${digit}</div>`;
-                            });
-                            const slowContainer = document.getElementById('slowDigitsHistory');
-                            if (slowContainer) slowContainer.innerHTML = slowHtml;
-                        }
-                        const analysis = d.analysis;
-                        if (analysis && analysis.alert === 'RECOMENDADO' && analysis.confidence >= 65) {
-                            showDigitAlert(analysis.reason, analysis.confidence, analysis.recommended_action === 'BUY' ? 'odd' : (analysis.recommended_action === 'SELL' ? 'even' : null));
-                        }
-                        if (analysis) {
-                            document.getElementById('oddPercent').textContent = (analysis.odd_pct || 0) + '%';
-                            document.getElementById('evenPercent').textContent = (analysis.even_pct || 0) + '%';
-                            document.getElementById('oddBar').style.width = (analysis.odd_pct || 0) + '%';
-                            document.getElementById('evenBar').style.width = (analysis.even_pct || 0) + '%';
-                            document.getElementById('totalDigits').textContent = d.stats?.total || 0;
-                            document.getElementById('oddCount').textContent = d.stats?.odd || 0;
-                            document.getElementById('evenCount').textContent = d.stats?.even || 0;
-                            document.getElementById('accuracy').textContent = d.stats?.accuracy || 0;
-                        }
+                        updateDigitPanel(data.digits);
                     }
-                    
-                    // ========== MODO HÍBRIDO ==========
+
+                    // Modo híbrido
                     if (modoAtual === 'hybrid') {
-                        const hybridDiv = document.getElementById('hybridStatus');
-                        hybridDiv.classList.remove('hidden');
+                        const digitAnalysis = data.digits?.analysis;
+                        const digitRecommend = digitAnalysis?.recommended_action;
+                        const digitConf = digitAnalysis?.confidence || 0;
                         const ativoSignal = bot.signal;
                         const ativoConf = bot.confidence;
-                        const digitAnalysis = data.digits ? data.digits.analysis : null;
-                        const digitRecommend = digitAnalysis ? digitAnalysis.recommended_action : null;
-                        const digitConf = digitAnalysis ? digitAnalysis.confidence : 0;
-                        let hybridMessage = '';
-                        let hybridColor = '#ffaa00';
-                        let canTrade = false;
-                        let combinedConf = 0;
-                        console.log("🔍 Híbrido - Ativo:", ativoSignal, "conf:", ativoConf);
-                        console.log("🔍 Híbrido - Dígitos:", digitRecommend, "conf:", digitConf);
+                        let canTrade = false, combinedConf = 0, hybridMsg = '', hybridColor = '#ffaa00';
+
                         if (ativoSignal === 'BUY' && digitRecommend === 'BUY') {
                             combinedConf = (ativoConf + digitConf) / 2;
-                            hybridMessage = `✅ SINAIS CONVERGENTES (COMPRA) – Confiança combinada: ${combinedConf.toFixed(1)}%`;
-                            hybridColor = '#00f0b5';
-                            canTrade = true;
+                            hybridMsg = `✅ COMPRA CONFIRMADA – Confiança: ${combinedConf.toFixed(1)}%`;
+                            hybridColor = '#00f0b5'; canTrade = true;
                         } else if (ativoSignal === 'SELL' && digitRecommend === 'SELL') {
                             combinedConf = (ativoConf + digitConf) / 2;
-                            hybridMessage = `✅ SINAIS CONVERGENTES (VENDA) – Confiança combinada: ${combinedConf.toFixed(1)}%`;
-                            hybridColor = '#00f0b5';
-                            canTrade = true;
+                            hybridMsg = `✅ VENDA CONFIRMADA – Confiança: ${combinedConf.toFixed(1)}%`;
+                            hybridColor = '#00f0b5'; canTrade = true;
                         } else {
-                            hybridMessage = `⚠️ SINAIS DIVERGENTES (Ativo: ${ativoSignal}, Dígitos: ${digitRecommend || 'NEUTRO'}) – Aguarde convergência`;
+                            hybridMsg = `⚠️ Sinais divergentes (Ativo: ${ativoSignal}, Dígitos: ${digitRecommend||'NEUTRO'})`;
                             hybridColor = '#ff4d4d';
-                            canTrade = false;
                         }
-                        document.getElementById('hybridSignal').innerHTML = hybridMessage;
+                        document.getElementById('hybridSignal').innerHTML = hybridMsg;
                         document.getElementById('hybridSignal').style.color = hybridColor;
-                        document.getElementById('hybridConfidence').innerHTML = canTrade ? `Pronto para trade!` : `Confiança combinada: ${combinedConf.toFixed(1)}% (mínimo 60%)`;
-                        const buyBtn = document.getElementById('hybridBuyBtn');
-                        const sellBtn = document.getElementById('hybridSellBtn');
-                        if (buyBtn && sellBtn) {
-                            buyBtn.disabled = !canTrade;
-                            sellBtn.disabled = !canTrade;
-                            buyBtn.style.opacity = canTrade ? '1' : '0.5';
-                            sellBtn.style.opacity = canTrade ? '1' : '0.5';
-                        }
+                        document.getElementById('hybridConfidence').textContent = canTrade ? 'Pronto para trade!' : 'Aguarde convergência...';
+                        document.getElementById('hybridBuyBtn').disabled  = !canTrade;
+                        document.getElementById('hybridSellBtn').disabled = !canTrade;
+                        document.getElementById('hybridBuyBtn').style.opacity  = canTrade ? '1' : '0.5';
+                        document.getElementById('hybridSellBtn').style.opacity = canTrade ? '1' : '0.5';
+                    }
+                })
+                .catch(() => {});
+        }
+
+        // ===== AUTENTICAÇÃO =====
+        function showAuthTab(tab) {
+            ['loginForm','registerForm','forgotForm'].forEach(f =>
+                document.getElementById(f).style.display = 'none');
+            if (tab === 'login')    document.getElementById('loginForm').style.display    = 'block';
+            if (tab === 'register') document.getElementById('registerForm').style.display = 'block';
+            if (tab === 'forgot')   document.getElementById('forgotForm').style.display   = 'block';
+        }
+        function showForgotPassword() { showAuthTab('forgot'); }
+        function register() {
+            const data = {
+                name: document.getElementById('regName').value,
+                email: document.getElementById('regEmail').value,
+                password: document.getElementById('regPassword').value,
+                referral_code: document.getElementById('regReferral').value
+            };
+            fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+                .then(r=>r.json()).then(data => {
+                    if (data.error) document.getElementById('authError').textContent = data.error;
+                    else { alert('✅ Conta criada! Faça login.'); showAuthTab('login'); }
+                });
+        }
+        function login() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
+                .then(r=>r.json()).then(data => {
+                    if (data.error) { document.getElementById('authError').textContent = data.error; return; }
+                    document.getElementById('authModal').style.display = 'none';
+                    document.getElementById('mainContent').style.display = 'block';
+                    if (email === 'admin@foloma.com') {
+                        isAdmin = true;
+                        document.getElementById('adminMenuItem').style.display = 'block';
+                    }
+                    initPlatform();
+                });
+        }
+        function requestPasswordReset() {
+            const email = document.getElementById('forgotEmail').value;
+            fetch('/api/auth/reset-password', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})
+                .then(r=>r.json()).then(data => {
+                    const msgDiv = document.getElementById('forgotMessage');
+                    msgDiv.innerHTML = data.error ? '❌ '+data.error : '✅ '+(data.message||'Link enviado!');
+                });
+        }
+        function logout() { fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload()); }
+
+        // ===== PLATAFORMA =====
+        function initPlatform() {
+            initSymbolSelector();
+            selectAccount('demo');
+            setModo('ativos');
+            updateAll();
+            setInterval(updateAll, 2000);
+            setInterval(carregarHistorico, 5000);
+            setInterval(atualizarMartingale, 5000);
+            carregarLinkAfiliado();
+        }
+        function initSymbolSelector() {
+            let html = '';
+            for (let [key, value] of Object.entries(symbols)) {
+                html += `<button class="symbol-btn ${key===currentSymbol?'active':''}" onclick="changeSymbol('${key}')">${value}</button>`;
+            }
+            document.getElementById('symbol-selector').innerHTML = html;
+        }
+        function changeSymbol(symbol) {
+            currentSymbol = symbol;
+            fetch('/api/symbol/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol})});
+            document.querySelectorAll('.symbol-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+        function selectAccount(account) {
+            selectedAccount = account;
+            document.getElementById('btnDemo').classList.toggle('active', account === 'demo');
+            document.getElementById('btnReal').classList.toggle('active', account === 'real');
+            document.getElementById('accountInfo').innerHTML = account === 'demo'
+                ? '🎮 Conta Demo - Saldo virtual, sem risco'
+                : '💰 Conta Real - Ganhe comissão de 0.5% por trade';
+        }
+        function saveToken() {
+            const token = document.getElementById('tokenInput').value;
+            if (!token) { alert('Insira o token'); return; }
+            fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,account_type:selectedAccount})})
+                .then(r=>r.json()).then(data => {
+                    if (data.error) alert('❌ '+data.error);
+                    else { alert('✅ Token guardado!'); document.getElementById('tokenStatus').innerHTML = '✅ Token configurado'; }
+                });
+        }
+        function conectar() {
+            if (isConnected) { alert('Já conectado!'); return; }
+            const btn = document.getElementById('connectBtn');
+            const statusDiv = document.getElementById('connectStatus');
+            btn.disabled = true; btn.textContent = '🔄 CONECTANDO...';
+            statusDiv.innerHTML = '⏳ Conectando à Deriv...';
+            fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:selectedAccount,symbol:currentSymbol})})
+                .then(r=>r.json()).then(data => {
+                    if (data.error) {
+                        statusDiv.innerHTML = '❌ '+data.error;
+                        btn.disabled = false; btn.textContent = '🔌 CONECTAR';
                     } else {
-                        const hybridDiv = document.getElementById('hybridStatus');
-                        if (hybridDiv) hybridDiv.classList.add('hidden');
-                        const buyBtn = document.getElementById('hybridBuyBtn');
-                        const sellBtn = document.getElementById('hybridSellBtn');
-                        if (buyBtn && sellBtn) {
-                            buyBtn.disabled = false;
-                            sellBtn.disabled = false;
-                            buyBtn.style.opacity = '1';
-                            sellBtn.style.opacity = '1';
-                        }
+                        statusDiv.innerHTML = '✅ Conectado!';
+                        setTimeout(() => statusDiv.innerHTML = '', 3000);
+                        btn.disabled = false; btn.textContent = '✅ CONECTADO'; btn.style.background = '#2a3342';
+                        isConnected = true;
                     }
                 });
         }
 
-        function carregarHistorico() {
-            fetch('/api/report')
-                .then(r => r.json())
-                .then(data => {
-                    const historico = data.historico || [];
-                    const tradesList = document.getElementById('tradesList');
-                    if (historico.length === 0) {
-                        tradesList.innerHTML = '<div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>';
-                        return;
-                    }
-                    let html = '';
-                    historico.slice(-10).reverse().forEach(trade => {
-                        const isWin = trade.result === 'win';
-                        const isLoss = trade.result === 'loss';
-                        let profitAmount = 0;
-                        let displayAmount = trade.amount || 0;
-                        if (isWin) {
-                            profitAmount = trade.profit || (displayAmount * 0.85);
-                        } else if (isLoss) {
-                            profitAmount = -displayAmount;
-                        }
-                        const resultColor = isWin ? '#00f0b5' : (isLoss ? '#ff4d4d' : '#ffaa00');
-                        let resultText = '';
-                        if (isWin) {
-                            resultText = `✅ +$${profitAmount.toFixed(2)}`;
-                        } else if (isLoss) {
-                            resultText = `❌ -$${displayAmount.toFixed(2)}`;
-                        } else {
-                            resultText = '⏳ PENDENTE';
-                        }
-                        let action = trade.action || '';
-                        if (action === 'BUY') action = '📈 COMPRA';
-                        else if (action === 'SELL') action = '📉 VENDA';
-                        else if (action === 'DIGIT_ODD') action = '🎲 ÍMPAR';
-                        else if (action === 'DIGIT_EVEN') action = '🎲 PAR';
-                        html += `<div class="trade-item">
-                            <div>${trade.time?.slice(5, 16) || '---'}</div>
-                            <div>${action}</div>
-                            <div>$${displayAmount.toFixed(2)}</div>
-                            <div class="${isWin ? 'win' : (isLoss ? 'loss' : 'pending')}">${resultText}</div>
-                        </div>`;
-                    });
-                    tradesList.innerHTML = html;
+        // ===== TRADES =====
+        function executeTrade(action) {
+            const amount = parseFloat(document.getElementById('amount').value);
+            if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
+            const isManual = document.getElementById('manualMode').checked;
+            let url = isManual ? '/api/trade/manual' : (modoAtual === 'hybrid' ? '/api/trade/hybrid' : '/api/trade');
+            fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,amount})})
+                .then(r=>r.json()).then(data => {
+                    if (data.error) alert('❌ '+data.error);
+                    else alert(data.message || '✅ Trade executado!');
                 });
         }
 
-        function carregarLinkAfiliado() {
-            fetch('/api/affiliate/link').then(r => r.json()).then(data => {
-                if (data.link) document.getElementById('referralLink').value = data.link;
-            }).catch(() => document.getElementById('referralLink').value = 'https://foloma.com/ref/seu_codigo');
-            fetch('/api/affiliate/stats').then(r => r.json()).then(data => {
-                document.getElementById('refCount').textContent = data.total_referrals || 0;
-                document.getElementById('refCommission').textContent = '$' + (data.total_commission || 0);
+        // ✅ APOSTA NOS DÍGITOS — aposta no que SAIRÁ no próximo dígito de 15s
+        function executeDigitTrade(prediction) {
+            if (secondsToNext <= 3) {
+                alert('⚠️ Dígito a sair em menos de 3s! Aguarde o próximo ciclo.');
+                return;
+            }
+            const amount = parseFloat(document.getElementById('amountDigit').value || document.getElementById('amount').value);
+            if (amount < 0.35 || amount > 100) { alert('Valor entre $0.35 e $100'); return; }
+
+            const label = prediction === 'odd' ? 'ÍMPAR' : 'PAR';
+            if (!confirm(`Apostar $${amount.toFixed(2)} em ${label}?\nO resultado sairá em ~${secondsToNext}s.`)) return;
+
+            fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction,amount})})
+                .then(r=>r.json()).then(data => {
+                    if (data.error) alert('❌ '+data.error);
+                    else alert(`✅ Aposta em ${label} enviada!\n${data.message||''}`);
+                });
+        }
+
+        function togglePause() {
+            paused = !paused;
+            fetch('/api/pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused})});
+            document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
+        }
+        function aplicarMartingale() {
+            fetch('/api/report').then(r=>r.json()).then(data => {
+                const historico = data.historico || [];
+                if (!historico.length) { alert('⚠️ Nenhum trade anterior'); return; }
+                const ultimo = historico[historico.length-1];
+                if (ultimo.result === 'win') { alert('✅ Último foi GANHO. Martingale só após perda.'); return; }
+                if (confirm(`⚠️ Último trade PERDA de $${ultimo.amount}\nAplicar Martingale (2x)?`)) {
+                    fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:ultimo.amount})})
+                        .then(r=>r.json()).then(data => {
+                            if (data.error) alert('❌ '+data.error);
+                            else {
+                                alert(data.martingale.message);
+                                document.getElementById('amount').value = data.martingale.next_amount.toFixed(2);
+                                atualizarMartingale();
+                            }
+                        });
+                }
             });
+        }
+        function aplicarMartingaleDigit() {
+            fetch('/api/report').then(r=>r.json()).then(data => {
+                const historico = data.historico || [];
+                if (!historico.length) { alert('⚠️ Nenhum trade anterior'); return; }
+                const ultimo = historico[historico.length-1];
+                if (ultimo.result === 'win') { alert('✅ Último foi GANHO. Martingale só após perda.'); return; }
+                if (confirm(`⚠️ Último PERDA de $${ultimo.amount}\nAplicar Martingale (2x)?`)) {
+                    fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:ultimo.amount})})
+                        .then(r=>r.json()).then(data => {
+                            if (data.error) alert('❌ '+data.error);
+                            else {
+                                alert(data.martingale.message);
+                                document.getElementById('amountDigit').value = data.martingale.next_amount.toFixed(2);
+                                atualizarMartingale();
+                            }
+                        });
+                }
+            });
+        }
+        function resetarMartingale() {
+            if (confirm('Resetar Martingale?')) {
+                fetch('/api/martingale/reset',{method:'POST'}).then(()=>{
+                    alert('✅ Martingale resetado!');
+                    document.getElementById('amount').value = '0.35';
+                    if (document.getElementById('amountDigit')) document.getElementById('amountDigit').value = '0.35';
+                    atualizarMartingale();
+                });
+            }
+        }
+        function atualizarMartingale() {
+            fetch('/api/martingale/status').then(r=>r.json()).then(data => {
+                const activeSpan = document.getElementById('martingaleActive');
+                const nextSpan   = document.getElementById('martingaleNext');
+                const activeSpanD = document.getElementById('martingaleActiveDigit');
+                const nextSpanD   = document.getElementById('martingaleNextDigit');
+                if (data.active) {
+                    const txt = `ATIVO (PASSO ${data.step}/${data.max_steps})`;
+                    if (activeSpan) { activeSpan.textContent = txt; activeSpan.style.color = '#00f0b5'; }
+                    if (activeSpanD){ activeSpanD.textContent = txt; activeSpanD.style.color = '#00f0b5'; }
+                } else {
+                    if (activeSpan) { activeSpan.textContent = 'DESATIVADO'; activeSpan.style.color = '#ffaa00'; }
+                    if (activeSpanD){ activeSpanD.textContent = 'DESATIVADO'; activeSpanD.style.color = '#ffaa00'; }
+                }
+                const nextTxt = '$' + data.next_amount.toFixed(2);
+                if (nextSpan)  nextSpan.textContent  = nextTxt;
+                if (nextSpanD) nextSpanD.textContent = nextTxt;
+            });
+        }
+        function limparHistorico() {
+            if (confirm('⚠️ Apagar todo o histórico? Esta ação não pode ser desfeita.')) {
+                fetch('/api/clear_history',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+                    .then(r=>r.json()).then(data => {
+                        if (data.error) alert('❌ '+data.error);
+                        else { alert('✅ Histórico apagado!'); carregarHistorico(); }
+                    });
+            }
+        }
+        function carregarHistorico() {
+            fetch('/api/report').then(r=>r.json()).then(data => {
+                const historico = data.historico || [];
+                const tradesList = document.getElementById('tradesList');
+                if (!historico.length) { tradesList.innerHTML = '<div class="text-center" style="color:#62748c; padding:20px;">Nenhum trade</div>'; return; }
+                let html = '';
+                historico.slice(-10).reverse().forEach(trade => {
+                    const isWin  = trade.result === 'win';
+                    const isLoss = trade.result === 'loss';
+                    const displayAmount = trade.amount || 0;
+                    const profitAmount  = isWin ? (trade.profit || displayAmount * 0.85) : (isLoss ? -displayAmount : 0);
+                    const resultColor   = isWin ? '#00f0b5' : (isLoss ? '#ff4d4d' : '#ffaa00');
+                    const resultText    = isWin ? `✅ +$${profitAmount.toFixed(2)}` : (isLoss ? `❌ -$${displayAmount.toFixed(2)}` : '⏳ PENDENTE');
+                    let action = trade.action || '';
+                    if (action === 'DIGITODD')  action = '🎲 ÍMPAR';
+                    else if (action === 'DIGITEVEN') action = '🎲 PAR';
+                    else if (action === 'CALL')  action = '📈 COMPRA';
+                    else if (action === 'PUT')   action = '📉 VENDA';
+                    html += `<div class="trade-item">
+                        <div>${trade.time?.slice(5,16)||'---'}</div>
+                        <div>${action}</div>
+                        <div>$${displayAmount.toFixed(2)}</div>
+                        <div style="color:${resultColor}">${resultText}</div>
+                    </div>`;
+                });
+                tradesList.innerHTML = html;
+            });
+        }
+        function carregarLinkAfiliado() {
+            fetch('/api/affiliate/link').then(r=>r.json()).then(data => {
+                if (data.link) document.getElementById('referralLink').value = data.link;
+            }).catch(() => {});
+            fetch('/api/affiliate/stats').then(r=>r.json()).then(data => {
+                document.getElementById('refCount').textContent = data.total_referrals || 0;
+                document.getElementById('refCommission').textContent = '$'+(data.total_commission||0);
+            }).catch(() => {});
         }
         function copiarLink() {
             const link = document.getElementById('referralLink');
-            link.select();
-            document.execCommand('copy');
-            alert('✅ Link copiado!');
+            link.select(); document.execCommand('copy'); alert('✅ Link copiado!');
         }
         function realizarDeposito() {
             const amount = parseFloat(document.getElementById('depositAmount').value);
             const method = document.getElementById('depositMethod').value;
             if (!amount || amount < 10) { alert('Valor mínimo $10'); return; }
-            fetch('/api/payment/deposit', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({amount: amount, currency: 'USD', method: method})
-            }).then(r => r.json()).then(data => {
-                if (data.error) alert('❌ ' + data.error);
-                else { alert('✅ ' + (data.message || 'Depósito solicitado!')); document.getElementById('depositAmount').value = ''; }
-            });
+            fetch('/api/payment/deposit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount,currency:'USD',method})})
+                .then(r=>r.json()).then(data => {
+                    if (data.error) alert('❌ '+data.error);
+                    else { alert('✅ '+(data.message||'Depósito solicitado!')); document.getElementById('depositAmount').value=''; }
+                });
         }
         function realizarSaque() {
             const amount = parseFloat(document.getElementById('withdrawAmount').value);
             const method = document.getElementById('withdrawMethod').value;
             if (!amount || amount < 10) { alert('Valor mínimo $10'); return; }
-            const balance = parseFloat(document.getElementById('balance').textContent);
-            if (amount > balance) { alert('❌ Saldo insuficiente!'); return; }
-            fetch('/api/payment/withdraw', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({amount: amount, currency: 'USD', method: method})
-            }).then(r => r.json()).then(data => {
-                if (data.error) alert('❌ ' + data.error);
-                else { alert('✅ ' + (data.message || 'Saque solicitado!')); document.getElementById('withdrawAmount').value = ''; }
+            fetch('/api/payment/withdraw',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount,currency:'USD',method})})
+                .then(r=>r.json()).then(data => {
+                    if (data.error) alert('❌ '+data.error);
+                    else { alert('✅ '+(data.message||'Saque solicitado!')); document.getElementById('withdrawAmount').value=''; }
+                });
+        }
+        function carregarAdminUsers() {
+            fetch('/api/admin/users').then(r=>r.json()).then(data => {
+                const container = document.getElementById('adminUsersList');
+                if (data.error) { container.innerHTML = '<div style="color:#ff4d4d;">Erro ao carregar.</div>'; return; }
+                if (!data.users?.length) { container.innerHTML = '<div>Nenhum utilizador.</div>'; return; }
+                let html = '<table class="user-table"><tr><th>Email</th><th>Nome</th><th>Status</th><th>Ação</th></tr>';
+                data.users.forEach(u => {
+                    const isActive = u.active !== false;
+                    html += `<tr><td>${u.email}</td><td>${u.name}</td><td>${isActive?'✅':'⛔'}</td>
+                        <td><button class="btn-toggle ${!isActive?'disabled-user':''}" onclick="toggleUserStatus('${u.email}',${!isActive})">${isActive?'Desativar':'Ativar'}</button></td></tr>`;
+                });
+                html += '</table>';
+                container.innerHTML = html;
             });
         }
+        function toggleUserStatus(email, enable) {
+            fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,enable})})
+                .then(r=>r.json()).then(data => {
+                    if (data.error) alert('❌ '+data.error);
+                    else { alert('✅ '+data.message); carregarAdminUsers(); }
+                });
+        }
 
-        // Verificar autenticação
-        fetch('/api/auth/status').then(r => r.json()).then(data => {
+        // ===== ARRANQUE =====
+        fetch('/api/auth/status').then(r=>r.json()).then(data => {
             if (data.authenticated) {
                 document.getElementById('authModal').style.display = 'none';
                 document.getElementById('mainContent').style.display = 'block';
-                if (data.user && data.user.email === 'admin@foloma.com') {
+                if (data.user?.email === 'admin@foloma.com') {
                     isAdmin = true;
                     document.getElementById('adminMenuItem').style.display = 'block';
                 }
