@@ -39,7 +39,7 @@ class TradingBot:
         }
 
         self.trades = deque(maxlen=100)
-        self.consecutive_losses = 0   # ✅ FIX: agora são atualizados corretamente
+        self.consecutive_losses = 0
         self.consecutive_wins = 0
 
         self.martingale = {
@@ -63,12 +63,22 @@ class TradingBot:
         logger.info("▶️ Resumido")
 
     def on_tick(self, tick):
+        # 🔍 Log para confirmar que ticks estão a chegar
+        logger.info(f"📈 Tick recebido: {tick.get('symbol')} @ {tick.get('price')}")
+
         self.current_price = tick['price']
         self.current_symbol = tick['symbol']
         self.indicators.add_price(self.current_price, self.current_symbol)
+
+        # 🎲 Alimentar analisador de dígitos apenas para índices de volatilidade (R_)
         if 'R_' in self.current_symbol:
+            logger.info("🔵 Alimentando digit_analyzer")
             digit_analyzer.add_tick(self.current_price)
+        else:
+            logger.info("⚪ Símbolo não R_ → digit_analyzer ignorado")
+
         self.last_analysis = self.indicators.get_all_indicators(self.current_symbol)
+
         if self.client:
             self.balance = self.client.balance
             self.currency = self.client.currency
@@ -191,7 +201,6 @@ class TradingBot:
                 profit_loss += trade.get('profit', 0)
             elif trade.get('result') == 'loss':
                 losses += 1
-                # ✅ FIX: Subtrair apenas o valor apostado (amount), não buy_price
                 profit_loss -= trade.get('amount', 0)
         self.stats['wins'] = wins
         self.stats['losses'] = losses
@@ -205,7 +214,7 @@ class TradingBot:
         for trade in self.trades:
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
-                if elapsed > 60:  # ✅ FIX: Aumentado para 60s (5 ticks podem demorar mais)
+                if elapsed > 60:
                     trade['result'] = 'loss'
                     trade['profit'] = 0
                     updated = True
@@ -221,7 +230,6 @@ class TradingBot:
             profit = result.get('profit', 0)
             is_win = profit > 0
 
-            # ✅ FIX CRÍTICO: Encontrar o trade correto pelo contract_id
             target_trade = None
             if contract_id:
                 for trade in reversed(list(self.trades)):
@@ -229,7 +237,6 @@ class TradingBot:
                         target_trade = trade
                         break
 
-            # Fallback: último trade pendente (se não há contract_id)
             if target_trade is None:
                 for trade in reversed(list(self.trades)):
                     if trade.get('result') == 'pending':
@@ -241,7 +248,6 @@ class TradingBot:
                 logger.warning("⚠️ Nenhum trade pendente encontrado para este resultado")
                 return
 
-            # ✅ FIX: Verificar se já foi processado (evitar duplicação)
             if target_trade.get('result') != 'pending':
                 logger.warning(f"⚠️ Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando duplicado.")
                 return
@@ -251,7 +257,6 @@ class TradingBot:
                 target_trade['profit'] = profit
                 self.daily_stats['wins'] += 1
                 self.daily_stats['profit_loss'] += profit
-                # ✅ FIX: Atualizar consecutive stats
                 self.consecutive_wins += 1
                 self.consecutive_losses = 0
                 logger.info(f"✅ GANHO! +${profit:.2f} | Vitórias consecutivas: {self.consecutive_wins}")
@@ -261,7 +266,6 @@ class TradingBot:
                 target_trade['profit'] = 0
                 self.daily_stats['losses'] += 1
                 self.daily_stats['profit_loss'] -= loss
-                # ✅ FIX: Atualizar consecutive stats
                 self.consecutive_losses += 1
                 self.consecutive_wins = 0
                 logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
@@ -375,5 +379,5 @@ class TradingBot:
         self.consecutive_wins = 0
         logger.info("📊 Estatísticas e histórico resetados")
 
+
 trading_bot = TradingBot()
-        
