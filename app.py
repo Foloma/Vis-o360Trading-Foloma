@@ -189,9 +189,8 @@ def api_connect():
         deriv_client.set_user_token(token)
         deriv_client.set_trading_bot(trading_bot)
         deriv_client.set_digit_analyzer(digit_analyzer)
-        deriv_client.current_symbol = symbol
-        deriv_client.connect()
-        deriv_client._start_watchdog()  # ✅ iniciar watchdog após connect
+        deriv_client.connect(); time.sleep(2)
+        deriv_client.subscribe_ticks(symbol)
         trading_bot.start(deriv_client)
         payment_system=PaymentSystem(deriv_client); deriv_client.set_payment_system(payment_system)
         return jsonify({'status':'conectando','account_type':at,'is_demo':at=='demo'})
