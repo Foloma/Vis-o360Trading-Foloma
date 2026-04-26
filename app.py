@@ -51,11 +51,21 @@ users = load_users()
 
 
 def ensure_admin_exists():
-    """Garante que existe um administrador definido pelas variáveis de ambiente."""
+    """
+    Garante que existe um administrador definido pelas variáveis de ambiente.
+    Se o email já existir mas não for admin, promove para admin.
+    """
     admin_email = os.environ.get('ADMIN_EMAIL', 'admin@foloma.com')
     admin_password = os.environ.get('ADMIN_PASSWORD', 'Admin123!')
 
-    if admin_email not in users:
+    if admin_email in users:
+        # Utilizador já existe → garantir que é admin
+        if users[admin_email].get('role') != 'admin':
+            users[admin_email]['role'] = 'admin'
+            save_users(users)
+            logger.info(f"🔑 Utilizador {admin_email} promovido a admin.")
+    else:
+        # Criar novo admin
         uid = str(int(time.time() * 1000))
         users[admin_email] = {
             'id': uid,
