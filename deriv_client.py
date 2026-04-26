@@ -85,7 +85,14 @@ class DerivWebSocketClient:
         if data.get('error'):
             logger.error(f"❌ Auth: {data['error']}"); self.authorized = False
         else:
-            logger.info("✅ Autorizado!"); self.authorized = True; self.get_balance()
+            logger.info("✅ Autorizado!"); self.authorized = True
+            self.get_balance()
+            # ✅ FIX: re-subscrever ticks após reconexão automática
+            # subscribed_symbols foi limpo no reconnect(), por isso subscribe_ticks
+            # não vai ignorar o pedido
+            if self.current_symbol:
+                self.subscribe_ticks(self.current_symbol)
+                logger.info(f"🔄 Ticks re-subscritos após reconexão: {self.current_symbol}")
 
     def on_balance(self, data):
         try:
