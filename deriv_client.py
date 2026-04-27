@@ -144,7 +144,7 @@ class DerivWebSocketClient:
                 time.sleep(5)
                 if not self.connected:
                     continue
-                if time.time() - self._last_tick_time > 15:
+                if time.time() - self._last_tick_time > 30:   # AGORA (30 segundos)
                     logger.warning("⚠️ Timeout de ticks (15s sem tick) → forçando reconexão...")
                     self.connected = False
                     self.authorized = False
