@@ -4,6 +4,7 @@ import logging
 
 load_dotenv()
 
+
 class Config:
     DERIV_APP_ID = os.getenv('DERIV_APP_ID', '1089')
 
@@ -51,7 +52,7 @@ class Config:
         'max_daily_loss_percent': 5,
         'max_consecutive_losses': 2,
         'min_confidence': 50,
-        'min_confidence_digits': 42,   # recomendado > 0
+        'min_confidence_digits': 42,
         'max_stake_percent': 5,
         'stop_loss_enabled': True,
         'take_profit_enabled': True,
@@ -66,5 +67,6 @@ class Config:
     }
 
     LOG_LEVEL = logging.INFO
+
 
 config = Config()
