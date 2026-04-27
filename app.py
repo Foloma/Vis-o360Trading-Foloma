@@ -82,7 +82,9 @@ def ensure_admin_exists():
             'referral_code': '',
             'referrals': [],
             'active': True,
-            'role': 'admin'
+            'role': 'admin',
+            'affiliate_earnings': 0.0,
+            'referred_users': []
         }
         save_users(users)
         logger.info(f"🔑 Admin criado: {admin_email}")
@@ -206,14 +208,20 @@ def api_register():
             'referral_code': ref,
             'referrals': [],
             'active': True,
-            'role': 'user'
+            'role': 'user',
+            'affiliate_earnings': 0.0,
+            'referred_users': []
         }
         save_users(users)
 
+        # Se veio de um link de afiliado, creditar ao afiliado uma comissão fixa
         if ref:
             for ue, ud in users.items():
                 if ud.get('referral_link_code') == ref:
-                    affiliate.track_referral(ud['id'], uid)
+                    # Comissão fixa de 1 USD por cada novo utilizador
+                    ud['affiliate_earnings'] = ud.get('affiliate_earnings', 0) + 1.0
+                    ud.setdefault('referred_users', []).append(email)
+                    save_users(users)
                     break
         return jsonify({'status': 'ok', 'message': 'Conta criada!'})
     except Exception as e:
@@ -702,6 +710,22 @@ def api_affiliate_link():
         return jsonify({'link': link, 'code': link.split('=')[-1]})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/affiliate/earnings')
+@require_auth
+def api_affiliate_earnings():
+    """Retorna os ganhos do afiliado autenticado e a lista de referidos."""
+    email = session.get('user_email')
+    user = users.get(email)
+    if not user:
+        return jsonify({'error': 'Utilizador não encontrado'}), 404
+    return jsonify({
+        'earnings': user.get('affiliate_earnings', 0),
+        'referral_link': user.get('referral_link_code', ''),
+        'referred_count': len(user.get('referred_users', [])),
+        'referred_list': user.get('referred_users', [])
+    })
 
 
 @app.route('/api/payment/deposit', methods=['POST'])
