@@ -63,22 +63,12 @@ class TradingBot:
         logger.info("▶️ Resumido")
 
     def on_tick(self, tick):
-        # 🔍 Log para confirmar que ticks estão a chegar
-        logger.info(f"📈 Tick recebido: {tick.get('symbol')} @ {tick.get('price')}")
-
         self.current_price = tick['price']
         self.current_symbol = tick['symbol']
         self.indicators.add_price(self.current_price, self.current_symbol)
-
-        # 🎲 Alimentar analisador de dígitos apenas para índices de volatilidade (R_)
         if 'R_' in self.current_symbol:
-            logger.info("🔵 Alimentando digit_analyzer")
             digit_analyzer.add_tick(self.current_price)
-        else:
-            logger.info("⚪ Símbolo não R_ → digit_analyzer ignorado")
-
         self.last_analysis = self.indicators.get_all_indicators(self.current_symbol)
-
         if self.client:
             self.balance = self.client.balance
             self.currency = self.client.currency
@@ -117,13 +107,11 @@ class TradingBot:
         vote_bb = 0
         vote_stoch = 0
 
-        # Tendência
         if 'ALTA' in analysis['trend']['desc']:
             vote_trend = 1
         elif 'BAIXA' in analysis['trend']['desc']:
             vote_trend = -1
 
-        # RSI
         rsi = analysis['rsi']['score']
         if rsi < 30:
             vote_rsi = 1
@@ -136,19 +124,16 @@ class TradingBot:
         else:
             vote_rsi = 0
 
-        # MACD
         if 'COMPRA' in analysis['macd']['desc']:
             vote_macd = 1
         elif 'VENDA' in analysis['macd']['desc']:
             vote_macd = -1
 
-        # Bollinger
         if 'COMPRA' in analysis['bollinger']['desc']:
             vote_bb = 1
         elif 'VENDA' in analysis['bollinger']['desc']:
             vote_bb = -1
 
-        # Estocástico
         stoch_desc = analysis.get('stochastic', {}).get('desc', '---')
         if 'SOBREVENDIDO' in stoch_desc:
             vote_stoch = 1
