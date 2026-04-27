@@ -1,9 +1,9 @@
 import math
 from collections import deque
 
+
 class TechnicalIndicators:
     def __init__(self, max_length=200):
-        # ✅ FIX: aumentado para 200 para suportar SMA200 e MACD(26+9)
         self.prices_by_symbol = {}
         self.max_length = max_length
 
@@ -21,15 +21,10 @@ class TechnicalIndicators:
         return sum(data[-period:]) / period
 
     def _ema(self, data, period):
-        """
-        ✅ FIX: EMA corretamente calculada.
-        Semente = SMA dos primeiros `period` preços,
-        depois aplica EMA sobre os restantes em ordem cronológica.
-        """
         if len(data) < period:
             return None
         k = 2.0 / (period + 1)
-        ema = sum(data[:period]) / period  # semente = SMA
+        ema = sum(data[:period]) / period
         for price in data[period:]:
             ema = price * k + ema * (1 - k)
         return ema
@@ -37,7 +32,6 @@ class TechnicalIndicators:
     def _rsi(self, data, period=14):
         if len(data) < period + 1:
             return None
-        # ✅ FIX: calcular em ordem cronológica
         recent = data[-(period + 1):]
         gains, losses = [], []
         for i in range(1, len(recent)):
@@ -56,10 +50,6 @@ class TechnicalIndicators:
         return 100 - (100 / (1 + rs))
 
     def _macd(self, data, fast=12, slow=26, signal=9):
-        """
-        ✅ FIX: MACD com signal line e histograma reais.
-        Retorna (macd_line, signal_line, histogram).
-        """
         if len(data) < slow + signal:
             return None, None, None
 
@@ -70,7 +60,6 @@ class TechnicalIndicators:
 
         macd_line = ema_fast - ema_slow
 
-        # Construir série MACD para calcular signal line
         macd_series = []
         for i in range(slow, len(data)):
             subset = data[:i + 1]
@@ -100,9 +89,6 @@ class TechnicalIndicators:
         return upper, sma, lower
 
     def _stochastic(self, data, k_period=14, d_period=3):
-        """
-        ✅ FIX: Estocástico com %K e %D (suavização real).
-        """
         if len(data) < k_period + d_period:
             return None, None
         k_values = []
@@ -134,28 +120,26 @@ class TechnicalIndicators:
         prices = self.get_prices(symbol)
         n = len(prices)
 
-        # ✅ FIX: mínimo correto — RSI precisa 15, Bollinger 20
         if n < 15:
             return {
-                'trend':      {'score': 0,  'desc': '---'},
-                'rsi':        {'score': 50, 'desc': '---'},
-                'macd':       {'score': 0,  'desc': '---'},
-                'bollinger':  {'score': 0,  'desc': '---'},
+                'trend': {'score': 0, 'desc': '---'},
+                'rsi': {'score': 50, 'desc': '---'},
+                'macd': {'score': 0, 'desc': '---'},
+                'bollinger': {'score': 0, 'desc': '---'},
                 'stochastic': {'score': 50, 'desc': '---'},
                 'sma200': None, 'sma9': None, 'sma21': None,
-                'sma50': None,  'ema12': None, 'ema26': None
+                'sma50': None, 'ema12': None, 'ema26': None
             }
 
         data = list(prices)
 
-        sma9   = self._sma(data, 9)   if n >= 9   else None
-        sma21  = self._sma(data, 21)  if n >= 21  else None
-        sma50  = self._sma(data, 50)  if n >= 50  else None
+        sma9 = self._sma(data, 9) if n >= 9 else None
+        sma21 = self._sma(data, 21) if n >= 21 else None
+        sma50 = self._sma(data, 50) if n >= 50 else None
         sma200 = self._sma_long(data) if n >= 200 else None
-        ema12  = self._ema(data, 12)  if n >= 12  else None
-        ema26  = self._ema(data, 26)  if n >= 26  else None
+        ema12 = self._ema(data, 12) if n >= 12 else None
+        ema26 = self._ema(data, 26) if n >= 26 else None
 
-        # ===== TENDÊNCIA =====
         if sma9 is not None and sma21 is not None:
             if sma9 > sma21:
                 trend_desc, trend_score = 'ALTA', 80
@@ -166,7 +150,6 @@ class TechnicalIndicators:
         else:
             trend_desc, trend_score = '---', 0
 
-        # ===== RSI =====
         rsi = self._rsi(data)
         if rsi is not None:
             rsi_score = rsi
@@ -183,10 +166,8 @@ class TechnicalIndicators:
         else:
             rsi_score, rsi_desc = 50, '---'
 
-        # ===== MACD =====
         macd_line, signal_line, histogram = self._macd(data)
         if macd_line is not None and histogram is not None:
-            # ✅ FIX: usar histograma (crossover) em vez de só zero line
             if histogram > 0:
                 macd_desc, macd_score = 'COMPRA', 80
             elif histogram < 0:
@@ -194,7 +175,6 @@ class TechnicalIndicators:
             else:
                 macd_desc, macd_score = 'NEUTRO', 50
         elif macd_line is not None:
-            # Fallback se signal não disponível
             if macd_line > 0:
                 macd_desc, macd_score = 'COMPRA', 65
             elif macd_line < 0:
@@ -204,7 +184,6 @@ class TechnicalIndicators:
         else:
             macd_desc, macd_score = '---', 0
 
-        # ===== BOLLINGER =====
         upper, middle, lower = self._bollinger_bands(data)
         if upper is not None:
             last_price = data[-1]
@@ -222,7 +201,6 @@ class TechnicalIndicators:
         else:
             bb_desc, bb_score = '---', 0
 
-        # ===== ESTOCÁSTICO =====
         stoch_k, stoch_d = self._stochastic(data)
         if stoch_k is not None:
             stoch_score = stoch_k
@@ -240,15 +218,15 @@ class TechnicalIndicators:
             stoch_score, stoch_desc = 50, '---'
 
         return {
-            'trend':      {'score': trend_score, 'desc': trend_desc},
-            'rsi':        {'score': rsi_score,   'desc': rsi_desc},
-            'macd':       {'score': macd_score,  'desc': macd_desc},
-            'bollinger':  {'score': bb_score,    'desc': bb_desc},
+            'trend': {'score': trend_score, 'desc': trend_desc},
+            'rsi': {'score': rsi_score, 'desc': rsi_desc},
+            'macd': {'score': macd_score, 'desc': macd_desc},
+            'bollinger': {'score': bb_score, 'desc': bb_desc},
             'stochastic': {'score': stoch_score, 'desc': stoch_desc},
             'sma200': sma200,
-            'sma9':   sma9,
-            'sma21':  sma21,
-            'sma50':  sma50,
-            'ema12':  ema12,
-            'ema26':  ema26
+            'sma9': sma9,
+            'sma21': sma21,
+            'sma50': sma50,
+            'ema12': ema12,
+            'ema26': ema26
         }
