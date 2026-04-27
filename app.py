@@ -126,18 +126,15 @@ class AffiliateSystem:
 
 affiliate = AffiliateSystem()
 
-# Dicionário para sessões individuais
 user_sessions = {}
 sessions_lock = threading.Lock()
 
 
 def get_user_session(user_id):
-    """Obtém ou cria os objetos de trading para um utilizador."""
     with sessions_lock:
         if user_id not in user_sessions:
             bot = TradingBot()
             analyzer = DigitAnalyzer(max_digits=500)
-            # Callback específico para esta sessão
             def tick_callback(tick):
                 bot.on_tick(tick)
             client = DerivWebSocketClient(config, on_tick_callback=tick_callback)
@@ -236,7 +233,6 @@ def api_register():
         }
         save_users(users)
 
-        # Comissão fixa de 1 USD para o afiliado
         if ref:
             for ue, ud in users.items():
                 if ud.get('referral_link_code') == ref:
@@ -478,9 +474,11 @@ def api_status():
         bot = sess['trading_bot']
         analyzer = sess['digit_analyzer']
 
+        # Forçar o bot a ficar com os valores mais recentes
         if client:
             bot.balance = client.balance
             bot.currency = client.currency
+            bot.client = client
 
         bot_status = bot.get_status()
         analysis = analyzer.get_analysis()
@@ -535,7 +533,6 @@ def api_symbol_change():
 
 
 def credit_affiliate_commission(user_email, amount):
-    """Credita a comissão ao afiliado que indicou o utilizador."""
     user = users.get(user_email)
     if not user or not user.get('referral_code'):
         return
