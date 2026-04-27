@@ -30,7 +30,7 @@ class DerivWebSocketClient:
         self._trade_lock = threading.Lock()
         self._digit_analyzer = None
         self._balance_subscribed = False
-        self._last_tick_time = time.time()    # Para o heartbeat
+        self._last_tick_time = time.time()
         self._heartbeat_started = False
 
     def set_digit_analyzer(self, a):
@@ -38,6 +38,10 @@ class DerivWebSocketClient:
 
     def set_trading_bot(self, b):
         self.trading_bot = b
+        if b:
+            b.balance = self.balance
+            b.currency = self.currency
+            b.client = self   # garante que o bot conhece o cliente
 
     def set_payment_system(self, p):
         self.payment_system = p
@@ -46,9 +50,6 @@ class DerivWebSocketClient:
         self.user_token = t
         logger.info("🔑 Token configurado")
 
-    # ═══════════════════════════════════════════════════════════════
-    # Conexão WebSocket
-    # ═══════════════════════════════════════════════════════════════
     def connect(self):
         try:
             self.ws = websocket.WebSocketApp(
@@ -112,9 +113,6 @@ class DerivWebSocketClient:
         if self.should_reconnect:
             self.schedule_reconnect()
 
-    # ═══════════════════════════════════════════════════════════════
-    # Reconexão
-    # ═══════════════════════════════════════════════════════════════
     def schedule_reconnect(self):
         self.reconnect_attempts += 1
         delay = min(5 * self.reconnect_attempts, 60)
@@ -131,9 +129,7 @@ class DerivWebSocketClient:
         self._heartbeat_started = False
         self.connect()
 
-    # ═══════════════════════════════════════════════════════════════
-    # Heartbeat – se ficar >15s sem ticks, força reconexão
-    # ═══════════════════════════════════════════════════════════════
+    # ── Heartbeat – se ficar >30s sem ticks, força reconexão ──
     def start_heartbeat(self):
         if self._heartbeat_started:
             return
@@ -144,8 +140,8 @@ class DerivWebSocketClient:
                 time.sleep(5)
                 if not self.connected:
                     continue
-                if time.time() - self._last_tick_time > 30:   # AGORA (30 segundos)
-                    logger.warning("⚠️ Timeout de ticks (15s sem tick) → forçando reconexão...")
+                if time.time() - self._last_tick_time > 30:   # ← aumentado para 30s
+                    logger.warning("⚠️ Timeout de ticks (30s sem tick) → forçando reconexão...")
                     self.connected = False
                     self.authorized = False
                     self._balance_subscribed = False
@@ -153,9 +149,7 @@ class DerivWebSocketClient:
                     break
         threading.Thread(target=check, daemon=True).start()
 
-    # ═══════════════════════════════════════════════════════════════
-    # Autenticação
-    # ═══════════════════════════════════════════════════════════════
+    # ── Autenticação ───────────────────────────────────────────
     def authorize(self):
         if not self.user_token:
             logger.error("❌ Token não configurado!")
@@ -177,9 +171,7 @@ class DerivWebSocketClient:
             if self.current_symbol:
                 self.subscribe_ticks(self.current_symbol)
 
-    # ═══════════════════════════════════════════════════════════════
-    # Saldo
-    # ═══════════════════════════════════════════════════════════════
+    # ── Saldo ──────────────────────────────────────────────────
     def _subscribe_balance(self):
         try:
             self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": 2}))
@@ -210,9 +202,7 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro saldo: {e}")
 
-    # ═══════════════════════════════════════════════════════════════
-    # Ticks
-    # ═══════════════════════════════════════════════════════════════
+    # ── Ticks ──────────────────────────────────────────────────
     def subscribe_ticks(self, symbol):
         if symbol in self.subscribed_symbols:
             logger.info(f"⚠️ Já subscrito em {symbol}")
@@ -243,7 +233,6 @@ class DerivWebSocketClient:
 
     def on_tick(self, data):
         try:
-            # Atualiza o timestamp de último tick para o heartbeat
             self._last_tick_time = time.time()
             tick = data.get('tick', {})
             if tick and self.on_tick_callback:
@@ -255,9 +244,7 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro tick: {e}")
 
-    # ═══════════════════════════════════════════════════════════════
-    # Colocar Trade
-    # ═══════════════════════════════════════════════════════════════
+    # ── Colocar Trade ──────────────────────────────────────────
     def place_trade(self, contract_type, amount, is_digit=False):
         with self._trade_lock:
             try:
@@ -268,10 +255,10 @@ class DerivWebSocketClient:
                     logger.warning("⚠️ Trade pendente — aguarde resultado.")
                     return False
 
-                original_action = contract_type  # 'CALL' ou 'PUT'
+                original_action = contract_type
 
                 if is_digit:
-                    duration = self.config.DIGIT_CONTRACT_DURATION  # 10
+                    duration = self.config.DIGIT_CONTRACT_DURATION
                     duration_unit = 't'
                     contract_type_full = 'DIGITODD' if contract_type == 'CALL' else 'DIGITEVEN'
                     if self._digit_analyzer:
@@ -286,7 +273,7 @@ class DerivWebSocketClient:
 
                 self.pending_trade = {
                     'amount':        amount,
-                    'contract_type': original_action,   # sempre CALL/PUT
+                    'contract_type': original_action,
                     'is_digit':      is_digit,
                     'timestamp':     time.time(),
                     'status':        'waiting_proposal'
@@ -311,9 +298,7 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return False
 
-    # ═══════════════════════════════════════════════════════════════
-    # Proposta → Compra → Resultado
-    # ═══════════════════════════════════════════════════════════════
+    # ── Proposta → Compra → Resultado ──────────────────────────
     def on_proposal(self, data):
         try:
             if data.get('error'):
@@ -428,9 +413,6 @@ class DerivWebSocketClient:
         error = data.get('error', {})
         logger.error(f"API Error: {error.get('message', 'desconhecido')}")
 
-    # ═══════════════════════════════════════════════════════════════
-    # Pagamentos (stubs)
-    # ═══════════════════════════════════════════════════════════════
     def request_deposit(self, amount, currency, method):
         return {'status': 'pending', 'message': f'Depósito ${amount} solicitado.',
                 'amount': amount, 'method': method}
