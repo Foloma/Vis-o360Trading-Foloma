@@ -299,6 +299,17 @@ body{background:#0a0e1a;color:#fff;min-height:100vh}
             <div><div class="sv2" id="refCom">$0</div><div class="sl">Comissão</div></div>
         </div>
     </div>
+
+    <!-- NOVA SECÇÃO: MEUS GANHOS DETALHADOS -->
+    <div class="card">
+        <div class="card-title">💰 MEUS GANHOS</div>
+        <p style="font-size:14px;margin-bottom:8px;">Total ganho: <span id="affEarnings" style="color:#00f0b5;font-weight:bold;">$0.00</span></p>
+        <p style="font-size:14px;margin-bottom:8px;">Utilizadores indicados: <span id="affCount" style="color:#00f0b5;font-weight:bold;">0</span></p>
+        <div id="affListContainer" style="display:none;">
+            <p style="font-size:12px;color:#62748c;margin-bottom:5px;">Lista de referidos:</p>
+            <ul id="affList" style="list-style:none;padding-left:0;margin:0;"></ul>
+        </div>
+    </div>
 </div>
 
 <div id="payment-section" class="hidden">
@@ -384,7 +395,7 @@ body{background:#0a0e1a;color:#fff;min-height:100vh}
 // ── Estado ────────────────────────────────────────────────
 let selectedAcct='demo', paused=false, isConn=false, curSym='R_100', modo='ativos';
 let lastTradeCount=0;
-let lastDigitCount=0;    // ✅ detectar novo dígito por CONTAGEM (não por timer)
+let lastDigitCount=0;
 let lastDigitCounter=0;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
@@ -405,7 +416,7 @@ function showSec(s){
         document.getElementById(x+'-section').classList.add('hidden'));
     document.getElementById(s+'-section').classList.remove('hidden');
     toggleMenu();
-    if(s==='affiliate') loadAffiliate();
+    if(s==='affiliate') { loadAffiliate(); loadAffiliateEarnings(); }
     if(s==='admin') loadAdmin();
 }
 function setModo(m){
@@ -433,13 +444,12 @@ function updateDigits(digits){
     document.getElementById('cdown').textContent = `⏱ ${tr} tick${tr!==1?'s':''} para o próximo dígito`;
     document.getElementById('nearWarn').style.display = tr <= 2 ? 'block' : 'none';
 
-    // ✅ FIX DEFINITIVO DO HISTORIAL:
-    // Usar digit_counter para detectar novo dígito.
-    // Reconstruir SEMPRE que o contador muda.
     const counter = digits.digit_counter || 0;
     const recent  = digits.recent || [];
 
-    if(counter !== lastDigitCounter && recent.length > 0){
+    // ✅ CORREÇÃO: atualizar sempre que o array de dígitos mudar de tamanho ou o contador mudar
+    if (recent.length > 0 && (recent.length !== lastDigitCount || counter !== lastDigitCounter)) {
+        lastDigitCount = recent.length;
         lastDigitCounter = counter;
 
         // Mostrar dígito grande (o mais recente)
@@ -454,7 +464,7 @@ function updateDigits(digits){
         bd.style.transform = 'scale(1.3)';
         setTimeout(()=>bd.style.transform='scale(1)', 220);
 
-        // ✅ Reconstruir historial completo
+        // Reconstruir historial completo
         let html = '';
         recent.forEach((d, i) => {
             const o   = d % 2 !== 0;
@@ -464,7 +474,7 @@ function updateDigits(digits){
         const row = document.getElementById('histRow');
         row.innerHTML = html || '<div style="color:#62748c;font-size:12px;padding:8px">Aguardando...</div>';
 
-        // ✅ Scroll automático para o mais recente
+        // Scroll automático para o mais recente
         const scroll = document.getElementById('histScroll');
         setTimeout(()=>{ scroll.scrollLeft = row.scrollWidth; }, 60);
 
@@ -643,7 +653,7 @@ function chgSym(s){
     fetch('/api/symbol/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})});
     document.querySelectorAll('.sym-btn').forEach(b=>b.classList.remove('active'));
     event.target.classList.add('active');
-    lastDigitCounter=0; // resetar ao mudar símbolo
+    lastDigitCounter=0;
 }
 function selAcct(a){
     selectedAcct=a;
@@ -735,6 +745,29 @@ function clrHist(){
 function loadAffiliate(){
     fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{if(d.link)document.getElementById('refLink').value=d.link;}).catch(()=>{});
     fetch('/api/affiliate/stats').then(r=>r.json()).then(d=>{document.getElementById('refCnt').textContent=d.total_referrals||0;document.getElementById('refCom').textContent='$'+(d.total_commission||0);}).catch(()=>{});
+    loadAffiliateEarnings();
+}
+function loadAffiliateEarnings(){
+    fetch('/api/affiliate/earnings')
+        .then(r=>r.json())
+        .then(d=>{
+            document.getElementById('affEarnings').textContent = '$' + (d.earnings || 0).toFixed(2);
+            document.getElementById('affCount').textContent = d.referred_count || 0;
+            const list = document.getElementById('affList');
+            list.innerHTML = '';
+            const container = document.getElementById('affListContainer');
+            if(d.referred_list && d.referred_list.length > 0){
+                container.style.display = 'block';
+                d.referred_list.forEach(email => {
+                    const li = document.createElement('li');
+                    li.textContent = email;
+                    li.style.cssText = 'padding:4px 0;border-bottom:1px solid #2a3342;font-size:13px;color:#ccc;';
+                    list.appendChild(li);
+                });
+            } else {
+                container.style.display = 'none';
+            }
+        });
 }
 function cpLink(){const l=document.getElementById('refLink');l.select();document.execCommand('copy');alert('✅ Copiado!');}
 function doDeposit(){
