@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 from config import config
 from deriv_client import DerivWebSocketClient
-from trading_bot import trading_bot
-from synthetics import digit_analyzer
+from trading_bot import TradingBot
+from synthetics import DigitAnalyzer
 from payment_system import PaymentSystem
 
 app = Flask(__name__)
@@ -125,12 +125,33 @@ class AffiliateSystem:
 
 
 affiliate = AffiliateSystem()
-deriv_client = None
-payment_system = None
+
+# Dicionário para sessões individuais
+user_sessions = {}
+sessions_lock = threading.Lock()
 
 
-def on_tick_callback(tick):
-    trading_bot.on_tick(tick)
+def get_user_session(user_id):
+    """Obtém ou cria os objetos de trading para um utilizador."""
+    with sessions_lock:
+        if user_id not in user_sessions:
+            bot = TradingBot()
+            analyzer = DigitAnalyzer(max_digits=500)
+            # Callback específico para esta sessão
+            def tick_callback(tick):
+                bot.on_tick(tick)
+            client = DerivWebSocketClient(config, on_tick_callback=tick_callback)
+            client.set_trading_bot(bot)
+            client.set_digit_analyzer(analyzer)
+            payment = PaymentSystem(client)
+            client.set_payment_system(payment)
+            user_sessions[user_id] = {
+                'client': client,
+                'trading_bot': bot,
+                'digit_analyzer': analyzer,
+                'payment_system': payment
+            }
+        return user_sessions[user_id]
 
 
 def require_auth(f):
@@ -147,8 +168,9 @@ def require_admin(f):
     def decorated(*args, **kwargs):
         if 'user_id' not in session:
             return jsonify({'error': 'Não autenticado'}), 401
-        role = session.get('user_role')
-        if role != 'admin':
+        email = session.get('user_email')
+        user = users.get(email)
+        if not user or user.get('role') != 'admin':
             return jsonify({'error': 'Acesso restrito ao administrador'}), 403
         return f(*args, **kwargs)
     return decorated
@@ -214,11 +236,10 @@ def api_register():
         }
         save_users(users)
 
-        # Se veio de um link de afiliado, creditar ao afiliado uma comissão fixa
+        # Comissão fixa de 1 USD para o afiliado
         if ref:
             for ue, ud in users.items():
                 if ud.get('referral_link_code') == ref:
-                    # Comissão fixa de 1 USD por cada novo utilizador
                     ud['affiliate_earnings'] = ud.get('affiliate_earnings', 0) + 1.0
                     ud.setdefault('referred_users', []).append(email)
                     save_users(users)
@@ -410,11 +431,10 @@ def api_reset_password_confirm():
     return jsonify({'error': 'Token inválido ou expirado'}), 400
 
 
-# ───── Rotas de Trading (admin apenas) ─────
+# ───── Rotas de Trading (acessíveis a todos os utilizadores autenticados) ─────
 @app.route('/api/connect', methods=['POST'])
-@require_admin
+@require_auth
 def api_connect():
-    global deriv_client, payment_system
     try:
         d = request.json
         at = d.get('account_type', 'demo')
@@ -426,7 +446,7 @@ def api_connect():
 
         token = user.get('deriv_token')
         if not token:
-            return jsonify({'error': 'Token não configurado.'}), 400
+            return jsonify({'error': 'Token não configurado. Vá a Configurações e insira o token da Deriv.'}), 400
 
         if at == 'real':
             config.REAL_API_TOKEN = token
@@ -434,17 +454,13 @@ def api_connect():
         else:
             config.DEMO_API_TOKEN = token
 
-        deriv_client = DerivWebSocketClient(config, on_tick_callback)
-        deriv_client.set_user_token(token)
-        deriv_client.set_trading_bot(trading_bot)
-        deriv_client.set_digit_analyzer(digit_analyzer)
-        deriv_client.connect()
+        sess = get_user_session(user['id'])
+        client = sess['client']
+        client.set_user_token(token)
+        client.connect()
         time.sleep(2)
-        deriv_client.subscribe_ticks(symbol)
-        trading_bot.start(deriv_client)
-
-        payment_system = PaymentSystem(deriv_client)
-        deriv_client.set_payment_system(payment_system)
+        client.subscribe_ticks(symbol)
+        sess['trading_bot'].start(client)
 
         return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
     except Exception as e:
@@ -456,24 +472,30 @@ def api_connect():
 @require_auth
 def api_status():
     try:
-        if deriv_client:
-            trading_bot.balance = deriv_client.balance
-            trading_bot.currency = deriv_client.currency
+        user_id = session['user_id']
+        sess = get_user_session(user_id)
+        client = sess['client']
+        bot = sess['trading_bot']
+        analyzer = sess['digit_analyzer']
 
-        bot_status = trading_bot.get_status()
-        analysis = digit_analyzer.get_analysis()
-        all_digits = digit_analyzer.get_recent_digits()
+        if client:
+            bot.balance = client.balance
+            bot.currency = client.currency
+
+        bot_status = bot.get_status()
+        analysis = analyzer.get_analysis()
+        all_digits = analyzer.get_recent_digits()
 
         digits = {
-            'last': digit_analyzer.get_current_digit(),
-            'parity': digit_analyzer.get_current_parity(),
-            'stats': digit_analyzer.get_stats(),
+            'last': analyzer.get_current_digit(),
+            'parity': analyzer.get_current_parity(),
+            'stats': analyzer.get_stats(),
             'analysis': analysis,
             'recent': all_digits,
             'total': len(all_digits),
-            'ticks_remaining': digit_analyzer.get_ticks_remaining(),
-            'digit_counter': digit_analyzer.get_digit_counter(),
-            'ticks_per_digit': digit_analyzer.TICKS_PER_DIGIT,
+            'ticks_remaining': analyzer.get_ticks_remaining(),
+            'digit_counter': analyzer.get_digit_counter(),
+            'ticks_per_digit': analyzer.TICKS_PER_DIGIT,
         }
         return jsonify({'bot': bot_status, 'digits': digits, 'symbols': config.AVAILABLE_SYMBOLS})
     except Exception as e:
@@ -485,7 +507,9 @@ def api_status():
 @require_auth
 def api_display_digit():
     try:
-        d, p, tr = digit_analyzer.get_next_display_digit()
+        user_id = session['user_id']
+        analyzer = get_user_session(user_id)['digit_analyzer']
+        d, p, tr = analyzer.get_next_display_digit()
         return jsonify({'digit': d, 'parity': p, 'ticks_remaining': tr, 'timestamp': time.time()})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -499,35 +523,56 @@ def api_symbol_change():
         sym = d.get('symbol')
         if sym not in config.AVAILABLE_SYMBOLS:
             return jsonify({'error': 'Símbolo inválido'}), 400
-        if deriv_client:
-            deriv_client.change_symbol(sym)
-            trading_bot.current_symbol = sym
+        user_id = session['user_id']
+        sess = get_user_session(user_id)
+        client = sess['client']
+        if client:
+            client.change_symbol(sym)
+            sess['trading_bot'].current_symbol = sym
         return jsonify({'status': 'ok', 'symbol': sym})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
+def credit_affiliate_commission(user_email, amount):
+    """Credita a comissão ao afiliado que indicou o utilizador."""
+    user = users.get(user_email)
+    if not user or not user.get('referral_code'):
+        return
+    ref_code = user['referral_code']
+    for ue, ud in users.items():
+        if ud.get('referral_link_code') == ref_code:
+            commission = amount * (config.MARKUP_PERCENTAGE / 100)
+            ud['affiliate_earnings'] = ud.get('affiliate_earnings', 0) + commission
+            save_users(users)
+            logger.info(f"💰 Comissão de ${commission:.4f} creditada a {ue}")
+            break
+
+
 @app.route('/api/trade', methods=['POST'])
-@require_admin
+@require_auth
 def api_trade():
     try:
         d = request.json
         action = d.get('action')
         amt = float(d.get('amount', 0.35))
+        user_id = session['user_id']
+        sess = get_user_session(user_id)
+        client = sess['client']
+        bot = sess['trading_bot']
 
-        if not deriv_client or not deriv_client.authorized:
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
         if amt < 0.35 or amt > 100:
             return jsonify({'error': 'Valor inválido'}), 400
 
-        sig, conf = trading_bot.calculate_signal()
+        sig, conf = bot.calculate_signal()
         if conf < config.RISK_LIMITS.get('min_confidence', 50):
             return jsonify({'error': f'Confiança baixa: {conf:.1f}%'}), 400
 
-        ok = deriv_client.place_trade('CALL' if action == 'BUY' else 'PUT', amt, is_digit=False)
+        ok = client.place_trade('CALL' if action == 'BUY' else 'PUT', amt, is_digit=False)
         if ok:
-            if deriv_client.markup_percentage > 0:
-                affiliate.calculate_commission(amt, deriv_client.markup_percentage)
+            credit_affiliate_commission(session.get('user_email'), amt)
             return jsonify({'status': 'ok', 'message': f'Trade {action} enviado', 'confidence': conf})
         return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
@@ -535,28 +580,31 @@ def api_trade():
 
 
 @app.route('/api/trade/digit', methods=['POST'])
-@require_admin
+@require_auth
 def api_trade_digit():
     try:
         d = request.json
         pred = d.get('prediction')
         amt = float(d.get('amount', 0.35))
+        user_id = session['user_id']
+        sess = get_user_session(user_id)
+        client = sess['client']
+        analyzer = sess['digit_analyzer']
 
-        if not deriv_client or not deriv_client.authorized:
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
         if amt < 0.35 or amt > 100:
             return jsonify({'error': 'Valor inválido'}), 400
         if pred not in ('odd', 'even'):
             return jsonify({'error': 'Use "odd" ou "even"'}), 400
 
-        tr = digit_analyzer.get_ticks_remaining()
+        tr = analyzer.get_ticks_remaining()
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s)! Aguarde.'}), 400
 
-        ok = deriv_client.place_trade('CALL' if pred == 'odd' else 'PUT', amt, is_digit=True)
+        ok = client.place_trade('CALL' if pred == 'odd' else 'PUT', amt, is_digit=True)
         if ok:
-            if deriv_client.markup_percentage > 0:
-                affiliate.calculate_commission(amt, deriv_client.markup_percentage)
+            credit_affiliate_commission(session.get('user_email'), amt)
             label = 'ÍMPAR' if pred == 'odd' else 'PAR'
             return jsonify({
                 'status': 'ok',
@@ -569,19 +617,24 @@ def api_trade_digit():
 
 
 @app.route('/api/trade/hybrid', methods=['POST'])
-@require_admin
+@require_auth
 def api_trade_hybrid():
     try:
         d = request.json
         amt = float(d.get('amount', 0.35))
+        user_id = session['user_id']
+        sess = get_user_session(user_id)
+        client = sess['client']
+        bot = sess['trading_bot']
+        analyzer = sess['digit_analyzer']
 
-        if not deriv_client or not deriv_client.authorized:
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
-        if 'R_' not in trading_bot.current_symbol:
+        if 'R_' not in bot.current_symbol:
             return jsonify({'error': 'Modo híbrido disponível apenas para índices de volatilidade (R_)'}), 400
 
-        sig, conf_a = trading_bot.calculate_signal()
-        da = digit_analyzer.get_analysis()
+        sig, conf_a = bot.calculate_signal()
+        da = analyzer.get_analysis()
         dr = da.get('recommended_action')
         dc = da.get('confidence', 0)
 
@@ -599,8 +652,9 @@ def api_trade_hybrid():
         if comb < config.ADVANCED_STRATEGY.get('hybrid_min_confidence', 60):
             return jsonify({'error': f'Confiança baixa ({comb:.1f}%)'}), 400
 
-        ok = deriv_client.place_trade('CALL' if action == 'BUY' else 'PUT', amt, is_digit=False)
+        ok = client.place_trade('CALL' if action == 'BUY' else 'PUT', amt, is_digit=False)
         if ok:
+            credit_affiliate_commission(session.get('user_email'), amt)
             return jsonify({'status': 'ok', 'message': msg, 'confidence': comb})
         return jsonify({'error': 'Falha'}), 500
     except Exception as e:
@@ -608,17 +662,20 @@ def api_trade_hybrid():
 
 
 @app.route('/api/trade/manual', methods=['POST'])
-@require_admin
+@require_auth
 def api_trade_manual():
     try:
         d = request.json
         action = d.get('action')
         amt = float(d.get('amount', 0.35))
+        user_id = session['user_id']
+        sess = get_user_session(user_id)
+        client = sess['client']
 
-        if not deriv_client or not deriv_client.authorized:
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
 
-        ok = deriv_client.place_trade('CALL' if action == 'BUY' else 'PUT', amt, is_digit=False)
+        ok = client.place_trade('CALL' if action == 'BUY' else 'PUT', amt, is_digit=False)
         if ok:
             return jsonify({'status': 'ok', 'message': f'Trade manual {action}!'})
         return jsonify({'error': 'Falha'}), 500
@@ -630,7 +687,9 @@ def api_trade_manual():
 @require_auth
 def api_clear_history():
     try:
-        trading_bot.reset_stats()
+        user_id = session['user_id']
+        bot = get_user_session(user_id)['trading_bot']
+        bot.reset_stats()
         return jsonify({'status': 'ok'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -640,7 +699,9 @@ def api_clear_history():
 @require_auth
 def api_report():
     try:
-        return jsonify(trading_bot.get_trade_report())
+        user_id = session['user_id']
+        bot = get_user_session(user_id)['trading_bot']
+        return jsonify(bot.get_trade_report())
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -650,10 +711,12 @@ def api_report():
 def api_pause():
     d = request.json
     p = d.get('paused', True)
+    user_id = session['user_id']
+    bot = get_user_session(user_id)['trading_bot']
     if p:
-        trading_bot.pause()
+        bot.pause()
     else:
-        trading_bot.resume()
+        bot.resume()
     return jsonify({'paused': p})
 
 
@@ -661,7 +724,9 @@ def api_pause():
 @require_auth
 def api_martingale_status():
     try:
-        return jsonify(trading_bot.get_martingale_status())
+        user_id = session['user_id']
+        bot = get_user_session(user_id)['trading_bot']
+        return jsonify(bot.get_martingale_status())
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -674,7 +739,9 @@ def api_martingale_apply():
         la = float(d.get('last_amount', 0))
         if la <= 0:
             return jsonify({'error': 'Valor inválido'}), 400
-        ok, res = trading_bot.apply_martingale_after_loss(la)
+        user_id = session['user_id']
+        bot = get_user_session(user_id)['trading_bot']
+        ok, res = bot.apply_martingale_after_loss(la)
         if ok:
             return jsonify({'status': 'ok', 'martingale': res})
         return jsonify({'error': res}), 400
@@ -686,7 +753,9 @@ def api_martingale_apply():
 @require_auth
 def api_martingale_reset():
     try:
-        trading_bot.reset_martingale()
+        user_id = session['user_id']
+        bot = get_user_session(user_id)['trading_bot']
+        bot.reset_martingale()
         return jsonify({'status': 'ok'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -715,7 +784,6 @@ def api_affiliate_link():
 @app.route('/api/affiliate/earnings')
 @require_auth
 def api_affiliate_earnings():
-    """Retorna os ganhos do afiliado autenticado e a lista de referidos."""
     email = session.get('user_email')
     user = users.get(email)
     if not user:
@@ -736,9 +804,11 @@ def api_deposit():
         amt = float(d.get('amount', 0))
         if amt <= 0:
             return jsonify({'error': 'Valor inválido'}), 400
-        if not deriv_client or not deriv_client.authorized:
+        user_id = session['user_id']
+        client = get_user_session(user_id)['client']
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
-        return jsonify(deriv_client.request_deposit(amt, d.get('currency', 'USD'), d.get('method', 'cryptocurrency')))
+        return jsonify(client.request_deposit(amt, d.get('currency', 'USD'), d.get('method', 'cryptocurrency')))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -751,11 +821,13 @@ def api_withdraw():
         amt = float(d.get('amount', 0))
         if amt <= 0:
             return jsonify({'error': 'Valor inválido'}), 400
-        if not deriv_client or not deriv_client.authorized:
+        user_id = session['user_id']
+        client = get_user_session(user_id)['client']
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
-        if amt > deriv_client.balance:
+        if amt > client.balance:
             return jsonify({'error': 'Saldo insuficiente'}), 400
-        return jsonify(deriv_client.request_withdrawal(amt, d.get('currency', 'USD'), d.get('method', 'cryptocurrency')))
+        return jsonify(client.request_withdrawal(amt, d.get('currency', 'USD'), d.get('method', 'cryptocurrency')))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
