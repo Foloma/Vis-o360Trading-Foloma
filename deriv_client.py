@@ -6,11 +6,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 class DerivWebSocketClient:
     def __init__(self, config, on_tick_callback=None):
         self.config = config
         self.ws = None
+        self.ws_thread = None
         self.connected = False
         self.authorized = False
         self.balance = 0
@@ -30,11 +30,12 @@ class DerivWebSocketClient:
         self._trade_lock = threading.Lock()
         self._digit_analyzer = None
         self._balance_subscribed = False
-        self._last_tick_time = time.time()
-        self._heartbeat_started = False
-        self._first_tick_received = False
-        self._retry_sub_timer = None
+        self._last_message_time = time.time()
+        self._heartbeat_active = False
+        self._first_tick_logged = False
+        self._reconnect_lock = threading.Lock()
 
+    # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a):
         self._digit_analyzer = a
 
@@ -52,43 +53,56 @@ class DerivWebSocketClient:
         self.user_token = t
         logger.info("🔑 Token configurado")
 
-    # ═══════════════════════════════════ Conexão ═══════════════════════════════════
+    # ── Conexão ──────────────────────────────────────────────────
     def connect(self):
-        try:
-            self.ws = websocket.WebSocketApp(
-                self.config.WS_URL,
-                on_open=self.on_open,
-                on_message=self.on_message,
-                on_error=self.on_error,
-                on_close=self.on_close
-            )
-            threading.Thread(
-                target=lambda: self.ws.run_forever(ping_interval=20, ping_timeout=10),
-                daemon=True
-            ).start()
-            logger.info("🔌 Conectando à Deriv...")
-            return True
-        except Exception as e:
-            logger.error(f"Erro conexão: {e}")
-            return False
+        with self._reconnect_lock:
+            if self.ws:
+                try:
+                    self.ws.keep_running = False
+                    self.ws.close()
+                except:
+                    pass
+                self.ws = None
+            self.connected = False
+            self.authorized = False
+            self._first_tick_logged = False
+            self._balance_subscribed = False
+            self.subscribed_symbols.clear()
+
+            try:
+                self.ws = websocket.WebSocketApp(
+                    self.config.WS_URL,
+                    on_open=self.on_open,
+                    on_message=self.on_message,
+                    on_error=self.on_error,
+                    on_close=self.on_close
+                )
+                self.ws_thread = threading.Thread(
+                    target=lambda: self.ws.run_forever(ping_interval=20, ping_timeout=10),
+                    daemon=True
+                )
+                self.ws_thread.start()
+                logger.info("🔌 Conectando à Deriv...")
+                return True
+            except Exception as e:
+                logger.error(f"Erro ao iniciar conexão: {e}")
+                return False
 
     def on_open(self, ws):
         logger.info("✅ WebSocket conectado")
         self.connected = True
         self.reconnect_attempts = 0
-        self._balance_subscribed = False
-        self._last_tick_time = time.time()
-        self._first_tick_received = False
-        self.start_heartbeat()
+        self._last_message_time = time.time()
+        self._start_heartbeat()
         self.authorize()
 
     def on_message(self, ws, message):
-        self._last_tick_time = time.time()   # qualquer mensagem mantém a conexão viva
+        self._last_message_time = time.time()
         try:
             data = json.loads(message)
-            mt = data.get('msg_type')
-            if mt not in ['tick', 'balance', 'time']:
-                logger.info(f"📨 [{mt}]")
+            msg_type = data.get('msg_type', '')
+            if msg_type not in ['tick', 'balance', 'time']:
+                logger.info(f"📨 [{msg_type}]")
             handlers = {
                 'authorize':               self.on_authorize,
                 'tick':                    self.on_tick,
@@ -99,70 +113,64 @@ class DerivWebSocketClient:
                 'error':                   self.on_error_msg,
                 'ping':                    self.on_ping,
             }
-            if mt in handlers:
-                handlers[mt](data)
+            handler = handlers.get(msg_type)
+            if handler:
+                handler(data)
+        except json.JSONDecodeError:
+            logger.error("Mensagem JSON inválida recebida")
         except Exception as e:
-            logger.error(f"Erro processar msg: {e}")
+            logger.error(f"Erro ao processar mensagem: {e}")
 
     def on_error(self, ws, error):
-        logger.error(f"WS error: {error}")
+        logger.error(f"Erro no WebSocket: {error}")
         self.connected = False
         self.authorized = False
         if self.should_reconnect:
             self.schedule_reconnect()
 
-    def on_close(self, ws, *args):
-        logger.warning("🔌 WebSocket desconectado — a reconectar...")
+    def on_close(self, ws, close_status_code, close_msg):
+        logger.warning(f"WebSocket fechado (código {close_status_code}): {close_msg}")
         self.connected = False
         self.authorized = False
         self._balance_subscribed = False
-        self._first_tick_received = False
-        if self._retry_sub_timer:
-            self._retry_sub_timer.cancel()
         if self.should_reconnect:
             self.schedule_reconnect()
 
-    # ═══════════════════════════════════ Reconexão ═══════════════════════════════════
+    # ── Reconexão ────────────────────────────────────────────────
     def schedule_reconnect(self):
-        self.reconnect_attempts += 1
-        delay = min(5 * self.reconnect_attempts, 60)
-        logger.info(f"🔄 Reconectar em {delay}s (tentativa {self.reconnect_attempts})")
-        threading.Timer(delay, self.reconnect).start()
+        with self._reconnect_lock:
+            self.reconnect_attempts += 1
+            delay = min(5 * self.reconnect_attempts, 60)
+            logger.info(f"🔄 Agendando reconexão em {delay}s (tentativa {self.reconnect_attempts})")
+            threading.Timer(delay, self.reconnect).start()
 
     def reconnect(self):
         if not self.should_reconnect:
             return
-        self.subscribed_symbols.clear()
-        self.processed_contracts.clear()
-        self.pending_trade = None
-        self._balance_subscribed = False
-        self._heartbeat_started = False
-        self._first_tick_received = False
-        if self._retry_sub_timer:
-            self._retry_sub_timer.cancel()
+        logger.info("🔄 Executando reconexão...")
         self.connect()
 
-    # ═══════════════════════════════════ Heartbeat (60s) ═════════════════════════════
-    def start_heartbeat(self):
-        if self._heartbeat_started:
+    # ── Heartbeat (força reconexão após 120s sem qualquer mensagem) ──
+    def _start_heartbeat(self):
+        if self._heartbeat_active:
             return
-        self._heartbeat_started = True
+        self._heartbeat_active = True
 
-        def check():
-            while self.should_reconnect:
-                time.sleep(5)
+        def monitor():
+            while self.should_reconnect and self._heartbeat_active:
+                time.sleep(10)
                 if not self.connected:
                     continue
-                if time.time() - self._last_tick_time > 60:   # ← 60 segundos
-                    logger.warning("⚠️ Timeout de ticks (60s sem tick) → forçando reconexão...")
+                if time.time() - self._last_message_time > 120:
+                    logger.warning("⚠️ Nenhuma mensagem durante 120s. Forçando reconexão...")
                     self.connected = False
                     self.authorized = False
                     self._balance_subscribed = False
                     self.schedule_reconnect()
                     break
-        threading.Thread(target=check, daemon=True).start()
+        threading.Thread(target=monitor, daemon=True).start()
 
-    # ═══════════════════════════════════ Autenticação ═══════════════════════════════
+    # ── Autenticação ────────────────────────────────────────────
     def authorize(self):
         if not self.user_token:
             logger.error("❌ Token não configurado!")
@@ -181,12 +189,11 @@ class DerivWebSocketClient:
             logger.info("✅ Autorizado com sucesso!")
             self.authorized = True
             self._subscribe_balance()
-            # Subscreen ticks após um curto delay (garante que a auth foi processada)
             time.sleep(0.5)
             if self.current_symbol:
                 self.subscribe_ticks(self.current_symbol)
 
-    # ═══════════════════════════════════ Saldo ═══════════════════════════════════════
+    # ── Saldo ────────────────────────────────────────────────────
     def _subscribe_balance(self):
         try:
             self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": 2}))
@@ -217,7 +224,7 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro saldo: {e}")
 
-    # ═══════════════════════════════════ Ticks ═══════════════════════════════════════
+    # ── Ticks ────────────────────────────────────────────────────
     def subscribe_ticks(self, symbol):
         if symbol in self.subscribed_symbols:
             logger.info(f"⚠️ Já subscrito em {symbol}")
@@ -227,26 +234,9 @@ class DerivWebSocketClient:
             self.subscribed_symbols.add(symbol)
             self.current_symbol = symbol
             logger.info(f"📊 Subscrito ticks: {symbol}")
-
-            # Agendar verificação: se não recebermos um tick em 10 segundos, reenviamos a subscrição
-            if self._retry_sub_timer:
-                self._retry_sub_timer.cancel()
-            self._retry_sub_timer = threading.Timer(10.0, self._retry_tick_subscription)
-            self._retry_sub_timer.start()
-
-            # Enviar um ping para testar a ida e volta
-            try:
-                self.ws.send(json.dumps({"ping": 1, "req_id": 99}))
-            except:
-                pass
+            self.ws.send(json.dumps({"ping": 1, "req_id": 99}))
         except Exception as e:
             logger.error(f"Erro subscrever ticks: {e}")
-
-    def _retry_tick_subscription(self):
-        if self.connected and self.authorized and not self._first_tick_received:
-            logger.warning("⏳ Nenhum tick recebido em 10s. Reenviando subscrição de ticks...")
-            self.subscribed_symbols.discard(self.current_symbol)
-            self.subscribe_ticks(self.current_symbol)
 
     def unsubscribe_ticks(self, symbol):
         if symbol in self.subscribed_symbols:
@@ -265,24 +255,29 @@ class DerivWebSocketClient:
             self.current_symbol = symbol
 
     def on_tick(self, data):
-        if not self._first_tick_received:
-            logger.info("🎯 Primeiro tick recebido! Fluxo de ticks ativo.")
-            self._first_tick_received = True
-            if self._retry_sub_timer:
-                self._retry_sub_timer.cancel()
-        self._last_tick_time = time.time()
-        tick = data.get('tick', {})
-        if tick and self.on_tick_callback:
-            self.on_tick_callback({
-                'symbol':    tick.get('symbol', self.current_symbol),
-                'price':     tick.get('quote', 0),
-                'timestamp': tick.get('epoch', time.time())
-            })
+        try:
+            tick = data.get('tick', {})
+            if not tick:
+                return
+            if not self._first_tick_logged:
+                logger.info("🎯 Primeiro tick recebido! Fluxo de ticks ativo.")
+                self._first_tick_logged = True
+            if self.on_tick_callback:
+                try:
+                    self.on_tick_callback({
+                        'symbol':    tick.get('symbol', self.current_symbol),
+                        'price':     float(tick.get('quote', 0)),
+                        'timestamp': tick.get('epoch', time.time())
+                    })
+                except Exception as cb_err:
+                    logger.error(f"Erro no callback de tick: {cb_err}")
+        except Exception as e:
+            logger.error(f"Erro ao processar tick: {e}")
 
     def on_ping(self, data):
         logger.info("📶 Ping response recebido")
 
-    # ═══════════════════════════════════ Colocar Trade ══════════════════════════════
+    # ── Colocar Trade ──────────────────────────────────────────
     def place_trade(self, contract_type, amount, is_digit=False):
         with self._trade_lock:
             try:
@@ -336,8 +331,7 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return False
 
-    # ... (resto dos métodos on_proposal, on_buy_response, etc. permanecem iguais)
-
+    # ── Proposta → Compra → Resultado ──────────────────────────
     def on_proposal(self, data):
         try:
             if data.get('error'):
