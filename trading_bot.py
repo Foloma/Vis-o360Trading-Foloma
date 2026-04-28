@@ -49,6 +49,10 @@ class TradingBot:
             'last_result': None
         }
 
+        # Atributos que serão preenchidos pelo app.py para refletir o estado real
+        self._client_connected = False
+        self._client_authorized = False
+
     def start(self, client):
         self.client = client
         self.daily_stats['start_balance'] = self.balance
@@ -291,9 +295,16 @@ class TradingBot:
     def get_status(self):
         self.check_pending_trades()
         signal, confidence = self.calculate_signal()
+        # Usar os campos auxiliares se existirem, caso contrário tentar pelo cliente
+        connected = self._client_connected
+        authorized = self._client_authorized
+        if not connected and self.client:
+            connected = self.client.connected
+        if not authorized and self.client:
+            authorized = self.client.authorized
         return {
-            'connected': self.client.connected if self.client else False,
-            'authorized': self.client.authorized if self.client else False,
+            'connected': connected,
+            'authorized': authorized,
             'price': self.current_price,
             'symbol': self.current_symbol,
             'balance': self.balance,
