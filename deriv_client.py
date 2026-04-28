@@ -6,6 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class DerivWebSocketClient:
     def __init__(self, config, on_tick_callback=None):
         self.config = config
@@ -24,16 +25,11 @@ class DerivWebSocketClient:
         self.user_token = None
         self.active_trades = {}
         self.pending_trade = None
-        self.reconnect_attempts = 0
-        self.should_reconnect = True
         self.processed_contracts = set()
         self._trade_lock = threading.Lock()
         self._digit_analyzer = None
         self._balance_subscribed = False
-        self._last_message_time = time.time()
-        self._heartbeat_active = False
         self._first_tick_logged = False
-        self._reconnect_lock = threading.Lock()
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a):
@@ -55,49 +51,52 @@ class DerivWebSocketClient:
 
     # ── Conexão ──────────────────────────────────────────────────
     def connect(self):
-        with self._reconnect_lock:
-            if self.ws:
-                try:
-                    self.ws.keep_running = False
-                    self.ws.close()
-                except:
-                    pass
-                self.ws = None
-            self.connected = False
-            self.authorized = False
-            self._first_tick_logged = False
-            self._balance_subscribed = False
-            self.subscribed_symbols.clear()
-
+        """Inicia o WebSocket. A reconexão é tratada pelo run_forever."""
+        # Fechar qualquer conexão anterior
+        if self.ws:
             try:
-                self.ws = websocket.WebSocketApp(
-                    self.config.WS_URL,
-                    on_open=self.on_open,
-                    on_message=self.on_message,
-                    on_error=self.on_error,
-                    on_close=self.on_close
-                )
-                self.ws_thread = threading.Thread(
-                    target=lambda: self.ws.run_forever(ping_interval=20, ping_timeout=10),
-                    daemon=True
-                )
-                self.ws_thread.start()
-                logger.info("🔌 Conectando à Deriv...")
-                return True
-            except Exception as e:
-                logger.error(f"Erro ao iniciar conexão: {e}")
-                return False
+                self.ws.keep_running = False
+                self.ws.close()
+            except:
+                pass
+
+        self.connected = False
+        self.authorized = False
+        self._first_tick_logged = False
+        self._balance_subscribed = False
+        self.subscribed_symbols.clear()
+
+        try:
+            self.ws = websocket.WebSocketApp(
+                self.config.WS_URL,
+                on_open=self.on_open,
+                on_message=self.on_message,
+                on_error=self.on_error,
+                on_close=self.on_close
+            )
+            # Reconexão automática a cada 5 segundos, com ping a cada 20 segundos
+            self.ws_thread = threading.Thread(
+                target=lambda: self.ws.run_forever(
+                    ping_interval=20,
+                    ping_timeout=10,
+                    reconnect=5       # <-- reconexão automática
+                ),
+                daemon=True
+            )
+            self.ws_thread.start()
+            logger.info("🔌 Conectando à Deriv...")
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao iniciar conexão: {e}")
+            return False
 
     def on_open(self, ws):
         logger.info("✅ WebSocket conectado")
         self.connected = True
-        self.reconnect_attempts = 0
-        self._last_message_time = time.time()
-        self._start_heartbeat()
         self.authorize()
 
     def on_message(self, ws, message):
-        self._last_message_time = time.time()
+        """Processa mensagens recebidas."""
         try:
             data = json.loads(message)
             msg_type = data.get('msg_type', '')
@@ -125,50 +124,13 @@ class DerivWebSocketClient:
         logger.error(f"Erro no WebSocket: {error}")
         self.connected = False
         self.authorized = False
-        if self.should_reconnect:
-            self.schedule_reconnect()
 
     def on_close(self, ws, close_status_code, close_msg):
         logger.warning(f"WebSocket fechado (código {close_status_code}): {close_msg}")
         self.connected = False
         self.authorized = False
         self._balance_subscribed = False
-        if self.should_reconnect:
-            self.schedule_reconnect()
-
-    # ── Reconexão ────────────────────────────────────────────────
-    def schedule_reconnect(self):
-        with self._reconnect_lock:
-            self.reconnect_attempts += 1
-            delay = min(5 * self.reconnect_attempts, 60)
-            logger.info(f"🔄 Agendando reconexão em {delay}s (tentativa {self.reconnect_attempts})")
-            threading.Timer(delay, self.reconnect).start()
-
-    def reconnect(self):
-        if not self.should_reconnect:
-            return
-        logger.info("🔄 Executando reconexão...")
-        self.connect()
-
-    # ── Heartbeat (força reconexão após 120s sem qualquer mensagem) ──
-    def _start_heartbeat(self):
-        if self._heartbeat_active:
-            return
-        self._heartbeat_active = True
-
-        def monitor():
-            while self.should_reconnect and self._heartbeat_active:
-                time.sleep(10)
-                if not self.connected:
-                    continue
-                if time.time() - self._last_message_time > 120:
-                    logger.warning("⚠️ Nenhuma mensagem durante 120s. Forçando reconexão...")
-                    self.connected = False
-                    self.authorized = False
-                    self._balance_subscribed = False
-                    self.schedule_reconnect()
-                    break
-        threading.Thread(target=monitor, daemon=True).start()
+        # O run_forever tratará da reconexão automaticamente
 
     # ── Autenticação ────────────────────────────────────────────
     def authorize(self):
@@ -215,10 +177,10 @@ class DerivWebSocketClient:
         try:
             bd = data.get('balance', {})
             if bd:
-                self.balance  = float(bd.get('balance', 0))
+                self.balance = float(bd.get('balance', 0))
                 self.currency = bd.get('currency', 'USD')
                 if self.trading_bot:
-                    self.trading_bot.balance  = self.balance
+                    self.trading_bot.balance = self.balance
                     self.trading_bot.currency = self.currency
                 logger.info(f"💰 Saldo: {self.balance:.2f} {self.currency}")
         except Exception as e:
@@ -234,7 +196,6 @@ class DerivWebSocketClient:
             self.subscribed_symbols.add(symbol)
             self.current_symbol = symbol
             logger.info(f"📊 Subscrito ticks: {symbol}")
-            self.ws.send(json.dumps({"ping": 1, "req_id": 99}))
         except Exception as e:
             logger.error(f"Erro subscrever ticks: {e}")
 
@@ -255,6 +216,7 @@ class DerivWebSocketClient:
             self.current_symbol = symbol
 
     def on_tick(self, data):
+        """Recebe um tick e encaminha para o callback."""
         try:
             tick = data.get('tick', {})
             if not tick:
@@ -262,6 +224,8 @@ class DerivWebSocketClient:
             if not self._first_tick_logged:
                 logger.info("🎯 Primeiro tick recebido! Fluxo de ticks ativo.")
                 self._first_tick_logged = True
+
+            # Chamar o callback de forma segura
             if self.on_tick_callback:
                 try:
                     self.on_tick_callback({
