@@ -466,6 +466,9 @@ def api_connect():
         client.subscribe_ticks(symbol)
         sess['trading_bot'].start(client)
 
+        # Pequena pausa para o primeiro tick chegar e o estado ficar 100% sincronizado
+        time.sleep(0.5)
+
         return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
     except Exception as e:
         logger.error(f"❌ Erro na conexão: {e}")
@@ -482,11 +485,14 @@ def api_status():
         bot = sess['trading_bot']
         analyzer = sess['digit_analyzer']
 
-        # Forçar o bot a ficar com os valores mais recentes
+        # Forçar sincronização total e garantir que o bot tem o cliente correto
         if client:
+            bot.client = client
             bot.balance = client.balance
             bot.currency = client.currency
-            bot.client = client
+            # Garantir que o estado "connected" reflete a realidade
+            if not client.connected and client.ws and client.ws.sock and client.ws.sock.connected:
+                client.connected = True
 
         bot_status = bot.get_status()
         analysis = analyzer.get_analysis()
