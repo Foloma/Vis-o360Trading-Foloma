@@ -454,7 +454,15 @@ def api_connect():
         client = sess['client']
         client.set_user_token(token)
         client.connect()
-        time.sleep(2)
+
+        # Aguardar até que o WebSocket esteja autorizado (máximo 15 segundos)
+        timeout = time.time() + 15
+        while not client.authorized and time.time() < timeout:
+            time.sleep(0.3)
+
+        if not client.authorized:
+            return jsonify({'error': 'Não foi possível autorizar a ligação. Verifique o token.'}), 500
+
         client.subscribe_ticks(symbol)
         sess['trading_bot'].start(client)
 
