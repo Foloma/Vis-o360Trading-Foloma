@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 from config import config
 from deriv_client import DerivWebSocketClient
 from trading_bot import TradingBot
-from synthetics import DigitAnalyzer      # <-- A classe dos dígitos está aqui
+from synthetics import DigitAnalyzer
 from payment_system import PaymentSystem
 
 app = Flask(__name__)
@@ -126,7 +126,6 @@ class AffiliateSystem:
 
 affiliate = AffiliateSystem()
 
-# Dicionário para sessões individuais
 user_sessions = {}
 sessions_lock = threading.Lock()
 
@@ -135,7 +134,7 @@ def get_user_session(user_id):
     with sessions_lock:
         if user_id not in user_sessions:
             bot = TradingBot()
-            analyzer = DigitAnalyzer(max_digits=500)   # <-- instância do analisador de dígitos
+            analyzer = DigitAnalyzer(max_digits=500)
             def tick_callback(tick):
                 bot.on_tick(tick)
             client = DerivWebSocketClient(config, on_tick_callback=tick_callback)
@@ -429,7 +428,7 @@ def api_reset_password_confirm():
     return jsonify({'error': 'Token inválido ou expirado'}), 400
 
 
-# ───── Rotas de Trading (acessíveis a todos os utilizadores autenticados) ─────
+# ───── Rotas de Trading ─────
 @app.route('/api/connect', methods=['POST'])
 @require_auth
 def api_connect():
@@ -455,21 +454,18 @@ def api_connect():
         sess = get_user_session(user['id'])
         client = sess['client']
         client.set_user_token(token)
-        client.connect()
+        client.connect()  # inicia a thread de conexão
 
-        # Aguardar até que o WebSocket esteja autorizado (máximo 15 segundos)
-        timeout = time.time() + 15
+        # Aguardar até 10 segundos para autorizar e subscrever
+        timeout = time.time() + 10
         while not client.authorized and time.time() < timeout:
-            time.sleep(0.3)
+            time.sleep(0.5)
 
         if not client.authorized:
-            return jsonify({'error': 'Não foi possível autorizar a ligação. Verifique o token.'}), 500
+            return jsonify({'error': 'Autorização falhou. Verifique o token.'}), 500
 
-        client.subscribe_ticks(symbol)
+        client._subscribe_ticks(symbol)
         sess['trading_bot'].start(client)
-
-        # Pequena pausa para o primeiro tick chegar e o estado ficar 100% sincronizado
-        time.sleep(0.5)
 
         return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
     except Exception as e:
@@ -487,14 +483,14 @@ def api_status():
         bot = sess['trading_bot']
         analyzer = sess['digit_analyzer']
 
-        # ⚡ Sincronização forçada antes de responder
+        # Sincronizar estado do cliente com o bot
         if client:
             bot.client = client
             bot.balance = client.balance
             bot.currency = client.currency
             bot._client_connected = client.connected
             bot._client_authorized = client.authorized
-            # Se o bot ainda não arrancou mas o cliente está ativo, forçar start
+            # Se o bot ainda não iniciou, forçar start
             if client.connected and client.authorized and not bot.client:
                 bot.start(client)
 
