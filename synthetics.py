@@ -1,23 +1,29 @@
 from collections import deque
 from decimal import Decimal, InvalidOperation
-import time
-import logging
-import threading
+import time, logging, threading
 
 logger = logging.getLogger(__name__)
 
 
 class DigitAnalyzer:
-    TICKS_PER_DIGIT = 10
+    """
+    Captura 1 dígito a cada TICKS_PER_DIGIT ticks reais do WebSocket.
+    - Sincronização exacta com contratos Deriv (que também contam ticks)
+    - Expõe ticks_remaining para que o contrato expire exactamente no próximo dígito
+    - Histórico completo (sem limite de 20)
+    """
+
+    TICKS_PER_DIGIT = 10   # 1 dígito lento a cada 10 ticks ≈ 10 segundos
 
     def __init__(self, max_digits=500):
-        self.slow_digits = deque(maxlen=max_digits)
-        self.current_digit = None
+        self.slow_digits   = deque(maxlen=max_digits)
+        self.current_digit  = None
         self.current_parity = '---'
 
-        self._tick_count = 0
-        self._ticks_in_cycle = 0
-        self._digit_counter = 0
+        # Contagem de ticks para sincronização
+        self._tick_count       = 0   # ticks totais recebidos
+        self._ticks_in_cycle   = 0   # posição dentro do ciclo actual (0..N-1)
+        self._digit_counter    = 0   # número de dígitos lentos capturados
 
         self._lock = threading.Lock()
 
@@ -34,6 +40,7 @@ class DigitAnalyzer:
             'all_signals': [], 'digit_counter': 0
         }
 
+    # ── Extracção correcta do dígito ───────────────────────────
     def _extract_last_digit(self, price):
         try:
             s = str(Decimal(str(price)).normalize())
@@ -44,27 +51,31 @@ class DigitAnalyzer:
                     return int(ch)
             return 0
         except Exception:
-            try:
-                return int(f"{float(price):.3f}"[-1])
-            except:
-                return 0
+            try: return int(f"{float(price):.3f}"[-1])
+            except: return 0
 
+    # ── Receber tick (chamado pelo deriv_client a cada tick) ────
     def add_tick(self, price):
+        """
+        Chamado a cada tick do WebSocket.
+        Conta ticks reais. A cada TICKS_PER_DIGIT ticks captura um dígito lento.
+        """
         try:
-            digit = self._extract_last_digit(price)
+            digit  = self._extract_last_digit(price)
             parity = 'IMPAR' if digit % 2 != 0 else 'PAR'
 
             with self._lock:
                 self._tick_count += 1
                 self._ticks_in_cycle = self._tick_count % self.TICKS_PER_DIGIT
-                self.current_digit = digit
+                self.current_digit  = digit
                 self.current_parity = parity
                 ticks_remaining = self.TICKS_PER_DIGIT - self._ticks_in_cycle
                 if ticks_remaining == 0:
                     ticks_remaining = self.TICKS_PER_DIGIT
                 self.last_analysis['ticks_remaining'] = ticks_remaining
-                self.last_analysis['ticks_in_cycle'] = self._ticks_in_cycle
+                self.last_analysis['ticks_in_cycle']  = self._ticks_in_cycle
 
+            # ✅ A cada TICKS_PER_DIGIT ticks → novo dígito lento
             if self._ticks_in_cycle == 0:
                 self._digit_counter += 1
                 with self._lock:
@@ -79,23 +90,25 @@ class DigitAnalyzer:
             logger.error(f"Erro tick: {e}")
             return False, None
 
+    # ── Análise dos últimos 20 dígitos ─────────────────────────
     def _analyse(self, snap):
-        total = len(snap)
+        total  = len(snap)
         window = snap[-20:]
-        w = len(window)
-        odd_c = sum(1 for d in window if d % 2 != 0)
+        w      = len(window)
+        odd_c  = sum(1 for d in window if d % 2 != 0)
         even_c = w - odd_c
-        odd_pct = round(odd_c / w * 100, 1) if w else 0
+        odd_pct  = round(odd_c  / w * 100, 1) if w else 0
         even_pct = round(even_c / w * 100, 1) if w else 0
-        rec_par = ['IMPAR' if d % 2 != 0 else 'PAR' for d in window]
+        rec_par  = ['IMPAR' if d % 2 != 0 else 'PAR' for d in window]
         streak, sp = self._calc_streak(snap)
         candidates = []
 
         if w < 3:
             self._set_no_signal(snap, odd_pct, even_pct, rec_par,
-                                reason=f'Aguardando ({total}/3 mínimo)...')
+                reason=f'Aguardando ({total}/3 mínimo)...')
             return
 
+        # 1. Streak consecutivo
         if streak >= 3:
             conf = min(60 + (streak - 3) * 8, 92)
             if sp == 'PAR':
@@ -103,6 +116,7 @@ class DigitAnalyzer:
             else:
                 candidates.append((conf, 'SELL', 'streak', f'🔥 {streak} ÍMPARES seguidos → aposte PAR ({conf}%)'))
 
+        # 2. Dominância nos últimos 20
         if w >= 10:
             if odd_pct >= 70:
                 conf = min(55 + int((odd_pct - 70) * 1.5), 85)
@@ -111,6 +125,7 @@ class DigitAnalyzer:
                 conf = min(55 + int((even_pct - 70) * 1.5), 85)
                 candidates.append((conf, 'BUY', 'dominance', f'📊 {even_pct}% PARES → reversão ÍMPAR ({conf}%)'))
 
+        # 3. Alternância
         if w >= 6:
             alt = self._calc_alternating(window)
             if alt >= 5:
@@ -120,6 +135,7 @@ class DigitAnalyzer:
                 else:
                     candidates.append((conf, 'BUY', 'alternating', f'🔄 Alternância {alt} → ÍMPAR ({conf}%)'))
 
+        # 4. Desequilíbrio moderado
         if w >= 15 and not candidates:
             if odd_pct >= 62:
                 candidates.append((42, 'SELL', 'imbalance', f'⚠️ {odd_pct}% ÍMPAR → possível PAR'))
@@ -139,18 +155,17 @@ class DigitAnalyzer:
                     'recent_parity': rec_par,
                     'odd_pct': odd_pct, 'even_pct': even_pct,
                     'total_digits': total,
-                    'all_signals': [{'type': c[2], 'action': c[1], 'confidence': c[0], 'reason': c[3]} for c in candidates],
+                    'all_signals': [{'type':c[2],'action':c[1],'confidence':c[0],'reason':c[3]} for c in candidates],
                     'digit_counter': self._digit_counter
                 })
             else:
                 self._set_no_signal(snap, odd_pct, even_pct, rec_par,
-                                    streak=streak, streak_parity=sp,
-                                    reason=f'Equilíbrio: {odd_pct}% ímpar / {even_pct}% par. Streak: {streak}.')
+                    streak=streak, streak_parity=sp,
+                    reason=f'Equilíbrio: {odd_pct}% ímpar / {even_pct}% par. Streak: {streak}.')
 
     def _set_no_signal(self, snap, odd_pct=0, even_pct=0, rec_par=None,
                        streak=0, streak_parity='---', reason=''):
-        if rec_par is None:
-            rec_par = []
+        if rec_par is None: rec_par = []
         with self._lock:
             self.last_analysis.update({
                 'streak': streak, 'streak_parity': streak_parity,
@@ -163,35 +178,32 @@ class DigitAnalyzer:
             })
 
     def _calc_streak(self, lst):
-        if not lst:
-            return 0, '---'
+        if not lst: return 0, '---'
         streak = 1
         lp = 'IMPAR' if lst[-1] % 2 != 0 else 'PAR'
         for i in range(len(lst) - 2, -1, -1):
             p = 'IMPAR' if lst[i] % 2 != 0 else 'PAR'
-            if p == lp:
-                streak += 1
-            else:
-                break
+            if p == lp: streak += 1
+            else: break
         return streak, lp
 
     def _calc_alternating(self, window):
-        if len(window) < 2:
-            return 0
+        if len(window) < 2: return 0
         count = 1
         for i in range(len(window) - 1, 0, -1):
-            if (window[i] % 2 != 0) != (window[i - 1] % 2 != 0):
-                count += 1
-            else:
-                break
+            if (window[i] % 2 != 0) != (window[i-1] % 2 != 0): count += 1
+            else: break
         return count
 
+    # ── API pública ────────────────────────────────────────────
     def get_ticks_remaining(self):
+        """Ticks que faltam para o próximo dígito lento. Usar como duração do contrato."""
         with self._lock:
             tr = self.TICKS_PER_DIGIT - (self._tick_count % self.TICKS_PER_DIGIT)
             return tr if tr > 0 else self.TICKS_PER_DIGIT
 
     def get_seconds_to_next_digit(self):
+        """Estimativa em segundos (1 tick ≈ 1s nos índices de volatilidade)."""
         return self.get_ticks_remaining()
 
     def get_countdown(self):
@@ -200,39 +212,32 @@ class DigitAnalyzer:
     def get_digit_counter(self):
         return self._digit_counter
 
-    def get_current_digit(self):
-        return self.current_digit
-
-    def get_current_parity(self):
-        return self.current_parity
+    def get_current_digit(self):  return self.current_digit
+    def get_current_parity(self): return self.current_parity
 
     def get_next_display_digit(self):
         return self.current_digit, self.current_parity, self.get_ticks_remaining()
 
     def get_analysis(self):
-        with self._lock:
-            return dict(self.last_analysis)
+        with self._lock: return dict(self.last_analysis)
 
     def get_recent_digits(self, count=500):
-        with self._lock:
-            return list(self.slow_digits)
+        """Retorna TODOS os dígitos lentos capturados."""
+        with self._lock: return list(self.slow_digits)
 
     def get_streak_info(self):
-        with self._lock:
-            snap = list(self.slow_digits)
+        with self._lock: snap = list(self.slow_digits)
         return self._calc_streak(snap)
 
     def get_stats(self):
-        with self._lock:
-            snap = list(self.slow_digits)
+        with self._lock: snap = list(self.slow_digits)
         if not snap:
-            return {'total': 0, 'odd_pct': 0, 'even_pct': 0, 'current_streak': 0, 'streak_parity': '---', 'recent': []}
-        total = len(snap)
-        odd_c = sum(1 for d in snap if d % 2 != 0)
+            return {'total':0,'odd_pct':0,'even_pct':0,'current_streak':0,'streak_parity':'---','recent':[]}
+        total = len(snap); odd_c = sum(1 for d in snap if d%2!=0)
         streak, sp = self._calc_streak(snap)
-        return {'total': total, 'odd_pct': round(odd_c / total * 100, 1),
-                'even_pct': round((total - odd_c) / total * 100, 1),
-                'current_streak': streak, 'streak_parity': sp, 'recent': snap[-20:]}
+        return {'total':total,'odd_pct':round(odd_c/total*100,1),
+                'even_pct':round((total-odd_c)/total*100,1),
+                'current_streak':streak,'streak_parity':sp,'recent':snap[-20:]}
 
 
 digit_analyzer = DigitAnalyzer(max_digits=500)
