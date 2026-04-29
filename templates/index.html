@@ -384,7 +384,7 @@ body{background:#0a0e1a;color:#fff;min-height:100vh}
 // ── Estado ────────────────────────────────────────────────
 let selectedAcct='demo', paused=false, isConn=false, curSym='R_100', modo='ativos';
 let lastTradeCount=0;
-let lastDigitCount=0;    // ✅ quantidade de dígitos na última atualização
+let lastDigitCount=0;    // ✅ detectar novo dígito por CONTAGEM (não por timer)
 let lastDigitCounter=0;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
@@ -433,12 +433,13 @@ function updateDigits(digits){
     document.getElementById('cdown').textContent = `⏱ ${tr} tick${tr!==1?'s':''} para o próximo dígito`;
     document.getElementById('nearWarn').style.display = tr <= 2 ? 'block' : 'none';
 
+    // ✅ FIX DEFINITIVO DO HISTORIAL:
+    // Usar digit_counter para detectar novo dígito.
+    // Reconstruir SEMPRE que o contador muda.
     const counter = digits.digit_counter || 0;
     const recent  = digits.recent || [];
 
-    // ✅ CORREÇÃO: atualizar sempre que o array de dígitos mudar de tamanho ou o contador mudar
-    if (recent.length > 0 && (recent.length !== lastDigitCount || counter !== lastDigitCounter)) {
-        lastDigitCount = recent.length;
+    if(counter !== lastDigitCounter && recent.length > 0){
         lastDigitCounter = counter;
 
         // Mostrar dígito grande (o mais recente)
@@ -453,7 +454,7 @@ function updateDigits(digits){
         bd.style.transform = 'scale(1.3)';
         setTimeout(()=>bd.style.transform='scale(1)', 220);
 
-        // Reconstruir historial completo
+        // ✅ Reconstruir historial completo
         let html = '';
         recent.forEach((d, i) => {
             const o   = d % 2 !== 0;
@@ -463,7 +464,7 @@ function updateDigits(digits){
         const row = document.getElementById('histRow');
         row.innerHTML = html || '<div style="color:#62748c;font-size:12px;padding:8px">Aguardando...</div>';
 
-        // Scroll automático para o mais recente
+        // ✅ Scroll automático para o mais recente
         const scroll = document.getElementById('histScroll');
         setTimeout(()=>{ scroll.scrollLeft = row.scrollWidth; }, 60);
 
