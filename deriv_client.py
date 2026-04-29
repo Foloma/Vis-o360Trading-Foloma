@@ -10,6 +10,7 @@ class DerivWebSocketClient:
     def __init__(self, config, on_tick_callback=None):
         self.config = config
         self.ws = None
+        self.ws_thread = None
         self.connected = False
         self.authorized = False
         self.balance = 0
@@ -27,9 +28,6 @@ class DerivWebSocketClient:
         self._trade_lock = threading.Lock()
         self._digit_analyzer = None
         self._balance_subscribed = False
-        self._stop_event = threading.Event()
-        self._ws_thread = None
-        self._ping_thread = None
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
@@ -44,71 +42,35 @@ class DerivWebSocketClient:
         self.user_token = t
         logger.info("🔑 Token configurado")
 
-    # ── Conexão ──────────────────────────────────────────────────
+    # ── Conexão (usa WebSocketApp com run_forever e ping) ──────
     def connect(self):
-        if self._ws_thread and self._ws_thread.is_alive():
-            logger.info("Thread de conexão já está em execução")
-            return
-        self._stop_event.clear()
-        self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
-        self._ws_thread.start()
-        logger.info("🔌 Thread de conexão iniciada")
-
-    def _start_ping_timer(self):
-        """Envia um ping a cada 30 segundos para manter o WebSocket ativo."""
-        if self._ping_thread and self._ping_thread.is_alive():
-            return
-        def ping_loop():
-            while not self._stop_event.is_set() and self.ws:
-                time.sleep(30)
-                if self.ws and self.connected:
-                    try:
-                        self.ws.send(json.dumps({"ping": 1}))
-                        logger.info("📶 Ping enviado")
-                    except Exception as e:
-                        logger.error(f"Falha ao enviar ping: {e}")
-                        break
-        self._ping_thread = threading.Thread(target=ping_loop, daemon=True)
-        self._ping_thread.start()
-
-    def _run_forever(self):
-        backoff = 1
-        while not self._stop_event.is_set():
+        if self.ws:
             try:
-                logger.info(f"🔌 Tentando conexão em {self.config.WS_URL}...")
-                self.ws = websocket.create_connection(self.config.WS_URL)
-                self.connected = True
-                logger.info("✅ WebSocket conectado")
-                self._on_connected()
-                self._start_ping_timer()
-                # Loop de leitura
-                while not self._stop_event.is_set():
-                    msg = self.ws.recv()
-                    if not msg:
-                        logger.warning("Conexão fechada pelo servidor (msg nula)")
-                        break
-                    self._on_message(msg)
-            except Exception as e:
-                logger.error(f"Erro na conexão: {e}")
-            finally:
-                self.connected = False
-                self.authorized = False
-                if self.ws:
-                    try:
-                        self.ws.close()
-                    except:
-                        pass
-                    self.ws = None
-            if self._stop_event.is_set():
-                break
-            logger.info(f"🔄 Reconectar em {backoff}s...")
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 120)
+                self.ws.keep_running = False
+                self.ws.close()
+            except:
+                pass
 
-    def _on_connected(self):
+        self.ws = websocket.WebSocketApp(
+            self.config.WS_URL,
+            on_open=self._on_open,
+            on_message=self._on_message,
+            on_error=self._on_error,
+            on_close=self._on_close
+        )
+        self.ws_thread = threading.Thread(
+            target=lambda: self.ws.run_forever(ping_interval=25, ping_timeout=10),
+            daemon=True
+        )
+        self.ws_thread.start()
+        logger.info("🔌 Conectando à Deriv...")
+
+    def _on_open(self, ws):
+        logger.info("✅ WebSocket conectado")
+        self.connected = True
         self.authorize()
 
-    def _on_message(self, message):
+    def _on_message(self, ws, message):
         try:
             data = json.loads(message)
             msg_type = data.get('msg_type', '')
@@ -122,7 +84,6 @@ class DerivWebSocketClient:
                 'proposal_open_contract': self._on_poc,
                 'balance':          self._on_balance,
                 'error':            self._on_error,
-                'ping':             self._on_ping,
             }
             handler = handlers.get(msg_type)
             if handler:
@@ -131,6 +92,15 @@ class DerivWebSocketClient:
             logger.error("Mensagem JSON inválida")
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}")
+
+    def _on_error(self, ws, error):
+        logger.error(f"Erro WS: {error}")
+
+    def _on_close(self, ws, close_code, close_msg):
+        logger.warning(f"WebSocket fechado ({close_code}): {close_msg}")
+        self.connected = False
+        self.authorized = False
+        self._balance_subscribed = False
 
     def authorize(self):
         if not self.user_token:
@@ -223,9 +193,6 @@ class DerivWebSocketClient:
                 })
         except Exception as e:
             logger.error(f"Erro no on_tick: {e}")
-
-    def _on_ping(self, data):
-        pass
 
     # ── Colocar Trade ──────────────────────────────────────────
     def place_trade(self, contract_type, amount, is_digit=False):
