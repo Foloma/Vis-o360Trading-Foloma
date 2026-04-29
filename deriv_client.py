@@ -50,7 +50,6 @@ class DerivWebSocketClient:
                 self.ws.close()
             except:
                 pass
-
         self.ws = websocket.WebSocketApp(
             self.config.WS_URL,
             on_open=self._on_open,
