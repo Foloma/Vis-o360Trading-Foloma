@@ -5,105 +5,106 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Foloma Trading</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-        body { background: #0a0e1a; color: #fff; min-height: 100vh; }
-        .top-bar { background: #1a1f2f; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #2a3342; position: sticky; top: 0; z-index: 100; }
-        .logo { font-size: 20px; font-weight: bold; color: #00f0b5; display: flex; align-items: center; gap: 8px; }
-        .logo svg { display: block; }
-        .menu-btn { background: #2a3342; border: none; color: #fff; font-size: 22px; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
-        .side-menu { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: #1a1f2f; z-index: 1000; transition: left .3s; padding: 20px; border-right: 1px solid #2a3342; }
-        .side-menu.open { left: 0; }
-        .menu-header { display: flex; justify-content: space-between; margin-bottom: 30px; padding-bottom: 15px; border-bottom: 1px solid #2a3342; }
-        .menu-close { background: none; border: none; color: #fff; font-size: 22px; cursor: pointer; }
-        .menu-item { padding: 12px 0; color: #fff; display: block; border-bottom: 1px solid #2a3342; cursor: pointer; }
-        .menu-item:hover { color: #00f0b5; }
-        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 999; display: none; }
-        .overlay.show { display: block; }
-        .container { max-width: 500px; margin: 0 auto; padding: 16px; }
-        .card { background: #1a1f2f; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid #2a3342; }
-        .card-title { color: #00f0b5; font-size: 14px; font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #2a3342; display: flex; justify-content: space-between; align-items: center; }
-        .mode-sel { display: flex; gap: 8px; }
-        .mode-btn { flex: 1; padding: 10px; border-radius: 8px; font-weight: 600; cursor: pointer; background: #2a3342; color: #fff; border: none; font-size: 12px; }
-        .mode-btn.active { background: #00f0b5; color: #0b0e14; }
-        .balance { font-size: 22px; font-weight: bold; color: #00f0b5; }
-        .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff4d4d; display: inline-block; }
-        .dot.on { background: #00f0b5; box-shadow: 0 0 8px #00f0b5; }
-        .price-area { display: flex; justify-content: space-between; align-items: baseline; background: #0b0e14; padding: 12px; border-radius: 10px; margin-bottom: 10px; }
-        .price { font-size: 26px; font-weight: bold; color: #00f0b5; }
-        .sb { display: inline-block; padding: 5px 14px; border-radius: 40px; font-size: 13px; font-weight: 600; }
-        .sb.buy { background: #00f0b5; color: #0a0e1a; } .sb.sell { background: #ff4d4d; color: #fff; } .sb.neutral { background: #62748c; color: #fff; }
-        .inds { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 12px; }
-        .ind { background: #0b0e14; padding: 8px; border-radius: 8px; text-align: center; }
-        .ind .l { font-size: 9px; color: #62748c; } .ind .v { font-size: 13px; font-weight: 600; } .ind .d { font-size: 8px; color: #00f0b5; }
-        .sym-row { display: flex; gap: 8px; flex-wrap: wrap; }
-        .sym-btn { background: #0b0e14; border: 1px solid #2a3342; color: #fff; padding: 6px 12px; border-radius: 20px; cursor: pointer; font-size: 12px; }
-        .sym-btn.active { background: #00f0b5; color: #0a0e1a; border-color: #00f0b5; }
-        .ai { width: 100%; padding: 12px; background: #0b0e14; border: 1px solid #2a3342; border-radius: 10px; color: #fff; font-size: 16px; text-align: center; margin-bottom: 12px; }
-        .tbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-        .btn-buy { background: #00f0b5; color: #0a0e1a; padding: 14px; border: none; border-radius: 10px; font-weight: bold; font-size: 15px; cursor: pointer; }
-        .btn-sell { background: #ff4d4d; color: #fff; padding: 14px; border: none; border-radius: 10px; font-weight: bold; font-size: 15px; cursor: pointer; }
+        * { margin:0; padding:0; box-sizing:border-box; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+        body { background:#0a0e1a; color:#fff; min-height:100vh; }
+        .top-bar { background:#1a1f2f; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #2a3342; position:sticky; top:0; z-index:100; }
+        .logo { font-size:20px; font-weight:bold; color:#00f0b5; display:flex; align-items:center; gap:8px; }
+        .logo svg { display:block; }
+        .menu-btn { background:#2a3342; border:none; color:#fff; font-size:22px; padding:8px 12px; border-radius:8px; cursor:pointer; }
+        .side-menu { position:fixed; top:0; left:-280px; width:280px; height:100%; background:#1a1f2f; z-index:1000; transition:left .3s; padding:20px; border-right:1px solid #2a3342; }
+        .side-menu.open { left:0; }
+        .menu-header { display:flex; justify-content:space-between; margin-bottom:30px; padding-bottom:15px; border-bottom:1px solid #2a3342; }
+        .menu-close { background:none; border:none; color:#fff; font-size:22px; cursor:pointer; }
+        .menu-item { padding:12px 0; color:#fff; display:block; border-bottom:1px solid #2a3342; cursor:pointer; }
+        .menu-item:hover { color:#00f0b5; }
+        .overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:999; display:none; }
+        .overlay.show { display:block; }
+        .container { max-width:500px; margin:0 auto; padding:16px; }
+        .card { background:#1a1f2f; border-radius:12px; padding:16px; margin-bottom:16px; border:1px solid #2a3342; }
+        .card-title { color:#00f0b5; font-size:14px; font-weight:600; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid #2a3342; display:flex; justify-content:space-between; align-items:center; }
+        .mode-sel { display:flex; gap:8px; }
+        .mode-btn { flex:1; padding:10px; border-radius:8px; font-weight:600; cursor:pointer; background:#2a3342; color:#fff; border:none; font-size:12px; }
+        .mode-btn.active { background:#00f0b5; color:#0b0e14; }
+        .balance { font-size:22px; font-weight:bold; color:#00f0b5; }
+        .dot { width:10px; height:10px; border-radius:50%; background:#ff4d4d; display:inline-block; }
+        .dot.on { background:#00f0b5; box-shadow:0 0 8px #00f0b5; }
+        .price-area { display:flex; justify-content:space-between; align-items:baseline; background:#0b0e14; padding:12px; border-radius:10px; margin-bottom:10px; }
+        .price { font-size:26px; font-weight:bold; color:#00f0b5; }
+        .sb { display:inline-block; padding:5px 14px; border-radius:40px; font-size:13px; font-weight:600; }
+        .sb.buy { background:#00f0b5; color:#0a0e1a; } .sb.sell { background:#ff4d4d; color:#fff; } .sb.neutral { background:#62748c; color:#fff; }
+        .inds { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:12px; }
+        .ind { background:#0b0e14; padding:8px; border-radius:8px; text-align:center; }
+        .ind .l { font-size:9px; color:#62748c; } .ind .v { font-size:13px; font-weight:600; } .ind .d { font-size:8px; color:#00f0b5; }
+        .sym-row { display:flex; gap:8px; flex-wrap:wrap; }
+        .sym-btn { background:#0b0e14; border:1px solid #2a3342; color:#fff; padding:6px 12px; border-radius:20px; cursor:pointer; font-size:12px; }
+        .sym-btn.active { background:#00f0b5; color:#0a0e1a; border-color:#00f0b5; }
+        .ai { width:100%; padding:12px; background:#0b0e14; border:1px solid #2a3342; border-radius:10px; color:#fff; font-size:16px; text-align:center; margin-bottom:12px; }
+        .tbtns { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+        .btn-buy { background:#00f0b5; color:#0a0e1a; padding:14px; border:none; border-radius:10px; font-weight:bold; font-size:15px; cursor:pointer; }
+        .btn-sell { background:#ff4d4d; color:#fff; padding:14px; border:none; border-radius:10px; font-weight:bold; font-size:15px; cursor:pointer; }
 
         /* DÍGITOS */
-        .dig-main { background: #0b0e14; border-radius: 14px; padding: 18px; text-align: center; margin-bottom: 12px; border: 2px solid #2a3342; }
-        .tlbl { font-size: 10px; color: #62748c; letter-spacing: 1px; margin-bottom: 6px; }
-        .twrap { background: #1a1f2f; border-radius: 6px; height: 8px; margin-bottom: 12px; overflow: hidden; }
-        .tbar { height: 8px; border-radius: 6px; transition: width .8s linear; }
-        .big-d { font-size: 88px; font-weight: 900; line-height: 1; transition: transform .2s; }
-        .big-d.odd { color: #00f0b5; text-shadow: 0 0 24px #00f0b545; }
-        .big-d.even { color: #ff4d4d; text-shadow: 0 0 24px #ff4d4d45; }
-        .big-d.wait { color: #2a3342; }
-        .big-p { font-size: 18px; font-weight: 700; letter-spacing: 3px; margin-top: 4px; }
-        .big-p.odd { color: #00f0b5; } .big-p.even { color: #ff4d4d; } .big-p.wait { color: #62748c; }
-        .cdown { font-size: 14px; color: #ffaa00; margin-top: 8px; font-weight: 600; }
-        .stk-row { background: #1a1f2f; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
-        .sv { font-weight: bold; font-size: 22px; } .sv.odd { color: #00f0b5; } .sv.even { color: #ff4d4d; } .sv.none { color: #62748c; }
-        .hist-section { margin-top: 14px; } .hist-hdr { font-size: 11px; color: #62748c; margin-bottom: 6px; display: flex; justify-content: space-between; }
-        .hist-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
-        .hist-row { display: flex; gap: 5px; width: max-content; padding: 2px; }
-        .dbox { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; background: #0b0e14; }
-        .dbox.odd { color: #00f0b5; border: 1.5px solid #00f0b5; } .dbox.even { color: #ff4d4d; border: 1.5px solid #ff4d4d; }
-        .dbox.new { animation: pop .4s ease; border-width: 2.5px; }
-        @keyframes pop { 0% { transform: scale(.4); opacity: 0 } 60% { transform: scale(1.3) } 100% { transform: scale(1); opacity: 1 } }
-        .sm { border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; text-align: center; font-size: 13px; font-weight: 600; }
-        .sm.active { background: linear-gradient(135deg,#00f0b540,#00f0b510); border: 1px solid #00f0b5; color: #00f0b5; animation: pulse 1.5s infinite; }
-        .sm.warn { background: linear-gradient(135deg,#ffaa0040,#ffaa0010); border: 1px solid #ffaa00; color: #ffaa00; }
-        .sm.none { background: #0b0e14; border: 1px solid #2a3342; color: #62748c; }
-        @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .7 } }
-        .all-sigs { margin-bottom: 8px; }
-        .si { background: #0b0e14; border-radius: 8px; padding: 8px 12px; margin-bottom: 5px; font-size: 12px; display: flex; justify-content: space-between; }
-        .si.streak { border-left: 3px solid #ffaa00; } .si.dominance { border-left: 3px solid #00f0b5; } .si.alternating { border-left: 3px solid #a855f7; } .si.imbalance { border-left: 3px solid #62748c; }
-        .sc { font-weight: bold; } .si.streak .sc { color: #ffaa00; } .si.dominance .sc { color: #00f0b5; } .si.alternating .sc { color: #a855f7; }
-        .pct-s { background: #0b0e14; border-radius: 8px; padding: 10px; margin: 10px 0; }
-        .pct-r { display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin-bottom: 8px; } .po { color: #00f0b5; } .pe { color: #ff4d4d; }
-        .pb { display: flex; height: 10px; border-radius: 5px; overflow: hidden; } .pob { background: #00f0b5; transition: width .3s; } .peb { background: #ff4d4d; transition: width .3s; }
-        .dbet { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-        .btn-odd { background: #00f0b5; color: #0a0e1a; padding: 18px; border: none; border-radius: 10px; font-weight: bold; font-size: 18px; cursor: pointer; }
-        .btn-even { background: #ff4d4d; color: #fff; padding: 18px; border: none; border-radius: 10px; font-weight: bold; font-size: 18px; cursor: pointer; }
-        .nw { background: #ff4d4d20; border: 1px solid #ff4d4d; border-radius: 8px; padding: 8px; text-align: center; font-size: 12px; color: #ff4d4d; margin-bottom: 8px; display: none; }
-        .ms { background: #0b0e14; border-radius: 8px; padding: 10px; font-size: 12px; margin: 10px 0; }
-        .bm { background: #ffaa00; color: #0a0e1a; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; flex: 1; }
-        .bmr { background: #2a3342; color: #fff; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; flex: 1; }
-        .hs { background: #0b0e14; border-radius: 8px; padding: 10px; margin-bottom: 12px; text-align: center; font-size: 12px; }
-        .sg { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; text-align: center; } .sv2 { font-size: 18px; font-weight: bold; } .sl { font-size: 10px; color: #62748c; }
-        .bp { background: #00f0b5; color: #0a0e14; width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .bs { background: #2a3342; color: #fff; width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .bsm { background: #2a3342; border: none; padding: 8px 12px; border-radius: 6px; color: #fff; cursor: pointer; }
-        .bch { background: #2a3342; border: none; padding: 6px 12px; border-radius: 6px; color: #ffaa00; cursor: pointer; font-size: 11px; }
-        .mc { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 12px; color: #62748c; }
-        .hidden { display: none; }
-        .lc { display: flex; gap: 8px; } .lc input { flex: 1; padding: 8px; background: #0b0e14; border: 1px solid #2a3342; border-radius: 6px; color: #fff; font-size: 12px; }
-        .as { display: flex; gap: 10px; margin: 10px 0; } .ab { flex: 1; padding: 10px; border-radius: 8px; font-weight: 600; cursor: pointer; background: #2a3342; color: #fff; border: none; } .ab.active { background: #00f0b5; color: #0b0e14; }
-        .modal { position: fixed; inset: 0; background: rgba(0,0,0,.95); z-index: 1100; display: flex; align-items: center; justify-content: center; }
-        .mbox { background: #1a1f2f; padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; } .mbox input { width: 100%; padding: 10px; margin: 8px 0; background: #0b0e14; border: 1px solid #2a3342; border-radius: 8px; color: #fff; }
-        .ut { width: 100%; border-collapse: collapse; margin-top: 10px; } .ut th,.ut td { padding: 8px; text-align: left; border-bottom: 1px solid #2a3342; font-size: 12px; } .ut th { color: #00f0b5; }
-        .btgl { background: #2a3342; border: none; padding: 4px 8px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; } .btgl.dis { background: #ff4d4d; }
-        .tc { text-align: center; } .mt2 { margin-top: 8px; } .flex { display: flex; gap: 8px; }
-        .badge { background: #00f0b520; border: 1px solid #00f0b5; border-radius: 20px; padding: 3px 10px; font-size: 10px; color: #00f0b5; }
-        .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #1a1f2f; border-radius: 14px; padding: 14px 22px; font-size: 13px; z-index: 2000; display: none; text-align: center; max-width: 320px; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
-        .toast.show { display: block; animation: su .3s ease; } .toast.win { border: 2px solid #00f0b5; color: #00f0b5; } .toast.loss { border: 2px solid #ff4d4d; color: #ff4d4d; } .toast.info { border: 2px solid #ffaa00; color: #ffaa00; }
-        @keyframes su { from { transform: translateX(-50%) translateY(16px); opacity: 0 } to { transform: translateX(-50%) translateY(0); opacity: 1 } }
-        .trade-summary-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #2a3342; font-size: 12px; }
-        .trade-summary-item .profit { font-weight: bold; }
+        .dig-main { background:#0b0e14; border-radius:14px; padding:18px; text-align:center; margin-bottom:12px; border:2px solid #2a3342; }
+        .tlbl { font-size:10px; color:#62748c; letter-spacing:1px; margin-bottom:6px; }
+        .twrap { background:#1a1f2f; border-radius:6px; height:8px; margin-bottom:12px; overflow:hidden; }
+        .tbar { height:8px; border-radius:6px; transition:width .8s linear; }
+        .big-d { font-size:88px; font-weight:900; line-height:1; transition:transform .2s; }
+        .big-d.odd { color:#00f0b5; text-shadow:0 0 24px #00f0b545; }
+        .big-d.even { color:#ff4d4d; text-shadow:0 0 24px #ff4d4d45; }
+        .big-d.wait { color:#2a3342; }
+        .big-p { font-size:18px; font-weight:700; letter-spacing:3px; margin-top:4px; }
+        .big-p.odd { color:#00f0b5; } .big-p.even { color:#ff4d4d; } .big-p.wait { color:#62748c; }
+        .cdown { font-size:14px; color:#ffaa00; margin-top:8px; font-weight:600; }
+        .stk-row { background:#1a1f2f; border-radius:8px; padding:10px 14px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
+        .sv { font-weight:bold; font-size:22px; } .sv.odd { color:#00f0b5; } .sv.even { color:#ff4d4d; } .sv.none { color:#62748c; }
+        .hist-section { margin-top:14px; } .hist-hdr { font-size:11px; color:#62748c; margin-bottom:6px; display:flex; justify-content:space-between; }
+        .hist-scroll { overflow-x:auto; overflow-y:hidden; padding-bottom:4px; -webkit-overflow-scrolling:touch; }
+        .hist-row { display:flex; gap:5px; width:max-content; padding:2px; }
+        .dbox { width:36px; height:36px; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:14px; font-weight:700; flex-shrink:0; background:#0b0e14; }
+        .dbox.odd { color:#00f0b5; border:1.5px solid #00f0b5; } .dbox.even { color:#ff4d4d; border:1.5px solid #ff4d4d; }
+        .dbox.new { animation:pop .4s ease; border-width:2.5px; }
+        @keyframes pop { 0% { transform:scale(.4); opacity:0 } 60% { transform:scale(1.3) } 100% { transform:scale(1); opacity:1 } }
+        .sm { border-radius:10px; padding:12px 14px; margin-bottom:10px; text-align:center; font-size:13px; font-weight:600; }
+        .sm.active { background:linear-gradient(135deg,#00f0b540,#00f0b510); border:1px solid #00f0b5; color:#00f0b5; animation:pulse 1.5s infinite; }
+        .sm.warn { background:linear-gradient(135deg,#ffaa0040,#ffaa0010); border:1px solid #ffaa00; color:#ffaa00; }
+        .sm.none { background:#0b0e14; border:1px solid #2a3342; color:#62748c; }
+        @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.7 } }
+        .all-sigs { margin-bottom:8px; }
+        .si { background:#0b0e14; border-radius:8px; padding:8px 12px; margin-bottom:5px; font-size:12px; display:flex; justify-content:space-between; }
+        .si.streak { border-left:3px solid #ffaa00; } .si.dominance { border-left:3px solid #00f0b5; } .si.alternating { border-left:3px solid #a855f7; } .si.imbalance { border-left:3px solid #62748c; }
+        .sc { font-weight:bold; } .si.streak .sc { color:#ffaa00; } .si.dominance .sc { color:#00f0b5; } .si.alternating .sc { color:#a855f7; }
+        .pct-s { background:#0b0e14; border-radius:8px; padding:10px; margin:10px 0; }
+        .pct-r { display:flex; justify-content:space-between; font-size:13px; font-weight:bold; margin-bottom:8px; } .po { color:#00f0b5; } .pe { color:#ff4d4d; }
+        .pb { display:flex; height:10px; border-radius:5px; overflow:hidden; } .pob { background:#00f0b5; transition:width .3s; } .peb { background:#ff4d4d; transition:width .3s; }
+        .dbet { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+        .btn-odd { background:#00f0b5; color:#0a0e1a; padding:18px; border:none; border-radius:10px; font-weight:bold; font-size:18px; cursor:pointer; }
+        .btn-even { background:#ff4d4d; color:#fff; padding:18px; border:none; border-radius:10px; font-weight:bold; font-size:18px; cursor:pointer; }
+        .nw { background:#ff4d4d20; border:1px solid #ff4d4d; border-radius:8px; padding:8px; text-align:center; font-size:12px; color:#ff4d4d; margin-bottom:8px; display:none; }
+        .ms { background:#0b0e14; border-radius:8px; padding:10px; font-size:12px; margin:10px 0; }
+        .bm { background:#ffaa00; color:#0a0e1a; border:none; padding:8px; border-radius:6px; font-weight:600; cursor:pointer; flex:1; }
+        .bmr { background:#2a3342; color:#fff; border:none; padding:8px; border-radius:6px; font-weight:600; cursor:pointer; flex:1; }
+        .hs { background:#0b0e14; border-radius:8px; padding:10px; margin-bottom:12px; text-align:center; font-size:12px; }
+        .sg { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; text-align:center; } .sv2 { font-size:18px; font-weight:bold; } .sl { font-size:10px; color:#62748c; }
+        .bp { background:#00f0b5; color:#0a0e14; width:100%; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; }
+        .bs { background:#2a3342; color:#fff; width:100%; padding:12px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; }
+        .bsm { background:#2a3342; border:none; padding:8px 12px; border-radius:6px; color:#fff; cursor:pointer; }
+        .bch { background:#2a3342; border:none; padding:6px 12px; border-radius:6px; color:#ffaa00; cursor:pointer; font-size:11px; }
+        .mc { display:flex; align-items:center; gap:8px; margin:10px 0; font-size:12px; color:#62748c; }
+        .hidden { display:none; }
+        .lc { display:flex; gap:8px; } .lc input { flex:1; padding:8px; background:#0b0e14; border:1px solid #2a3342; border-radius:6px; color:#fff; font-size:12px; }
+        .as { display:flex; gap:10px; margin:10px 0; } .ab { flex:1; padding:10px; border-radius:8px; font-weight:600; cursor:pointer; background:#2a3342; color:#fff; border:none; } .ab.active { background:#00f0b5; color:#0b0e14; }
+        .modal { position:fixed; inset:0; background:rgba(0,0,0,.95); z-index:1100; display:flex; align-items:center; justify-content:center; }
+        .mbox { background:#1a1f2f; padding:24px; border-radius:16px; width:90%; max-width:350px; } .mbox input { width:100%; padding:10px; margin:8px 0; background:#0b0e14; border:1px solid #2a3342; border-radius:8px; color:#fff; }
+        .ut { width:100%; border-collapse:collapse; margin-top:10px; } .ut th,.ut td { padding:8px; text-align:left; border-bottom:1px solid #2a3342; font-size:12px; } .ut th { color:#00f0b5; }
+        .btgl { background:#2a3342; border:none; padding:4px 8px; border-radius:4px; color:#fff; cursor:pointer; font-size:11px; } .btgl.dis { background:#ff4d4d; }
+        .tc { text-align:center; } .mt2 { margin-top:8px; } .flex { display:flex; gap:8px; }
+        .badge { background:#00f0b520; border:1px solid #00f0b5; border-radius:20px; padding:3px 10px; font-size:10px; color:#00f0b5; }
+        .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:#1a1f2f; border-radius:14px; padding:14px 22px; font-size:13px; z-index:2000; display:none; text-align:center; max-width:320px; box-shadow:0 6px 24px rgba(0,0,0,.5); }
+        .toast.show { display:block; animation:su .3s ease; } .toast.win { border:2px solid #00f0b5; color:#00f0b5; } .toast.loss { border:2px solid #ff4d4d; color:#ff4d4d; } .toast.info { border:2px solid #ffaa00; color:#ffaa00; }
+        @keyframes su { from { transform:translateX(-50%) translateY(16px); opacity:0 } to { transform:translateX(-50%) translateY(0); opacity:1 } }
+        .trade-summary-item { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #2a3342; font-size:12px; }
+        .trade-summary-item .profit { font-weight:bold; }
+        .token-status { font-size:10px; margin-top:4px; }
     </style>
 </head>
 <body>
@@ -167,7 +168,6 @@
             <div id="pDigitos" class="hidden">
                 <div class="card">
                     <div class="card-title">🎲 DÍGITOS <span class="badge" id="intervalBadge">1 dígito / 10 ticks</span></div>
-
                     <div class="dig-main">
                         <div class="tlbl">PRÓXIMO DÍGITO EM</div>
                         <div class="twrap"><div class="tbar" id="tBar" style="width:100%;background:#00f0b5"></div></div>
@@ -175,63 +175,30 @@
                         <div class="big-p wait" id="bigP">AGUARDANDO</div>
                         <div class="cdown" id="cdown">⏱ 10 ticks</div>
                     </div>
-
                     <div class="stk-row">
-                        <div>
-                            <div style="font-size:11px;color:#62748c">SEQUÊNCIA</div>
-                            <span class="sv none" id="stkV">—</span>
-                            <span id="stkL" style="font-size:12px;color:#62748c;margin-left:6px">aguardando...</span>
-                        </div>
-                        <div style="text-align:right">
-                            <div style="font-size:11px;color:#62748c">TOTAL DÍGITOS</div>
-                            <span id="totD" style="font-weight:bold;font-size:22px">0</span>
-                        </div>
+                        <div><div style="font-size:11px;color:#62748c">SEQUÊNCIA</div><span class="sv none" id="stkV">—</span><span id="stkL" style="font-size:12px;color:#62748c;margin-left:6px">aguardando...</span></div>
+                        <div style="text-align:right"><div style="font-size:11px;color:#62748c">TOTAL DÍGITOS</div><span id="totD" style="font-weight:bold;font-size:22px">0</span></div>
                     </div>
-
                     <div class="sm none" id="sigMain"><div id="sigTxt">Aguardando análise...</div></div>
                     <div class="all-sigs" id="allSigs"></div>
-
                     <div class="nw" id="nearWarn">⚠️ Dígito a sair em menos de 2 ticks! Aguarde o próximo.</div>
-
                     <div class="dbet">
                         <button class="btn-odd" onclick="tradeDigit('odd')">🎲 ÍMPAR</button>
                         <button class="btn-even" onclick="tradeDigit('even')">🎲 PAR</button>
                     </div>
-
                     <div class="hist-section">
-                        <div class="hist-hdr">
-                            <span>📜 HISTORIAL COMPLETO</span>
-                            <span id="histInfo" style="color:#00f0b5">0 dígitos</span>
-                        </div>
-                        <div class="hist-scroll" id="histScroll">
-                            <div class="hist-row" id="histRow">
-                                <div style="color:#62748c;font-size:12px;padding:8px">Aguardando...</div>
-                            </div>
-                        </div>
+                        <div class="hist-hdr"><span>📜 HISTORIAL COMPLETO</span><span id="histInfo" style="color:#00f0b5">0 dígitos</span></div>
+                        <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"><div style="color:#62748c;font-size:12px;padding:8px">Aguardando...</div></div></div>
                     </div>
-
                     <div class="pct-s">
-                        <div class="pct-r">
-                            <span class="po">ÍMPAR: <span id="oddPct">0%</span></span>
-                            <span class="pe">PAR: <span id="evenPct">0%</span></span>
-                        </div>
-                        <div class="pb">
-                            <div class="pob" id="oddBar" style="width:50%"></div>
-                            <div class="peb" id="evenBar" style="width:50%"></div>
-                        </div>
+                        <div class="pct-r"><span class="po">ÍMPAR: <span id="oddPct">0%</span></span><span class="pe">PAR: <span id="evenPct">0%</span></span></div>
+                        <div class="pb"><div class="pob" id="oddBar" style="width:50%"></div><div class="peb" id="evenBar" style="width:50%"></div></div>
                     </div>
-
                     <div style="margin-top:12px">
                         <div style="font-size:11px;color:#62748c;margin-bottom:6px">💰 VALOR DA APOSTA</div>
                         <input type="number" id="amtDig" class="ai" value="0.35" step="0.01" min="0.35" max="100">
-                        <div class="flex">
-                            <button class="bm" onclick="mgt('amtDig')">🎲 MARTINGALE</button>
-                            <button class="bmr" onclick="rstMgt()">🔄 RESETAR</button>
-                        </div>
-                        <div class="ms">
-                            <div>Martingale: <span id="mgtActD">DESATIVADO</span></div>
-                            <div>Próximo: <span id="mgtNxtD">$0.35</span></div>
-                        </div>
+                        <div class="flex"><button class="bm" onclick="mgt('amtDig')">🎲 MARTINGALE</button><button class="bmr" onclick="rstMgt()">🔄 RESETAR</button></div>
+                        <div class="ms"><div>Martingale: <span id="mgtActD">DESATIVADO</span></div><div>Próximo: <span id="mgtNxtD">$0.35</span></div></div>
                     </div>
                 </div>
             </div>
@@ -240,633 +207,191 @@
                 <div class="card-title">🎯 EXECUTAR TRADE</div>
                 <input type="number" id="amt" class="ai" value="0.35" step="0.01" min="0.35" max="100">
                 <div class="mc"><input type="checkbox" id="manMode"> <span>🔓 Modo Manual (ignorar sinais)</span></div>
-                <div id="hybSt" class="hs hidden">
-                    <div id="hybSig" style="margin-bottom:4px"></div>
-                    <div id="hybConf" style="font-size:11px;color:#62748c">Botões sempre disponíveis.</div>
-                </div>
-                <div class="tbtns">
-                    <button class="btn-buy" onclick="trade('BUY')">📈 COMPRAR</button>
-                    <button class="btn-sell" onclick="trade('SELL')">📉 VENDER</button>
-                </div>
-                <div class="flex">
-                    <button class="bm" onclick="mgt('amt')">🎲 MARTINGALE</button>
-                    <button class="bmr" onclick="rstMgt()">🔄 RESETAR</button>
-                </div>
-                <div class="ms">
-                    <div>Martingale: <span id="mgtAct">DESATIVADO</span></div>
-                    <div>Próximo: <span id="mgtNxt">$0.35</span></div>
-                </div>
+                <div id="hybSt" class="hs hidden"><div id="hybSig" style="margin-bottom:4px"></div></div>
+                <div class="tbtns"><button class="btn-buy" onclick="trade('BUY')">📈 COMPRAR</button><button class="btn-sell" onclick="trade('SELL')">📉 VENDER</button></div>
+                <div class="flex"><button class="bm" onclick="mgt('amt')">🎲 MARTINGALE</button><button class="bmr" onclick="rstMgt()">🔄 RESETAR</button></div>
+                <div class="ms"><div>Martingale: <span id="mgtAct">DESATIVADO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
                 <button class="bsm" style="width:100%;margin-top:8px" id="pauseBtn" onclick="togglePause()">⏸️ PAUSAR</button>
-            </div>
-
-        </div><!-- dashboard -->
-
-        <div id="affiliate-section" class="hidden">
-            <div class="card">
-                <div class="card-title">🔗 SEU LINK</div>
-                <div class="lc"><input type="text" id="refLink" readonly value="Carregando..."><button class="bsm" onclick="cpLink()">📋</button></div>
-                <div class="sg" style="margin-top:15px">
-                    <div><div class="sv2" id="refCnt">0</div><div class="sl">Indicações</div></div>
-                    <div><div class="sv2" id="refCom">$0</div><div class="sl">Comissão</div></div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-title">💰 MEUS GANHOS</div>
-                <p style="font-size:14px;margin-bottom:8px;">Total ganho: <span id="affEarnings" style="color:#00f0b5;font-weight:bold;">$0.00</span></p>
-                <p style="font-size:14px;margin-bottom:8px;">Utilizadores indicados: <span id="affCount" style="color:#00f0b5;font-weight:bold;">0</span></p>
-                <div id="affListContainer" style="display:none;">
-                    <p style="font-size:12px;color:#62748c;margin-bottom:5px;">Lista de referidos:</p>
-                    <ul id="affList" style="list-style:none;padding-left:0;margin:0;"></ul>
-                </div>
             </div>
         </div>
 
+        <div id="affiliate-section" class="hidden">
+            <div class="card"><div class="card-title">🔗 SEU LINK</div><div class="lc"><input type="text" id="refLink" readonly value="Carregando..."><button class="bsm" onclick="cpLink()">📋</button></div><div class="sg" style="margin-top:15px"><div><div class="sv2" id="refCnt">0</div><div class="sl">Indicações</div></div><div><div class="sv2" id="refCom">$0</div><div class="sl">Comissão</div></div></div></div>
+            <div class="card"><div class="card-title">💰 MEUS GANHOS</div><p style="font-size:14px;margin-bottom:8px;">Total ganho: <span id="affEarnings" style="color:#00f0b5;font-weight:bold;">$0.00</span></p><p style="font-size:14px;margin-bottom:8px;">Utilizadores indicados: <span id="affCount" style="color:#00f0b5;font-weight:bold;">0</span></p><div id="affListContainer" style="display:none;"><p style="font-size:12px;color:#62748c;margin-bottom:5px;">Lista de referidos:</p><ul id="affList" style="list-style:none;padding-left:0;margin:0;"></ul></div></div>
+        </div>
+
         <div id="payment-section" class="hidden">
-            <div class="card">
-                <div class="card-title">💰 DEPOSITAR</div>
-                <input type="number" id="depAmt" placeholder="Valor" min="10" class="ai">
-                <select id="depMeth" class="bsm" style="width:100%"><option value="cryptocurrency">💎 Criptomoedas</option><option value="bank_transfer">🏦 Transferência</option></select>
-                <button class="bp mt2" onclick="doDeposit()">DEPOSITAR</button>
-            </div>
-            <div class="card">
-                <div class="card-title">💸 SACAR</div>
-                <input type="number" id="wdAmt" placeholder="Valor" min="10" class="ai">
-                <select id="wdMeth" class="bsm" style="width:100%"><option value="cryptocurrency">💎 Criptomoedas</option><option value="bank_transfer">🏦 Transferência</option></select>
-                <button class="bp mt2" onclick="doWithdraw()">SACAR</button>
-            </div>
+            <div class="card"><div class="card-title">💰 DEPOSITAR</div><input type="number" id="depAmt" placeholder="Valor" min="10" class="ai"><select id="depMeth" class="bsm" style="width:100%"><option value="cryptocurrency">💎 Criptomoedas</option><option value="bank_transfer">🏦 Transferência</option></select><button class="bp mt2" onclick="doDeposit()">DEPOSITAR</button></div>
+            <div class="card"><div class="card-title">💸 SACAR</div><input type="number" id="wdAmt" placeholder="Valor" min="10" class="ai"><select id="wdMeth" class="bsm" style="width:100%"><option value="cryptocurrency">💎 Criptomoedas</option><option value="bank_transfer">🏦 Transferência</option></select><button class="bp mt2" onclick="doWithdraw()">SACAR</button></div>
         </div>
 
         <div id="settings-section" class="hidden">
             <div class="card">
-                <div class="card-title" style="cursor:pointer" onclick="toggleAccountMenu()">
-                    🏦 CONTA <span id="accArrow" style="float:right;transition:transform 0.3s">▼</span>
-                </div>
+                <div class="card-title" style="cursor:pointer" onclick="toggleAccountMenu()">🏦 CONTA <span id="accArrow" style="float:right;transition:transform 0.3s">▼</span></div>
                 <div id="accountMenu" style="display:none;margin-top:12px;">
                     <button id="btnDemo" class="ab active" onclick="selAcct('demo')">🎮 DEMO</button>
                     <button id="btnReal" class="ab" onclick="selAcct('real')">💰 REAL</button>
                 </div>
                 <div id="accInfo" style="text-align:center;font-size:11px;color:#62748c;margin-top:6px"></div>
+                <div id="tokStatus" class="token-status" style="text-align:center;"></div>
             </div>
-
-            <div class="card">
-                <div class="card-title">📋 ÚLTIMOS TRADES (LUCRO / PERDA)</div>
-                <div id="tradesSummary" style="max-height:180px;overflow-y:auto;">
-                    <div style="text-align:center;color:#62748c;padding:10px;">Nenhum trade</div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-title">🔑 TOKEN DERIV</div>
-                <input type="password" id="tokIn" placeholder="Cole seu token aqui" class="ai">
-                <button class="bp" onclick="saveTok()">💾 SALVAR</button>
-                <div id="tokSt" style="font-size:11px;color:#ffaa00;margin-top:6px"></div>
-            </div>
-
-            <div class="card">
-                <div class="card-title">📊 ESTATÍSTICAS</div>
-                <div class="sg">
-                    <div><div class="sv2" id="totTr">0</div><div class="sl">Trades</div></div>
-                    <div><div class="sv2" id="wr">0%</div><div class="sl">Win Rate</div></div>
-                    <div><div class="sv2" id="pl">$0</div><div class="sl">P/L</div></div>
-                    <div><div class="sv2" id="ret">0%</div><div class="sl">Retorno</div></div>
-                </div>
-            </div>
-
+            <div class="card"><div class="card-title">📋 ÚLTIMOS TRADES (LUCRO / PERDA)</div><div id="tradesSummary" style="max-height:180px;overflow-y:auto;"><div style="text-align:center;color:#62748c;padding:10px;">Nenhum trade</div></div></div>
+            <div class="card"><div class="card-title">🔑 TOKEN DERIV</div><input type="password" id="tokIn" placeholder="Cole seu token aqui" class="ai"><button class="bp" onclick="saveTok()">💾 SALVAR</button><div id="tokSt" style="font-size:11px;color:#ffaa00;margin-top:6px"></div></div>
+            <div class="card"><div class="card-title">📊 ESTATÍSTICAS</div><div class="sg"><div><div class="sv2" id="totTr">0</div><div class="sl">Trades</div></div><div><div class="sv2" id="wr">0%</div><div class="sl">Win Rate</div></div><div><div class="sv2" id="pl">$0</div><div class="sl">P/L</div></div><div><div class="sv2" id="ret">0%</div><div class="sl">Retorno</div></div></div></div>
             <div class="card"><div class="card-title">🔐 SEGURANÇA</div><button class="bs" onclick="showFP()">Esqueci a senha</button></div>
         </div>
 
-        <div id="admin-section" class="hidden">
-            <div class="card"><div class="card-title">👑 UTILIZADORES</div><div id="admList"><div style="text-align:center;padding:20px">Carregando...</div></div></div>
-        </div>
+        <div id="admin-section" class="hidden"><div class="card"><div class="card-title">👑 UTILIZADORES</div><div id="admList"><div style="text-align:center;padding:20px">Carregando...</div></div></div></div>
 
-        <div class="card">
-            <div class="card-title"><span>📋 ÚLTIMOS TRADES</span><button class="bch" onclick="clrHist()">🗑️ LIMPAR</button></div>
-            <div id="trList"><div style="text-align:center;color:#62748c;padding:20px">Nenhum trade</div></div>
-        </div>
-
-    </div><!-- container -->
-
-    <div id="authModal" class="modal">
-        <div class="mbox">
-            <h2 style="color:#00f0b5;text-align:center;margin-bottom:16px">FOLOMA</h2>
-            <div style="display:flex;gap:8px;margin-bottom:16px">
-                <button class="bsm" style="flex:1" onclick="showTab('login')">ENTRAR</button>
-                <button class="bsm" style="flex:1" onclick="showTab('register')">REGISTAR</button>
-                <button class="bsm" style="flex:1" onclick="showFP()">RECUPERAR</button>
-            </div>
-            <div id="loginForm">
-                <input type="email" id="lEmail" placeholder="Email">
-                <input type="password" id="lPass" placeholder="Senha">
-                <button class="bp" onclick="doLogin()">ENTRAR</button>
-            </div>
-            <div id="registerForm" style="display:none">
-                <input type="text" id="rName" placeholder="Nome">
-                <input type="email" id="rEmail" placeholder="Email">
-                <input type="password" id="rPass" placeholder="Senha (min 6)">
-                <input type="text" id="rRef" placeholder="Código de indicação">
-                <button class="bp" onclick="doRegister()">CRIAR CONTA</button>
-            </div>
-            <div id="forgotForm" style="display:none">
-                <input type="email" id="fEmail" placeholder="Email">
-                <button class="bp" onclick="doReset()">ENVIAR LINK</button>
-                <div id="fMsg" style="text-align:center;margin-top:8px;color:#ffaa00;font-size:12px"></div>
-            </div>
-            <div id="authErr" style="text-align:center;margin-top:8px;color:#ff4d4d;font-size:12px"></div>
-        </div>
+        <div class="card"><div class="card-title"><span>📋 ÚLTIMOS TRADES</span><button class="bch" onclick="clrHist()">🗑️ LIMPAR</button></div><div id="trList"><div style="text-align:center;color:#62748c;padding:20px">Nenhum trade</div></div></div>
     </div>
 
+    <div id="authModal" class="modal"><div class="mbox"><h2 style="color:#00f0b5;text-align:center;margin-bottom:16px">FOLOMA</h2><div style="display:flex;gap:8px;margin-bottom:16px"><button class="bsm" style="flex:1" onclick="showTab('login')">ENTRAR</button><button class="bsm" style="flex:1" onclick="showTab('register')">REGISTAR</button><button class="bsm" style="flex:1" onclick="showFP()">RECUPERAR</button></div><div id="loginForm"><input type="email" id="lEmail" placeholder="Email"><input type="password" id="lPass" placeholder="Senha"><button class="bp" onclick="doLogin()">ENTRAR</button></div><div id="registerForm" style="display:none"><input type="text" id="rName" placeholder="Nome"><input type="email" id="rEmail" placeholder="Email"><input type="password" id="rPass" placeholder="Senha (min 6)"><input type="text" id="rRef" placeholder="Código de indicação"><button class="bp" onclick="doRegister()">CRIAR CONTA</button></div><div id="forgotForm" style="display:none"><input type="email" id="fEmail" placeholder="Email"><button class="bp" onclick="doReset()">ENVIAR LINK</button><div id="fMsg" style="text-align:center;margin-top:8px;color:#ffaa00;font-size:12px"></div></div><div id="authErr" style="text-align:center;margin-top:8px;color:#ff4d4d;font-size:12px"></div></div></div>
+
     <script>
-        // ── Estado ────────────────────────────────────────────────
-        let selectedAcct = 'demo',
-            paused = false,
-            isConn = false,
-            curSym = 'R_100',
-            modo = 'ativos';
-        let lastTradeCount = 0;
-        let lastDigitCount = 0;
-        let lastDigitCounter = 0;
-        const syms = { 'R_100': 'Volatility 100', 'R_75': 'Volatility 75', 'R_50': 'Volatility 50' };
+        let selectedAcct='demo', paused=false, isConn=false, curSym='R_100', modo='ativos';
+        let lastTradeCount=0, lastDigitCount=0, lastDigitCounter=0;
+        const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
-        // ── Captura de erros global ───────────────────────────────
-        window.onerror = function(msg, url, line, col, error) {
-            alert("Erro no script: " + msg + "\nLinha: " + line);
-            return false;
-        };
+        window.onerror = function(msg, url, line, col, error) { alert("Erro: " + msg + " (linha " + line + ")"); return false; };
 
-        // ── Toast ─────────────────────────────────────────────────
-        function toast(msg, type = 'info', ms = 4000) {
-            try {
-                const t = document.getElementById('toast');
-                t.className = 'toast show ' + type;
-                t.innerHTML = msg;
-                clearTimeout(t._t);
-                t._t = setTimeout(() => t.className = 'toast', ms);
-            } catch(e) { console.error(e); }
+        function toast(msg,type='info',ms=4000){try{const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',ms);}catch(e){console.error(e);}}
+        function toggleMenu(){document.getElementById('sideMenu').classList.toggle('open');document.getElementById('overlay').classList.toggle('show');}
+        function showSec(s){['dashboard','affiliate','payment','settings','admin'].forEach(x=>document.getElementById(x+'-section').classList.add('hidden'));document.getElementById(s+'-section').classList.remove('hidden');toggleMenu();if(s==='affiliate'){loadAffiliate();loadAffiliateEarnings();}if(s==='admin')loadAdmin();}
+        function setModo(m){modo=m;['ativos','digitos','hybrid'].forEach(x=>document.getElementById('mode'+x[0].toUpperCase()+x.slice(1)).classList.toggle('active',x===m));document.getElementById('pAtivos').classList.toggle('hidden',m==='digitos');document.getElementById('pDigitos').classList.toggle('hidden',m!=='digitos');document.getElementById('pTrade').classList.toggle('hidden',m==='digitos');document.getElementById('hybSt').classList.toggle('hidden',m!=='hybrid');}
+
+        function toggleAccountMenu(){const menu=document.getElementById('accountMenu');const arrow=document.getElementById('accArrow');const isOpen=menu.style.display==='block';menu.style.display=isOpen?'none':'block';arrow.style.transform=isOpen?'rotate(0deg)':'rotate(180deg)';}
+        function selAcct(a){
+            selectedAcct=a;
+            document.getElementById('btnDemo').classList.toggle('active',a==='demo');
+            document.getElementById('btnReal').classList.toggle('active',a==='real');
+            document.getElementById('accInfo').innerHTML = a==='demo'?'🎮 Demo — saldo virtual':'💰 Real — comissão 0.5%';
+            document.getElementById('accountMenu').style.display='none';
+            document.getElementById('accArrow').style.transform='rotate(0deg)';
+            // Mostrar estado do token para esta conta
+            updateTokenStatus();
+        }
+        function updateTokenStatus(){
+            // Esta função será melhorada quando o servidor puder informar qual token está guardado
+            const statusEl = document.getElementById('tokStatus');
+            if(!statusEl) return;
+            statusEl.innerHTML = '🔑 Token ' + (selectedAcct==='demo'?'Demo':'Real') + ': verifique em Configurações';
         }
 
-        // ── Menu ──────────────────────────────────────────────────
-        function toggleMenu() {
-            document.getElementById('sideMenu').classList.toggle('open');
-            document.getElementById('overlay').classList.toggle('show');
-        }
-
-        function showSec(s) {
-            ['dashboard', 'affiliate', 'payment', 'settings', 'admin'].forEach(x =>
-                document.getElementById(x + '-section').classList.add('hidden'));
-            document.getElementById(s + '-section').classList.remove('hidden');
-            toggleMenu();
-            if (s === 'affiliate') { loadAffiliate();
-                loadAffiliateEarnings(); }
-            if (s === 'admin') loadAdmin();
-        }
-
-        function setModo(m) {
-            modo = m;
-            ['ativos', 'digitos', 'hybrid'].forEach(x =>
-                document.getElementById('mode' + x[0].toUpperCase() + x.slice(1)).classList.toggle('active', x === m));
-            document.getElementById('pAtivos').classList.toggle('hidden', m === 'digitos');
-            document.getElementById('pDigitos').classList.toggle('hidden', m !== 'digitos');
-            document.getElementById('pTrade').classList.toggle('hidden', m === 'digitos');
-            document.getElementById('hybSt').classList.toggle('hidden', m !== 'hybrid');
-        }
-
-        // ── Conta colapsável ─────────────────────────────────────
-        function toggleAccountMenu() {
-            const menu = document.getElementById('accountMenu');
-            const arrow = document.getElementById('accArrow');
-            const isOpen = menu.style.display === 'block';
-            menu.style.display = isOpen ? 'none' : 'block';
-            arrow.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
-        }
-
-        function selAcct(a) {
-            selectedAcct = a;
-            document.getElementById('btnDemo').classList.toggle('active', a === 'demo');
-            document.getElementById('btnReal').classList.toggle('active', a === 'real');
-            document.getElementById('accInfo').innerHTML = a === 'demo' ? '🎮 Demo — saldo virtual' : '💰 Real — comissão 0.5%';
-            document.getElementById('accountMenu').style.display = 'none';
-            document.getElementById('accArrow').style.transform = 'rotate(0deg)';
-        }
-
-        // ── Painel de dígitos ─────────────────────────────────────
-        function updateDigits(digits) {
-            try {
-                if (!digits) return;
-                const tpd = digits.ticks_per_digit || 10;
-                const tr = Math.max(0, Math.round(digits.ticks_remaining || tpd));
-                const pct = Math.min(100, (tr / tpd) * 100);
-                const bar = document.getElementById('tBar');
-                bar.style.width = pct + '%';
-                bar.style.background = tr <= 2 ? '#ff4d4d' : (tr <= 4 ? '#ffaa00' : '#00f0b5');
-                document.getElementById('cdown').textContent = `⏱ ${tr} tick${tr!==1?'s':''} para o próximo dígito`;
-                document.getElementById('nearWarn').style.display = tr <= 2 ? 'block' : 'none';
-
-                const recent = digits.recent || [];
-                const counter = digits.digit_counter || 0;
-                if (recent.length > 0 && (recent.length !== lastDigitCount || counter !== lastDigitCounter)) {
-                    lastDigitCount = recent.length;
-                    lastDigitCounter = counter;
-                    const newest = recent[recent.length - 1];
-                    const isOdd = newest % 2 !== 0;
-                    const bd = document.getElementById('bigD');
-                    const bp = document.getElementById('bigP');
-                    bd.textContent = newest;
-                    bd.className = 'big-d ' + (isOdd ? 'odd' : 'even');
-                    bp.textContent = isOdd ? 'ÍMPAR' : 'PAR';
-                    bp.className = 'big-p ' + (isOdd ? 'odd' : 'even');
-                    bd.style.transform = 'scale(1.3)';
-                    setTimeout(() => bd.style.transform = 'scale(1)', 220);
-
-                    let html = '';
-                    recent.forEach((d, i) => {
-                        const o = d % 2 !== 0;
-                        const neo = i === recent.length - 1;
-                        html += `<div class="dbox ${o?'odd':'even'}${neo?' new':''}">${d}</div>`;
-                    });
-                    const row = document.getElementById('histRow');
-                    row.innerHTML = html || '<div style="color:#62748c;font-size:12px;padding:8px">Aguardando...</div>';
-                    const scroll = document.getElementById('histScroll');
-                    setTimeout(() => { scroll.scrollLeft = row.scrollWidth; }, 60);
-                    document.getElementById('histInfo').textContent = `${recent.length} dígito${recent.length!==1?'s':''}`;
+        function updateDigits(digits){
+            try{
+                if(!digits)return;
+                const tpd=digits.ticks_per_digit||10, tr=Math.max(0,Math.round(digits.ticks_remaining||tpd));
+                const bar=document.getElementById('tBar');bar.style.width=Math.min(100,(tr/tpd)*100)+'%';
+                bar.style.background=tr<=2?'#ff4d4d':(tr<=4?'#ffaa00':'#00f0b5');
+                document.getElementById('cdown').textContent=`⏱ ${tr} tick${tr!==1?'s':''} para o próximo dígito`;
+                document.getElementById('nearWarn').style.display=tr<=2?'block':'none';
+                const recent=digits.recent||[], counter=digits.digit_counter||0;
+                if(recent.length>0 && (recent.length!==lastDigitCount || counter!==lastDigitCounter)){
+                    lastDigitCount=recent.length; lastDigitCounter=counter;
+                    const newest=recent[recent.length-1], isOdd=newest%2!==0;
+                    const bd=document.getElementById('bigD'), bp=document.getElementById('bigP');
+                    bd.textContent=newest; bd.className='big-d '+(isOdd?'odd':'even');
+                    bp.textContent=isOdd?'ÍMPAR':'PAR'; bp.className='big-p '+(isOdd?'odd':'even');
+                    bd.style.transform='scale(1.3)';setTimeout(()=>bd.style.transform='scale(1)',220);
+                    let html='';recent.forEach((d,i)=>{const o=d%2!==0;html+=`<div class="dbox ${o?'odd':'even'}${i===recent.length-1?' new':''}">${d}</div>`});
+                    document.getElementById('histRow').innerHTML=html||'<div style="color:#62748c;font-size:12px;padding:8px">Aguardando...</div>';
+                    document.getElementById('histScroll').scrollLeft=document.getElementById('histRow').scrollWidth;
+                    document.getElementById('histInfo').textContent=`${recent.length} dígito${recent.length!==1?'s':''}`;
                 }
-                document.getElementById('totD').textContent = digits.total || recent.length || 0;
-
-                const a = digits.analysis || {};
-                const stk = a.streak || 0, sp = a.streak_parity || '---';
-                const sv = document.getElementById('stkV');
-                sv.textContent = stk > 0 ? stk : '—';
-                sv.className = 'sv ' + (stk === 0 ? 'none' : sp === 'PAR' ? 'even' : 'odd');
-                document.getElementById('stkL').textContent = stk > 0 ? `${sp} consecutivo${stk>1?'s':''}` : 'aguardando...';
-
-                const sm = document.getElementById('sigMain'), st = document.getElementById('sigTxt');
-                if (a.recommended_action && a.confidence > 0) {
-                    const isOR = a.recommended_action === 'BUY';
-                    sm.className = 'sm ' + (a.confidence >= 60 ? 'active' : 'warn');
-                    st.innerHTML = `⚡ ${a.reason}<br><span style="font-size:12px;opacity:.85">→ Aposte em <strong>${isOR?'ÍMPAR':'PAR'}</strong></span>`;
-                } else {
-                    sm.className = 'sm none';
-                    st.textContent = a.reason || 'Sem sinal claro.';
-                }
-
-                let sh = '';
-                (a.all_signals || []).forEach(s => {
-                    const lbl = s.action === 'BUY' ? '→ ÍMPAR' : '→ PAR';
-                    const tl = { streak: 'Streak', dominance: 'Dominância', alternating: 'Alternância', imbalance: 'Desequilíbrio' }[s.type] || s.type;
-                    sh += `<div class="si ${s.type}"><span>${tl}</span><span class="sc">${s.confidence}% ${lbl}</span></div>`;
-                });
-                document.getElementById('allSigs').innerHTML = sh;
-                document.getElementById('oddPct').textContent = (a.odd_pct || 0) + '%';
-                document.getElementById('evenPct').textContent = (a.even_pct || 0) + '%';
-                document.getElementById('oddBar').style.width = (a.odd_pct || 50) + '%';
-                document.getElementById('evenBar').style.width = (a.even_pct || 50) + '%';
-            } catch(e) { console.error("updateDigits", e); }
+                document.getElementById('totD').textContent=digits.total||recent.length||0;
+                const a=digits.analysis||{}, stk=a.streak||0, sp=a.streak_parity||'---';
+                const sv=document.getElementById('stkV');sv.textContent=stk>0?stk:'—';sv.className='sv '+(stk===0?'none':sp==='PAR'?'even':'odd');
+                document.getElementById('stkL').textContent=stk>0?`${sp} consecutivo${stk>1?'s':''}`:'aguardando...';
+                const sm=document.getElementById('sigMain'),st2=document.getElementById('sigTxt');
+                if(a.recommended_action&&a.confidence>0){const isOR=a.recommended_action==='BUY';sm.className='sm '+(a.confidence>=60?'active':'warn');st2.innerHTML=`⚡ ${a.reason}<br><span style="font-size:12px;opacity:.85">→ Aposte em <strong>${isOR?'ÍMPAR':'PAR'}</strong></span>`;}
+                else{sm.className='sm none';st2.textContent=a.reason||'Sem sinal claro.';}
+                let sh='';(a.all_signals||[]).forEach(s=>{const lbl=s.action==='BUY'?'→ ÍMPAR':'→ PAR';sh+=`<div class="si ${s.type}"><span>${s.type}</span><span class="sc">${s.confidence}% ${lbl}</span></div>`});
+                document.getElementById('allSigs').innerHTML=sh;
+                document.getElementById('oddPct').textContent=(a.odd_pct||0)+'%';document.getElementById('evenPct').textContent=(a.even_pct||0)+'%';
+                document.getElementById('oddBar').style.width=(a.odd_pct||50)+'%';document.getElementById('evenBar').style.width=(a.even_pct||50)+'%';
+            }catch(e){console.error(e);}
         }
 
-        // ── Actualização geral ────────────────────────────────────
-        function updateAll() {
-            try {
-                fetch('/api/status').then(r => r.json()).then(data => {
-                    if (data.error) return;
-                    const bot = data.bot;
-                    if (!bot) return;
-                    const conn = bot.connected && bot.authorized;
-                    document.getElementById('sDot').className = 'dot' + (conn ? ' on' : '');
-                    document.getElementById('sTxt').textContent = conn ? 'Conectado ✅' : 'Desconectado';
-                    const cb = document.getElementById('conBtn');
-                    if (conn) {
-                        cb.textContent = '✅ CONECTADO';
-                        cb.style.background = '#2a3342';
-                        isConn = true;
-                    } else if (!isConn) {
-                        cb.textContent = '🔌 CONECTAR';
-                        cb.style.background = '#00f0b5';
-                    }
-                    document.getElementById('bal').textContent = (bot.balance || 0).toFixed(2);
-                    document.getElementById('cur').textContent = bot.currency || 'USD';
-                    document.getElementById('priceEl').textContent = (bot.price || 0).toFixed(4);
-                    const sig = bot.signal || 'NEUTRAL';
-                    document.getElementById('sigBadge').textContent = sig;
-                    document.getElementById('sigBadge').className = 'sb ' + sig.toLowerCase();
-                    document.getElementById('sigConf').textContent = (bot.confidence || 0) + '%';
-                    if (bot.analysis) {
-                        const A = bot.analysis;
-                        document.getElementById('trS').textContent = (A.trend?.score || 0).toFixed(1);
-                        document.getElementById('trD').textContent = A.trend?.desc || '---';
-                        document.getElementById('rsS').textContent = (A.rsi?.score || 0).toFixed(1);
-                        document.getElementById('rsD').textContent = A.rsi?.desc || '---';
-                        document.getElementById('mcS').textContent = (A.macd?.score || 0).toFixed(1);
-                        document.getElementById('mcD').textContent = A.macd?.desc || '---';
-                        document.getElementById('bbS').textContent = (A.bollinger?.score || 0).toFixed(1);
-                        document.getElementById('bbD').textContent = A.bollinger?.desc || '---';
-                    }
-                    document.getElementById('totTr').textContent = bot.stats?.total || 0;
-                    document.getElementById('wr').textContent = (bot.stats?.win_rate || 0).toFixed(1) + '%';
-                    const plv = bot.stats?.profit_loss || 0;
-                    const ple = document.getElementById('pl');
-                    ple.textContent = (plv >= 0 ? '+' : '') + '$' + plv.toFixed(2);
-                    ple.style.color = plv >= 0 ? '#00f0b5' : '#ff4d4d';
-                    document.getElementById('ret').textContent = (bot.stats?.total_return || 0).toFixed(1) + '%';
-                    paused = bot.paused || false;
-                    document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR';
-                    if (data.digits) updateDigits(data.digits);
-                    if (modo === 'hybrid' && data.digits) {
-                        const da = data.digits.analysis;
-                        const dr = da?.recommended_action;
-                        const dc = da?.confidence || 0;
-                        let msg = '', color = '#ffaa00';
-                        if (bot.signal === 'BUY' && dr === 'BUY') {
-                            msg = `✅ COMPRA – Conf: ${((bot.confidence+dc)/2).toFixed(1)}%`;
-                            color = '#00f0b5';
-                        } else if (bot.signal === 'SELL' && dr === 'SELL') {
-                            msg = `✅ VENDA – Conf: ${((bot.confidence+dc)/2).toFixed(1)}%`;
-                            color = '#00f0b5';
-                        } else msg = `⚠️ Divergentes (Ativo: ${bot.signal}, Dig: ${dr||'NEUTRO'})`;
-                        document.getElementById('hybSig').innerHTML = msg;
-                        document.getElementById('hybSig').style.color = color;
-                    }
-                }).catch(e => console.error("fetch status", e));
-            } catch(e) { console.error("updateAll", e); }
+        function updateAll(){
+            try{
+                fetch('/api/status').then(r=>r.json()).then(data=>{
+                    if(data.error)return;
+                    const bot=data.bot;if(!bot)return;
+                    const conn=bot.connected&&bot.authorized;
+                    document.getElementById('sDot').className='dot'+(conn?' on':'');document.getElementById('sTxt').textContent=conn?'Conectado ✅':'Desconectado';
+                    const cb=document.getElementById('conBtn');
+                    if(conn){cb.textContent='✅ CONECTADO';cb.style.background='#2a3342';isConn=true;}
+                    else if(!isConn){cb.textContent='🔌 CONECTAR';cb.style.background='#00f0b5';}
+                    document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
+                    document.getElementById('cur').textContent=bot.currency||'USD';
+                    document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
+                    const sig=bot.signal||'NEUTRAL';document.getElementById('sigBadge').textContent=sig;
+                    document.getElementById('sigBadge').className='sb '+sig.toLowerCase();
+                    document.getElementById('sigConf').textContent=(bot.confidence||0)+'%';
+                    if(bot.analysis){const A=bot.analysis;document.getElementById('trS').textContent=(A.trend?.score||0).toFixed(1);document.getElementById('trD').textContent=A.trend?.desc||'---';document.getElementById('rsS').textContent=(A.rsi?.score||0).toFixed(1);document.getElementById('rsD').textContent=A.rsi?.desc||'---';document.getElementById('mcS').textContent=(A.macd?.score||0).toFixed(1);document.getElementById('mcD').textContent=A.macd?.desc||'---';document.getElementById('bbS').textContent=(A.bollinger?.score||0).toFixed(1);document.getElementById('bbD').textContent=A.bollinger?.desc||'---';}
+                    document.getElementById('totTr').textContent=bot.stats?.total||0;
+                    document.getElementById('wr').textContent=(bot.stats?.win_rate||0).toFixed(1)+'%';
+                    const plv=bot.stats?.profit_loss||0;const ple=document.getElementById('pl');
+                    ple.textContent=(plv>=0?'+':'')+'$'+plv.toFixed(2);ple.style.color=plv>=0?'#00f0b5':'#ff4d4d';
+                    document.getElementById('ret').textContent=(bot.stats?.total_return||0).toFixed(1)+'%';
+                    paused=bot.paused||false;document.getElementById('pauseBtn').innerHTML=paused?'▶️ RESUMIR':'⏸️ PAUSAR';
+                    if(data.digits)updateDigits(data.digits);
+                    if(modo==='hybrid'&&data.digits){const da=data.digits.analysis;const dr=da?.recommended_action;const dc=da?.confidence||0;let msg='',color='#ffaa00';if(bot.signal==='BUY'&&dr==='BUY'){msg=`✅ COMPRA – Conf: ${((bot.confidence+dc)/2).toFixed(1)}%`;color='#00f0b5';}else if(bot.signal==='SELL'&&dr==='SELL'){msg=`✅ VENDA – Conf: ${((bot.confidence+dc)/2).toFixed(1)}%`;color='#00f0b5';}else msg=`⚠️ Divergentes (Ativo: ${bot.signal}, Dig: ${dr||'NEUTRO'})`;document.getElementById('hybSig').innerHTML=msg;document.getElementById('hybSig').style.color=color;}
+                }).catch(e=>console.error("fetch status",e));
+            }catch(e){console.error(e);}
         }
 
-        // ── Histórico de trades ─────────────────────────────────
-        function loadHistory() {
-            try {
-                fetch('/api/report').then(r => r.json()).then(data => {
-                    const hist = data.historico || [];
-                    const tl = document.getElementById('trList');
-                    if (!hist.length) {
-                        tl.innerHTML = '<div style="text-align:center;color:#62748c;padding:20px">Nenhum trade</div>';
-                        return;
-                    }
-                    if (hist.length > lastTradeCount && lastTradeCount > 0) {
-                        const last = hist[hist.length - 1];
-                        if (last.result === 'win') toast(`✅ GANHOU! +$${(last.profit||0).toFixed(2)}`, 'win', 6000);
-                        if (last.result === 'loss') toast(`❌ PERDEU -$${(last.amount||0).toFixed(2)}`, 'loss', 6000);
-                    }
-                    lastTradeCount = hist.length;
-                    let html = '';
-                    hist.slice(-15).reverse().forEach(t => {
-                        const isW = t.result === 'win', isL = t.result === 'loss';
-                        const amt = t.amount || 0;
-                        const profit = isW ? (t.profit || amt * 0.85) : (isL ? -amt : 0);
-                        const color = isW ? '#00f0b5' : (isL ? '#ff4d4d' : '#ffaa00');
-                        const res = isW ? `✅ +$${profit.toFixed(2)}` : (isL ? `❌ -$${amt.toFixed(2)}` : '⏳');
-                        let action = t.action || '';
-                        if (action === 'DIGITODD') action = '🎲 ÍMPAR';
-                        else if (action === 'DIGITEVEN') action = '🎲 PAR';
-                        else if (action === 'CALL') action = '📈 COMPRA';
-                        else if (action === 'PUT') action = '📉 VENDA';
-                        html += `<div style="display:grid;grid-template-columns:80px 1fr 55px 90px;gap:4px;padding:8px 0;border-bottom:1px solid #2a3342;font-size:12px;align-items:center">
-                            <span style="color:#62748c;font-size:10px">${t.time?.slice(5,16)||'---'}</span>
-                            <span>${action}</span><span>$${amt.toFixed(2)}</span>
-                            <span style="color:${color};font-weight:bold">${res}</span></div>`;
-                    });
-                    tl.innerHTML = html;
-                    updateTradeSummary(hist);
-                }).catch(e => console.error("fetch report", e));
-            } catch(e) { console.error("loadHistory", e); }
+        function loadHistory(){
+            fetch('/api/report').then(r=>r.json()).then(data=>{
+                const hist=data.historico||[], tl=document.getElementById('trList');
+                if(!hist.length){tl.innerHTML='<div style="text-align:center;color:#62748c;padding:20px">Nenhum trade</div>';return;}
+                if(hist.length>lastTradeCount&&lastTradeCount>0){const last=hist[hist.length-1];if(last.result==='win')toast(`✅ GANHOU! +$${(last.profit||0).toFixed(2)}`,'win',6000);if(last.result==='loss')toast(`❌ PERDEU -$${(last.amount||0).toFixed(2)}`,'loss',6000);}
+                lastTradeCount=hist.length;
+                let html='';hist.slice(-15).reverse().forEach(t=>{const isW=t.result==='win',isL=t.result==='loss';const amt=t.amount||0;const profit=isW?(t.profit||amt*0.85):(isL?-amt:0);const color=isW?'#00f0b5':(isL?'#ff4d4d':'#ffaa00');const res=isW?`✅ +$${profit.toFixed(2)}`:(isL?`❌ -$${amt.toFixed(2)}`:'⏳');let action=t.action||'';if(action==='CALL')action='📈 COMPRA';else if(action==='PUT')action='📉 VENDA';else if(action==='DIGITODD')action='🎲 ÍMPAR';else if(action==='DIGITEVEN')action='🎲 PAR';html+=`<div style="display:grid;grid-template-columns:80px 1fr 55px 90px;gap:4px;padding:8px 0;border-bottom:1px solid #2a3342;font-size:12px;align-items:center"><span style="color:#62748c;font-size:10px">${t.time?.slice(5,16)||'---'}</span><span>${action}</span><span>$${amt.toFixed(2)}</span><span style="color:${color};font-weight:bold">${res}</span></div>`});tl.innerHTML=html;updateTradeSummary(hist);}).catch(e=>console.error(e));
+        }
+        function updateTradeSummary(trades){const container=document.getElementById('tradesSummary');if(!trades||!trades.length){container.innerHTML='<div style="text-align:center;color:#62748c;padding:10px;">Nenhum trade</div>';return;}let html='<div style="display:flex;flex-direction:column;">';trades.slice(-5).reverse().forEach(t=>{const amt=t.amount||0;const profit=t.result==='win'?(t.profit||amt*0.85):(t.result==='loss'?-amt:0);const color=profit>=0?'#00f0b5':'#ff4d4d';const sign=profit>=0?'+':'';let action=t.action||'';if(action==='CALL')action='📈 COMPRA';else if(action==='PUT')action='📉 VENDA';else if(action==='DIGITODD')action='🎲 ÍMPAR';else if(action==='DIGITEVEN')action='🎲 PAR';html+=`<div class="trade-summary-item"><span style="color:#62748c;font-size:10px">${t.time?.slice(5,16)||'---'}</span><span>${action}</span><span class="profit" style="color:${color}">${sign}$${Math.abs(profit).toFixed(2)}</span></div>`});html+='</div>';container.innerHTML=html;}
+
+        function showTab(t){['loginForm','registerForm','forgotForm'].forEach(f=>document.getElementById(f).style.display='none');document.getElementById(t==='login'?'loginForm':t==='register'?'registerForm':'forgotForm').style.display='block';}
+        function showFP(){showTab('forgot');}
+        function doRegister(){const d={name:document.getElementById('rName').value,email:document.getElementById('rEmail').value,password:document.getElementById('rPass').value,referral_code:document.getElementById('rRef').value};fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()).then(d=>{if(d.error)document.getElementById('authErr').textContent=d.error;else{alert('✅ Conta criada!');showTab('login');}});}
+        function doLogin(){const email=document.getElementById('lEmail').value,password=document.getElementById('lPass').value;fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})}).then(r=>r.json()).then(d=>{if(d.error){document.getElementById('authErr').textContent=d.error;return;}document.getElementById('authModal').style.display='none';document.getElementById('mainContent').style.display='block';if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';initPlatform();});}
+        function doReset(){fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('fEmail').value})}).then(r=>r.json()).then(d=>{document.getElementById('fMsg').innerHTML=d.error?'❌ '+d.error:'✅ '+(d.message||'Link enviado!');});}
+        function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload());}
+
+        function initPlatform(){initSyms();selAcct('demo');setModo('ativos');updateAll();loadHistory();setInterval(updateAll,2000);setInterval(loadHistory,3000);setInterval(updMgt,6000);loadAffiliate();}
+        function initSyms(){let h='';for(let[k,v]of Object.entries(syms))h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym(event,'${k}')">${v}</button>`;document.getElementById('symSel').innerHTML=h;}
+        function chgSym(evt,s){if(!s)s=curSym;curSym=s;fetch('/api/symbol/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})});document.querySelectorAll('.sym-btn').forEach(b=>b.classList.remove('active'));if(evt&&evt.target)evt.target.classList.add('active');else document.querySelector(`.sym-btn[onclick*="${s}"]`).classList.add('active');lastDigitCounter=0;}
+        function saveTok(){const t=document.getElementById('tokIn').value;if(!t){alert('Insira o token');return;}fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t,account_type:selectedAcct})}).then(r=>r.json()).then(d=>{if(d.error)alert('❌ '+d.error);else{alert('✅ Token guardado!');document.getElementById('tokSt').innerHTML='✅ Configurado';}});}
+
+        function conectar(){
+            if(isConn){alert('Já conectado!');return;}
+            const btn=document.getElementById('conBtn');btn.disabled=true;btn.textContent='🔄 CONECTANDO...';
+            document.getElementById('conSt').innerHTML='⏳ Conectando...';
+            fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:selectedAcct,symbol:curSym})})
+            .then(r=>r.json()).then(d=>{
+                btn.disabled=false;
+                if(d.error){document.getElementById('conSt').innerHTML='❌ '+d.error;btn.textContent='🔌 CONECTAR';}
+                else{document.getElementById('conSt').innerHTML='✅ Conectado!';setTimeout(()=>document.getElementById('conSt').innerHTML='',3000);btn.textContent='✅ CONECTADO';btn.style.background='#2a3342';isConn=true;}
+            }).catch(err=>{btn.disabled=false;document.getElementById('conSt').innerHTML='❌ Erro de rede';btn.textContent='🔌 CONECTAR';alert("Erro ao conectar: "+err.message);});
         }
 
-        function updateTradeSummary(trades) {
-            try {
-                const container = document.getElementById('tradesSummary');
-                if (!trades || trades.length === 0) {
-                    container.innerHTML = '<div style="text-align:center;color:#62748c;padding:10px;">Nenhum trade</div>';
-                    return;
-                }
-                let html = '<div style="display:flex;flex-direction:column;">';
-                trades.slice(-5).reverse().forEach(t => {
-                    const amt = t.amount || 0;
-                    const profit = t.result === 'win' ? (t.profit || amt * 0.85) : (t.result === 'loss' ? -amt : 0);
-                    const color = profit >= 0 ? '#00f0b5' : '#ff4d4d';
-                    const sign = profit >= 0 ? '+' : '';
-                    let action = t.action || '';
-                    if (action === 'CALL') action = '📈 COMPRA';
-                    else if (action === 'PUT') action = '📉 VENDA';
-                    else if (action === 'DIGITODD') action = '🎲 ÍMPAR';
-                    else if (action === 'DIGITEVEN') action = '🎲 PAR';
-                    html += `<div class="trade-summary-item">
-                        <span style="color:#62748c;font-size:10px">${t.time?.slice(5,16)||'---'}</span>
-                        <span>${action}</span>
-                        <span class="profit" style="color:${color}">${sign}$${Math.abs(profit).toFixed(2)}</span>
-                    </div>`;
-                });
-                html += '</div>';
-                container.innerHTML = html;
-            } catch(e) { console.error(e); }
-        }
+        function trade(action){const amt=parseFloat(document.getElementById('amt').value);if(amt<0.35||amt>100){alert('Valor entre $0.35 e $100');return;}const isMan=document.getElementById('manMode').checked;const url=isMan?'/api/trade/manual':(modo==='hybrid'?'/api/trade/hybrid':'/api/trade');fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,amount:amt})}).then(r=>r.json()).then(d=>{if(d.error)toast('❌ '+d.error,'loss');else toast('⏳ Trade enviado!','info');});}
+        function tradeDigit(pred){const amt=parseFloat(document.getElementById('amtDig').value||'0.35');if(amt<0.35||amt>100){alert('Valor entre $0.35 e $100');return;}const label=pred==='odd'?'ÍMPAR':'PAR';fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})}).then(r=>r.json()).then(d=>{if(d.error){toast('❌ '+d.error,'loss',4000);}else{const tr=d.ticks_remaining||10;toast(`⏳ $${amt.toFixed(2)} em ${label} → resultado em ~${tr} ticks`,'info',5000);setTimeout(loadHistory,3000);setTimeout(loadHistory,8000);setTimeout(loadHistory,14000);}});}
+        function togglePause(){paused=!paused;fetch('/api/pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused})});document.getElementById('pauseBtn').innerHTML=paused?'▶️ RESUMIR':'⏸️ PAUSAR';}
+        function mgt(fid){fetch('/api/report').then(r=>r.json()).then(data=>{const h=data.historico||[];if(!h.length){alert('⚠️ Nenhum trade anterior');return;}const last=h[h.length-1];if(last.result==='win'){alert('✅ Último GANHO. Martingale só após perda.');return;}if(confirm(`⚠️ Último PERDA $${last.amount}\nMartingale (2x)?`)){fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:last.amount})}).then(r=>r.json()).then(d=>{if(d.error)alert('❌ '+d.error);else{alert(d.martingale.message);document.getElementById(fid).value=d.martingale.next_amount.toFixed(2);updMgt();}});}});}
+        function rstMgt(){if(confirm('Resetar Martingale?')){fetch('/api/martingale/reset',{method:'POST'}).then(()=>{alert('✅ Resetado!');['amt','amtDig'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='0.35';});updMgt();});}}
+        function updMgt(){fetch('/api/martingale/status').then(r=>r.json()).then(d=>{const txt=d.active?`ATIVO (${d.step}/${d.max_steps})`:'DESATIVADO';const c=d.active?'#00f0b5':'#ffaa00';const nxt='$'+d.next_amount.toFixed(2);['mgtAct','mgtActD'].forEach(id=>{const e=document.getElementById(id);if(e){e.textContent=txt;e.style.color=c;}});['mgtNxt','mgtNxtD'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=nxt;});});}
+        function clrHist(){if(confirm('⚠️ Apagar todo o histórico?')){fetch('/api/clear_history',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json()).then(d=>{if(d.error)alert('❌ '+d.error);else{toast('✅ Apagado!','info');loadHistory();lastTradeCount=0;}});}}
+        function loadAffiliate(){fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{if(d.link)document.getElementById('refLink').value=d.link;}).catch(()=>{});fetch('/api/affiliate/stats').then(r=>r.json()).then(d=>{document.getElementById('refCnt').textContent=d.total_referrals||0;document.getElementById('refCom').textContent='$'+(d.total_commission||0);}).catch(()=>{});loadAffiliateEarnings();}
+        function loadAffiliateEarnings(){fetch('/api/affiliate/earnings').then(r=>r.json()).then(d=>{document.getElementById('affEarnings').textContent='$'+(d.earnings||0).toFixed(2);document.getElementById('affCount').textContent=d.referred_count||0;const list=document.getElementById('affList');list.innerHTML='';const container=document.getElementById('affListContainer');if(d.referred_list&&d.referred_list.length>0){container.style.display='block';d.referred_list.forEach(email=>{const li=document.createElement('li');li.textContent=email;li.style.cssText='padding:4px 0;border-bottom:1px solid #2a3342;font-size:13px;color:#ccc;';list.appendChild(li);});}else{container.style.display='none';}});}
+        function cpLink(){const l=document.getElementById('refLink');l.select();document.execCommand('copy');alert('✅ Copiado!');}
+        function doDeposit(){const amt=parseFloat(document.getElementById('depAmt').value),meth=document.getElementById('depMeth').value;if(!amt||amt<10){alert('Mínimo $10');return;}fetch('/api/payment/deposit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt,currency:'USD',method:meth})}).then(r=>r.json()).then(d=>{if(d.error)alert('❌ '+d.error);else{alert('✅ '+(d.message||'Solicitado!'));document.getElementById('depAmt').value='';}});}
+        function doWithdraw(){const amt=parseFloat(document.getElementById('wdAmt').value),meth=document.getElementById('wdMeth').value;if(!amt||amt<10){alert('Mínimo $10');return;}fetch('/api/payment/withdraw',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt,currency:'USD',method:meth})}).then(r=>r.json()).then(d=>{if(d.error)alert('❌ '+d.error);else{alert('✅ '+(d.message||'Solicitado!'));document.getElementById('wdAmt').value='';}});}
+        function loadAdmin(){fetch('/api/admin/users').then(r=>r.json()).then(data=>{const c=document.getElementById('admList');if(data.error){c.innerHTML='<div style="color:#ff4d4d">Erro.</div>';return;}if(!data.users?.length){c.innerHTML='<div>Nenhum utilizador.</div>';return;}let h='<table class="ut"><tr><th>Email</th><th>Nome</th><th>Status</th><th>Ação</th></tr>';data.users.forEach(u=>{const a=u.active!==false;h+=`<tr><td>${u.email}</td><td>${u.name}</td><td>${a?'✅':'⛔'}</td><td><button class="btgl ${!a?'dis':''}" onclick="tglUser('${u.email}',${!a})">${a?'Desativar':'Ativar'}</button></td></tr>`;});c.innerHTML=h+'</table>';});}
+        function tglUser(email,enable){fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,enable})}).then(r=>r.json()).then(d=>{if(d.error)alert('❌ '+d.error);else{alert('✅ '+d.message);loadAdmin();}});}
 
-        // ── Auth ──────────────────────────────────────────────────
-        function showTab(t) {
-            ['loginForm','registerForm','forgotForm'].forEach(f => document.getElementById(f).style.display = 'none');
-            document.getElementById(t==='login'?'loginForm':t==='register'?'registerForm':'forgotForm').style.display = 'block';
-        }
-        function showFP() { showTab('forgot'); }
-        function doRegister() {
-            const d = {
-                name: document.getElementById('rName').value,
-                email: document.getElementById('rEmail').value,
-                password: document.getElementById('rPass').value,
-                referral_code: document.getElementById('rRef').value
-            };
-            fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
-                .then(r => r.json()).then(d => {
-                    if (d.error) document.getElementById('authErr').textContent = d.error;
-                    else { alert('✅ Conta criada!'); showTab('login'); }
-                });
-        }
-        function doLogin() {
-            const email = document.getElementById('lEmail').value, password = document.getElementById('lPass').value;
-            fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
-                .then(r => r.json()).then(d => {
-                    if (d.error) { document.getElementById('authErr').textContent = d.error; return; }
-                    document.getElementById('authModal').style.display = 'none';
-                    document.getElementById('mainContent').style.display = 'block';
-                    if (d.user?.role === 'admin') document.getElementById('adminMI').style.display = 'block';
-                    initPlatform();
-                });
-        }
-        function doReset() {
-            fetch('/api/auth/reset-password', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('fEmail').value})})
-                .then(r => r.json()).then(d => { document.getElementById('fMsg').innerHTML = d.error ? '❌ '+d.error : '✅ '+(d.message||'Link enviado!'); });
-        }
-        function doLogout() { fetch('/api/auth/logout', {method:'POST'}).then(() => location.reload()); }
-
-        // ── Plataforma ────────────────────────────────────────────
-        function initPlatform() {
-            initSyms();
-            selAcct('demo');
-            setModo('ativos');
-            updateAll();
-            loadHistory();
-            setInterval(updateAll, 2000);
-            setInterval(loadHistory, 3000);
-            setInterval(updMgt, 6000);
-            loadAffiliate();
-        }
-        function initSyms() {
-            let h = '';
-            for (let [k,v] of Object.entries(syms)) h += `<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym(event, '${k}')">${v}</button>`;
-            document.getElementById('symSel').innerHTML = h;
-        }
-        function chgSym(evt, s) {
-            if (!s) s = curSym;
-            curSym = s;
-            fetch('/api/symbol/change', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})});
-            document.querySelectorAll('.sym-btn').forEach(b => b.classList.remove('active'));
-            if (evt && evt.target) evt.target.classList.add('active');
-            else document.querySelector(`.sym-btn[onclick*="${s}"]`).classList.add('active');
-            lastDigitCounter = 0;
-        }
-        function saveTok() {
-            const t = document.getElementById('tokIn').value;
-            if (!t) { alert('Insira o token'); return; }
-            fetch('/api/auth/save_token', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t,account_type:selectedAcct})})
-                .then(r => r.json()).then(d => {
-                    if (d.error) alert('❌ '+d.error);
-                    else { alert('✅ Token guardado!'); document.getElementById('tokSt').innerHTML = '✅ Configurado'; }
-                });
-        }
-        function conectar() {
-            if (isConn) { alert('Já conectado!'); return; }
-            const btn = document.getElementById('conBtn');
-            btn.disabled = true; btn.textContent = '🔄 CONECTANDO...';
-            document.getElementById('conSt').innerHTML = '⏳ Conectando...';
-            fetch('/api/connect', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:selectedAcct,symbol:curSym})})
-                .then(r => r.json()).then(d => {
-                    btn.disabled = false;
-                    if (d.error) { document.getElementById('conSt').innerHTML = '❌ '+d.error; btn.textContent = '🔌 CONECTAR'; }
-                    else { document.getElementById('conSt').innerHTML = '✅ Conectado!'; setTimeout(() => document.getElementById('conSt').innerHTML = '', 3000); btn.textContent = '✅ CONECTADO'; btn.style.background = '#2a3342'; isConn = true; }
-                });
-        }
-
-        // ── Trades ────────────────────────────────────────────────
-        function trade(action) {
-            const amt = parseFloat(document.getElementById('amt').value);
-            if (amt < 0.35 || amt > 100) { alert('Valor entre $0.35 e $100'); return; }
-            const isMan = document.getElementById('manMode').checked;
-            const url = isMan ? '/api/trade/manual' : (modo === 'hybrid' ? '/api/trade/hybrid' : '/api/trade');
-            fetch(url, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,amount:amt})})
-                .then(r => r.json()).then(d => { if (d.error) toast('❌ '+d.error,'loss'); else toast('⏳ '+(d.message||'Trade enviado!'),'info',3000); });
-        }
-        function tradeDigit(pred) {
-            const amt = parseFloat(document.getElementById('amtDig').value || '0.35');
-            if (amt < 0.35 || amt > 100) { alert('Valor entre $0.35 e $100'); return; }
-            const label = pred === 'odd' ? 'ÍMPAR' : 'PAR';
-            fetch('/api/trade/digit', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
-                .then(r => r.json()).then(d => {
-                    if (d.error) { toast('❌ '+d.error,'loss',4000); }
-                    else {
-                        const tr = d.ticks_remaining || 10;
-                        toast(`⏳ $${amt.toFixed(2)} em ${label} → resultado em ~${tr} ticks`,'info',5000);
-                        setTimeout(loadHistory, 3000);
-                        setTimeout(loadHistory, 8000);
-                        setTimeout(loadHistory, 14000);
-                    }
-                });
-        }
-        function togglePause() { paused = !paused; fetch('/api/pause', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused})}); document.getElementById('pauseBtn').innerHTML = paused ? '▶️ RESUMIR' : '⏸️ PAUSAR'; }
-        function mgt(fid) {
-            fetch('/api/report').then(r => r.json()).then(data => {
-                const h = data.historico || [];
-                if (!h.length) { alert('⚠️ Nenhum trade anterior'); return; }
-                const last = h[h.length - 1];
-                if (last.result === 'win') { alert('✅ Último GANHO. Martingale só após perda.'); return; }
-                if (confirm(`⚠️ Último PERDA $${last.amount}\nMartingale (2x)?`)) {
-                    fetch('/api/martingale/apply', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:last.amount})})
-                        .then(r => r.json()).then(d => { if (d.error) alert('❌ '+d.error); else { alert(d.martingale.message); document.getElementById(fid).value = d.martingale.next_amount.toFixed(2); updMgt(); } });
-                }
-            });
-        }
-        function rstMgt() {
-            if (confirm('Resetar Martingale?')) {
-                fetch('/api/martingale/reset', {method:'POST'}).then(() => {
-                    alert('✅ Resetado!');
-                    ['amt','amtDig'].forEach(id => { const e = document.getElementById(id); if (e) e.value = '0.35'; });
-                    updMgt();
-                });
-            }
-        }
-        function updMgt() {
-            fetch('/api/martingale/status').then(r => r.json()).then(d => {
-                const txt = d.active ? `ATIVO (${d.step}/${d.max_steps})` : 'DESATIVADO';
-                const c = d.active ? '#00f0b5' : '#ffaa00';
-                const nxt = '$' + d.next_amount.toFixed(2);
-                ['mgtAct','mgtActD'].forEach(id => { const e = document.getElementById(id); if (e) { e.textContent = txt; e.style.color = c; } });
-                ['mgtNxt','mgtNxtD'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = nxt; });
-            });
-        }
-        function clrHist() {
-            if (confirm('⚠️ Apagar todo o histórico?')) {
-                fetch('/api/clear_history', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-                    .then(r => r.json()).then(d => { if (d.error) alert('❌ '+d.error); else { toast('✅ Apagado!','info'); loadHistory(); lastTradeCount = 0; } });
-            }
-        }
-        function loadAffiliate() {
-            fetch('/api/affiliate/link').then(r => r.json()).then(d => { if (d.link) document.getElementById('refLink').value = d.link; }).catch(() => {});
-            fetch('/api/affiliate/stats').then(r => r.json()).then(d => { document.getElementById('refCnt').textContent = d.total_referrals||0; document.getElementById('refCom').textContent = '$'+(d.total_commission||0); }).catch(() => {});
-            loadAffiliateEarnings();
-        }
-        function loadAffiliateEarnings() {
-            fetch('/api/affiliate/earnings')
-                .then(r => r.json())
-                .then(d => {
-                    document.getElementById('affEarnings').textContent = '$' + (d.earnings || 0).toFixed(2);
-                    document.getElementById('affCount').textContent = d.referred_count || 0;
-                    const list = document.getElementById('affList');
-                    list.innerHTML = '';
-                    const container = document.getElementById('affListContainer');
-                    if (d.referred_list && d.referred_list.length > 0) {
-                        container.style.display = 'block';
-                        d.referred_list.forEach(email => {
-                            const li = document.createElement('li');
-                            li.textContent = email;
-                            li.style.cssText = 'padding:4px 0;border-bottom:1px solid #2a3342;font-size:13px;color:#ccc;';
-                            list.appendChild(li);
-                        });
-                    } else {
-                        container.style.display = 'none';
-                    }
-                });
-        }
-        function cpLink() { const l = document.getElementById('refLink'); l.select(); document.execCommand('copy'); alert('✅ Copiado!'); }
-        function doDeposit() {
-            const amt = parseFloat(document.getElementById('depAmt').value), meth = document.getElementById('depMeth').value;
-            if (!amt || amt < 10) { alert('Mínimo $10'); return; }
-            fetch('/api/payment/deposit', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt,currency:'USD',method:meth})})
-                .then(r => r.json()).then(d => { if (d.error) alert('❌ '+d.error); else { alert('✅ '+(d.message||'Solicitado!')); document.getElementById('depAmt').value = ''; } });
-        }
-        function doWithdraw() {
-            const amt = parseFloat(document.getElementById('wdAmt').value), meth = document.getElementById('wdMeth').value;
-            if (!amt || amt < 10) { alert('Mínimo $10'); return; }
-            fetch('/api/payment/withdraw', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt,currency:'USD',method:meth})})
-                .then(r => r.json()).then(d => { if (d.error) alert('❌ '+d.error); else { alert('✅ '+(d.message||'Solicitado!')); document.getElementById('wdAmt').value = ''; } });
-        }
-        function loadAdmin() {
-            fetch('/api/admin/users').then(r => r.json()).then(data => {
-                const c = document.getElementById('admList');
-                if (data.error) { c.innerHTML = '<div style="color:#ff4d4d">Erro.</div>'; return; }
-                if (!data.users?.length) { c.innerHTML = '<div>Nenhum utilizador.</div>'; return; }
-                let h = '<table class="ut"><tr><th>Email</th><th>Nome</th><th>Status</th><th>Ação</th></tr>';
-                data.users.forEach(u => { const a = u.active !== false; h += `<tr><td>${u.email}</td><td>${u.name}</td><td>${a?'✅':'⛔'}</td><td><button class="btgl ${!a?'dis':''}" onclick="tglUser('${u.email}',${!a})">${a?'Desativar':'Ativar'}</button></td></tr>`; });
-                c.innerHTML = h + '</table>';
-            });
-        }
-        function tglUser(email, enable) {
-            fetch('/api/admin/toggle-user', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,enable})})
-                .then(r => r.json()).then(d => { if (d.error) alert('❌ '+d.error); else { alert('✅ '+d.message); loadAdmin(); } });
-        }
-
-        // ── Arranque ──────────────────────────────────────────────
-        fetch('/api/auth/status').then(r => r.json()).then(data => {
-            if (data.authenticated) {
-                document.getElementById('authModal').style.display = 'none';
-                document.getElementById('mainContent').style.display = 'block';
-                if (data.user?.role === 'admin') document.getElementById('adminMI').style.display = 'block';
-                initPlatform();
-            }
-        });
+        fetch('/api/auth/status').then(r=>r.json()).then(data=>{if(data.authenticated){document.getElementById('authModal').style.display='none';document.getElementById('mainContent').style.display='block';if(data.user?.role==='admin')document.getElementById('adminMI').style.display='block';initPlatform();}});
     </script>
 </body>
 </html>
