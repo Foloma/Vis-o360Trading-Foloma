@@ -470,7 +470,10 @@ def api_connect():
         if not client.authorized:
             return jsonify({'error': 'Autorização falhou. Verifique o token.'}), 500
 
-        client._subscribe_ticks(symbol)
+        # ✅ CORREÇÃO: A subscrição de ticks é feita automaticamente no
+        # deriv_client._on_authorize. NÃO chamamos client._subscribe_ticks aqui
+        # para evitar ordens duplicadas que podem causar desconexão.
+
         sess['trading_bot'].start(client)
 
         return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
@@ -489,6 +492,7 @@ def api_status():
         bot = sess['trading_bot']
         analyzer = sess['digit_analyzer']
 
+        # Sincronizar estado do cliente com o bot
         if client:
             bot.balance = client.balance
             bot.currency = client.currency
