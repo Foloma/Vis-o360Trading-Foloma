@@ -10,7 +10,7 @@ class DerivWebSocketClient:
     def __init__(self, config, on_tick_callback=None):
         self.config = config
         self.ws = None
-        self.ws_thread = None          # <--- INICIALIZA A VARIÁVEL AQUI
+        self.ws_thread = None          # <--- atributo sem underscore
         self.connected = False
         self.authorized = False
         self.balance = 0
@@ -46,13 +46,13 @@ class DerivWebSocketClient:
     # ── Conexão Principal ─────────────────────────────────────
     def connect(self):
         """Inicia o loop de conexão numa thread separada."""
-        # Como 'ws_thread' já está inicializada no __init__, podemos verificar
-        if self._ws_thread and self._ws_thread.is_alive():
+        # Agora usa 'ws_thread' (sem underscore)
+        if self.ws_thread and self.ws_thread.is_alive():
             logger.info("Thread de conexão já está em execução")
             return
         self._stop_event.clear()
-        self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
-        self._ws_thread.start()
+        self.ws_thread = threading.Thread(target=self._run_forever, daemon=True)
+        self.ws_thread.start()
         logger.info("🔌 Thread de conexão iniciada")
 
     def _run_forever(self):
