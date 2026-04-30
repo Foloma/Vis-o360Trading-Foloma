@@ -104,7 +104,7 @@
         @keyframes su { from { transform:translateX(-50%) translateY(16px); opacity:0 } to { transform:translateX(-50%) translateY(0); opacity:1 } }
         .trade-summary-item { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #2a3342; font-size:12px; }
         .trade-summary-item .profit { font-weight:bold; }
-        .token-status { font-size:10px; margin-top:4px; }
+        .token-status { font-size:10px; margin-top:4px; text-align:center; }
     </style>
 </head>
 <body>
@@ -233,7 +233,7 @@
                     <button id="btnReal" class="ab" onclick="selAcct('real')">💰 REAL</button>
                 </div>
                 <div id="accInfo" style="text-align:center;font-size:11px;color:#62748c;margin-top:6px"></div>
-                <div id="tokStatus" class="token-status" style="text-align:center;"></div>
+                <div id="tokStatus" class="token-status"></div>
             </div>
             <div class="card"><div class="card-title">📋 ÚLTIMOS TRADES (LUCRO / PERDA)</div><div id="tradesSummary" style="max-height:180px;overflow-y:auto;"><div style="text-align:center;color:#62748c;padding:10px;">Nenhum trade</div></div></div>
             <div class="card"><div class="card-title">🔑 TOKEN DERIV</div><input type="password" id="tokIn" placeholder="Cole seu token aqui" class="ai"><button class="bp" onclick="saveTok()">💾 SALVAR</button><div id="tokSt" style="font-size:11px;color:#ffaa00;margin-top:6px"></div></div>
@@ -268,11 +268,9 @@
             document.getElementById('accInfo').innerHTML = a==='demo'?'🎮 Demo — saldo virtual':'💰 Real — comissão 0.5%';
             document.getElementById('accountMenu').style.display='none';
             document.getElementById('accArrow').style.transform='rotate(0deg)';
-            // Mostrar estado do token para esta conta
             updateTokenStatus();
         }
         function updateTokenStatus(){
-            // Esta função será melhorada quando o servidor puder informar qual token está guardado
             const statusEl = document.getElementById('tokStatus');
             if(!statusEl) return;
             statusEl.innerHTML = '🔑 Token ' + (selectedAcct==='demo'?'Demo':'Real') + ': verifique em Configurações';
