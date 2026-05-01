@@ -1,386 +1,324 @@
-import websocket
-import json
-import threading
-import time
 import logging
+import time
 from collections import deque
+from datetime import datetime
+from indicators import TechnicalIndicators
+from synthetics import digit_analyzer   # fallback global
+from config import config
 
 logger = logging.getLogger(__name__)
 
-class DerivWebSocketClient:
-    ST_CONNECTING   = 'CONNECTING'
-    ST_CONNECTED    = 'CONNECTED'
-    ST_STREAMING    = 'STREAMING'
-    ST_STALE        = 'STALE'
-    ST_RECONNECTING = 'RECONNECTING'
-
-    def __init__(self, config, on_tick_callback=None):
-        self.config = config
-        self.ws = None
-        self.ws_thread = None
-        self.connected = False
-        self.authorized = False
-        self.streaming = False
+class TradingBot:
+    def __init__(self):
+        self.client = None
+        self.indicators = TechnicalIndicators()
+        self.current_price = 0
+        self.current_symbol = 'R_100'
         self.balance = 0
         self.currency = 'USD'
-        self.current_symbol = 'R_100'
-        self.on_tick_callback = on_tick_callback
-        self.trading_bot = None
-        self.payment_system = None
-        self.markup_percentage = 0
-        self.subscribed_symbols = set()
-        self.user_token = None
-        self.active_trades = {}
-        self.pending_trade = None
-        self.pending_trade_time = 0
-        self._trade_lock = threading.Lock()
-        self._digit_analyzer = None
-        self._balance_subscribed = False
-        self._stop_event = threading.Event()
-        self._last_tick_time = None
-        self._last_trade_time = 0
-        self._processed_contracts = deque(maxlen=1000)
-        self._processed_lock = threading.Lock()
-        self._req_counter = 1000
-        self.connection_state = self.ST_CONNECTING
-        self._keep_alive_thread = None
-        self._thread_monitor_enabled = False
+        self.paused = False
+        self.last_analysis = {}
+        self.digit_analyzer = None   # será preenchido pelo app.py
 
-    # ── Dependências ─────────────────────────────────────────────
-    def set_digit_analyzer(self, a): self._digit_analyzer = a
-    def set_trading_bot(self, b):
-        self.trading_bot = b
-        if b: b.balance, b.currency, b.client = self.balance, self.currency, self
-    def set_payment_system(self, p): self.payment_system = p
-    def set_user_token(self, t):
-        self.user_token = t
-        logger.info("🔑 Token configurado")
+        self.stats = {
+            'total': 0, 'wins': 0, 'losses': 0,
+            'win_rate': 0, 'profit_loss': 0,
+            'total_invested': 0, 'total_return': 0
+        }
 
-    # ── Conexão ──────────────────────────────────────────────────
-    def connect(self):
-        if self._stop_event.is_set():
-            self._stop_event.clear()
-        if self.ws_thread and self.ws_thread.is_alive():
-            logger.info("Thread de conexão já ativa")
-            self._start_thread_monitor()
-            return
-        logger.info("🔌 A iniciar thread de ligação...")
-        self.ws_thread = threading.Thread(target=self._run_forever, daemon=True)
-        self.ws_thread.start()
-        self._start_thread_monitor()
+        self.daily_stats = {
+            'date': datetime.now().date(), 'trades': 0,
+            'wins': 0, 'losses': 0, 'profit_loss': 0,
+            'start_balance': 0
+        }
 
-    def _start_thread_monitor(self):
-        if self._thread_monitor_enabled:
-            return
-        self._thread_monitor_enabled = True
-        def monitor():
-            while not self._stop_event.is_set():
-                time.sleep(10)
-                if self.ws_thread is None or not self.ws_thread.is_alive():
-                    logger.warning("🔄 Thread de ligação morreu! Reiniciando...")
-                    self.ws_thread = threading.Thread(target=self._run_forever, daemon=True)
-                    self.ws_thread.start()
-        threading.Thread(target=monitor, daemon=True).start()
+        self.trades = deque(maxlen=100)
+        self.consecutive_losses = 0
+        self.consecutive_wins = 0
 
-    def _run_forever(self):
-        logger.info("▶️ Thread de ligação iniciada.")
-        while not self._stop_event.is_set():
-            self._cleanup_state()
-            self.connection_state = self.ST_CONNECTING
-            try:
-                logger.info("🔌 A ligar à Deriv...")
-                self.ws = websocket.WebSocketApp(
-                    self.config.WS_URL,
-                    on_open=self._on_open,
-                    on_message=self._on_message,
-                    on_error=self._on_ws_error,
-                    on_close=self._on_close
-                )
-                # Desativamos o ping da biblioteca e usamos keep-alive manual
-                self._start_keep_alive()
-                self.ws.run_forever(ping_interval=86400, ping_timeout=10)
-            except Exception as e:
-                logger.error(f"Erro no loop de conexão: {e}", exc_info=True)
-            finally:
-                self.connected, self.authorized, self.streaming = False, False, False
-                if self.ws: self.ws = None
-                if self._keep_alive_thread: self._keep_alive_thread = None
-            if not self._stop_event.is_set():
-                self.connection_state = self.ST_RECONNECTING
-                logger.info("🔄 A aguardar 2 segundos antes de nova tentativa...")
-                time.sleep(2)
+        self.martingale = {
+            'active': False, 'step': 0,
+            'original_amount': 0, 'last_result': None
+        }
 
-    def _start_keep_alive(self):
-        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
-            return
-        def ping_loop():
-            while not self._stop_event.is_set() and self.ws:
-                time.sleep(30)
-                if self.ws and self.ws.sock and self.ws.sock.connected:
-                    try:
-                        self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
-                        logger.debug("📶 Ping manual enviado")
-                    except Exception as e:
-                        logger.warning(f"Falha ao enviar ping: {e}")
-                        break
-        self._keep_alive_thread = threading.Thread(target=ping_loop, daemon=True)
-        self._keep_alive_thread.start()
+        self._client_connected = False
+        self._client_authorized = False
 
-    def _cleanup_state(self):
-        self.subscribed_symbols.clear()
-        self.pending_trade = None
-        self.pending_trade_time = 0
-        self.active_trades.clear()
-        self._balance_subscribed = False
-        self.connected, self.authorized, self.streaming = False, False, False
-        self._last_tick_time = None
+    def start(self, client):
+        self.client = client
+        self.daily_stats['start_balance'] = self.balance
+        logger.info("🚀 Bot iniciado")
 
-    # ── Callbacks do WebSocket ──────────────────────────────────
-    def _on_open(self, ws):
-        logger.info("✅ WebSocket conectado (on_open)")
-        self.connected = True
-        self.connection_state = self.ST_CONNECTED
-        self.authorize()
+    def pause(self):
+        self.paused = True
+        logger.info("⏸️ Pausado")
 
-    def _on_message(self, ws, message):
-        try:
-            data = json.loads(message)
-            msg_type = data.get('msg_type', '')
-            if msg_type not in ['tick', 'balance', 'time', 'ping']:
-                logger.info(f"📨 [{msg_type}]")
-            handlers = {
-                'authorize':              self._on_authorize,
-                'tick':                   self._on_tick,
-                'proposal':               self._on_proposal,
-                'buy':                    self._on_buy_response,
-                'proposal_open_contract': self._on_poc,
-                'balance':                self._on_balance,
-                'error':                  self._on_api_error,
-                'ping':                   self._on_pong,
-            }
-            handler = handlers.get(msg_type)
-            if handler: handler(data)
-        except json.JSONDecodeError:
-            logger.error("Mensagem JSON inválida recebida: %s", message[:200])
-        except Exception as e:
-            logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
+    def resume(self):
+        self.paused = False
+        logger.info("▶️ Resumido")
 
-    def _on_ws_error(self, ws, error):
-        logger.error(f"Erro de conexão WebSocket: {error}")
+    def on_tick(self, tick):
+        self.current_price = tick['price']
+        self.current_symbol = tick['symbol']
+        self.indicators.add_price(self.current_price, self.current_symbol)
 
-    def _on_close(self, ws, close_code, close_msg):
-        logger.warning(f"WebSocket fechado (código {close_code}): {close_msg}")
-        self.connected, self.authorized, self.streaming = False, False, False
+        # Alimentar o analisador de dígitos da sessão (ou o global como fallback)
+        if 'R_' in self.current_symbol:
+            analyzer = self.digit_analyzer if self.digit_analyzer else digit_analyzer
+            analyzer.add_tick(self.current_price)
 
-    def _on_pong(self, data):
-        logger.debug("📶 Pong recebido")
+        self.last_analysis = self.indicators.get_all_indicators(self.current_symbol)
+        if self.client:
+            self.balance = self.client.balance
+            self.currency = self.client.currency
+            today = datetime.now().date()
+            if self.daily_stats['date'] != today:
+                self.reset_daily_stats()
 
-    # ── Autenticação ────────────────────────────────────────────
-    def authorize(self):
-        if not self.user_token: return
-        try:
-            self.ws.send(json.dumps({"authorize": self.user_token, "req_id": self._next_req()}))
-            self._auth_time = time.time()
-            logger.info("🔐 Pedido de autorização enviado")
-        except Exception as e: logger.error(f"Erro autorizar: {e}")
+    def reset_daily_stats(self):
+        self.daily_stats = {
+            'date': datetime.now().date(), 'trades': 0,
+            'wins': 0, 'losses': 0, 'profit_loss': 0,
+            'start_balance': self.balance
+        }
 
-    def _on_authorize(self, data):
-        logger.info("📬 Resposta de autorização recebida")
-        if data.get('error'):
-            self.authorized = False
-            logger.error(f"❌ Auth erro: {data['error']}")
+    def get_momentum(self):
+        prices = self.indicators.get_prices(self.current_symbol)
+        if len(prices) < 5:
+            return 0
+        recent = list(prices)[-5:]
+        return (recent[-1] - recent[0]) / recent[0] * 100
+
+    def calculate_signal(self):
+        if not self.last_analysis:
+            return 'NEUTRAL', 0
+
+        analysis = self.last_analysis
+        vote_trend = 1 if 'ALTA' in analysis['trend']['desc'] else -1 if 'BAIXA' in analysis['trend']['desc'] else 0
+        rsi = analysis['rsi']['score']
+        vote_rsi = 1 if rsi < 30 else -1 if rsi > 70 else 0.5 if rsi < 40 else -0.5 if rsi > 60 else 0
+        vote_macd = 1 if 'COMPRA' in analysis['macd']['desc'] else -1 if 'VENDA' in analysis['macd']['desc'] else 0
+        vote_bb = 1 if 'COMPRA' in analysis['bollinger']['desc'] else -1 if 'VENDA' in analysis['bollinger']['desc'] else 0
+        stoch_desc = analysis.get('stochastic', {}).get('desc', '---')
+        vote_stoch = 1 if 'SOBREVENDIDO' in stoch_desc else -1 if 'SOBRECOMPRADO' in stoch_desc else 0
+
+        votes = [v for v in [vote_trend, vote_rsi, vote_macd, vote_bb, vote_stoch] if v != 0]
+        buy_votes = sum(1 for v in votes if v > 0)
+        sell_votes = sum(1 for v in votes if v < 0)
+        total_votes = len(votes)
+
+        if total_votes == 0:
+            return 'NEUTRAL', 0
+
+        if buy_votes > sell_votes:
+            signal = 'BUY'
+            confidence = (buy_votes / total_votes) * 100
+        elif sell_votes > buy_votes:
+            signal = 'SELL'
+            confidence = (sell_votes / total_votes) * 100
         else:
-            logger.info("✅ Autorizado com sucesso!")
-            self.authorized = True
-            time.sleep(0.5)
-            self._subscribe_balance()
-            if self.current_symbol:
-                self._subscribe_ticks(self.current_symbol)
+            return 'NEUTRAL', 0
 
-    # ── Saldo ───────────────────────────────────────────────────
-    def _subscribe_balance(self):
+        momentum = self.get_momentum()
+        if signal == 'BUY' and momentum > 0.1:
+            confidence = min(confidence + 5, 100)
+        elif signal == 'SELL' and momentum < -0.1:
+            confidence = min(confidence + 5, 100)
+
+        return signal, min(confidence, 100)
+
+    def register_trade(self, trade_data):
+        trade_data['timestamp'] = datetime.now()
+        self.trades.append(trade_data)
+        self.stats['total'] += 1
+        self.stats['total_invested'] += trade_data['amount']
+        self.daily_stats['trades'] += 1
+        self.update_stats()
+
+    def update_stats(self):
+        wins = losses = profit_loss = 0
+        for trade in self.trades:
+            if trade.get('result') == 'win':
+                wins += 1
+                profit_loss += trade.get('profit', 0)
+            elif trade.get('result') == 'loss':
+                losses += 1
+                profit_loss -= trade.get('amount', 0)
+        self.stats['wins'] = wins
+        self.stats['losses'] = losses
+        self.stats['win_rate'] = (wins / self.stats['total']) * 100 if self.stats['total'] > 0 else 0
+        self.stats['profit_loss'] = profit_loss
+        self.stats['total_return'] = (profit_loss / self.stats['total_invested']) * 100 if self.stats['total_invested'] > 0 else 0
+
+    def check_pending_trades(self):
+        now = datetime.now()
+        updated = False
+        for trade in self.trades:
+            if trade.get('result') == 'pending':
+                elapsed = (now - trade['timestamp']).total_seconds()
+                if elapsed > 60:
+                    trade['result'] = 'loss'
+                    trade['profit'] = 0
+                    updated = True
+                    logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')}")
+        if updated:
+            self.update_stats()
+
+    def on_trade_result(self, result):
         try:
-            self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
-            self._balance_subscribed = True
-        except Exception as e: logger.error(f"Erro subs. saldo: {e}")
+            logger.info(f"📊 [BOT] Processando resultado: {result}")
+            contract_id = result.get('contract_id')
+            profit = result.get('profit', 0)
+            is_win = profit > 0
 
-    def _on_balance(self, data):
-        bd = data.get('balance', {})
-        if bd:
-            self.balance = float(bd.get('balance', 0))
-            self.currency = bd.get('currency', 'USD')
-            if self.trading_bot: self.trading_bot.balance, self.trading_bot.currency = self.balance, self.currency
+            target_trade = None
+            if contract_id:
+                for trade in reversed(list(self.trades)):
+                    if trade.get('contract_id') == contract_id:
+                        target_trade = trade
+                        break
 
-    # ── Ticks ───────────────────────────────────────────────────
-    def _subscribe_ticks(self, symbol):
-        if not self.authorized: return
-        if symbol in self.subscribed_symbols: return
-        try:
-            self.ws.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": self._next_req()}))
-            self.subscribed_symbols.add(symbol)
-            self.current_symbol = symbol
-            logger.info(f"📊 Subscrição de ticks para {symbol} enviada")
-        except Exception as e: logger.error(f"Erro subs. ticks: {e}")
+            if target_trade is None:
+                for trade in reversed(list(self.trades)):
+                    if trade.get('result') == 'pending':
+                        target_trade = trade
+                        break
 
-    def _on_tick(self, data):
-        tick = data.get('tick', {})
-        if not tick: return
-        if not self.streaming:
-            self.streaming = True
-            self.connection_state = self.ST_STREAMING
-            logger.info("📡 Estado STREAMING ativado! Primeiro tick real recebido.")
-        self._last_tick_time = time.time()
-        if self.on_tick_callback:
-            self.on_tick_callback({
-                'symbol':    tick.get('symbol', self.current_symbol),
-                'price':     float(tick.get('quote', 0)),
-                'timestamp': tick.get('epoch', time.time())
-            })
+            if target_trade is None:
+                logger.warning("⚠️ Nenhum trade pendente encontrado para este resultado")
+                return
 
-    # ── Colocar Trade (com lock global e timeout robusto) ─────────
-    def _next_req(self):
-        self._req_counter += 1
-        return self._req_counter
+            if target_trade.get('result') != 'pending':
+                logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
+                return
 
-    def place_trade(self, contract_type, amount, is_digit=False):
-        with self._trade_lock:
-            if not self.streaming:
-                logger.warning("🚫 Trade bloqueado: sistema não está em estado STREAMING.")
-                return False
-            if amount > self.balance * 0.02:
-                logger.warning("🚫 Trade bloqueado: excede 2% do saldo.")
-                return False
-            if time.time() - self._last_trade_time < 2:
-                logger.warning("⏱️ Trade bloqueado: intervalo mínimo de 2s entre trades.")
-                return False
-            if not self.authorized:
-                logger.warning("🚫 Trade bloqueado: não autorizado.")
-                return False
-            if self.pending_trade is not None:
-                if time.time() - self.pending_trade_time > 60:
-                    logger.warning("Trade pendente expirou (60s). Forçando limpeza.")
-                    self.pending_trade = None
-                else:
-                    logger.warning("⚠️ Já existe um trade pendente. Aguarde.")
-                    return False
-
-            self._last_trade_time = time.time()
-            if is_digit:
-                duration = self.config.DIGIT_CONTRACT_DURATION; duration_unit = 't'
-                contract_type_full = 'DIGITODD' if contract_type == 'CALL' else 'DIGITEVEN'
+            if is_win:
+                target_trade['result'] = 'win'
+                target_trade['profit'] = profit
+                self.daily_stats['wins'] += 1
+                self.daily_stats['profit_loss'] += profit
+                self.consecutive_wins += 1
+                self.consecutive_losses = 0
+                logger.info(f"✅ GANHO! +${profit:.2f} | Vitórias consecutivas: {self.consecutive_wins}")
             else:
-                duration = self.config.CONTRACT_DURATION; duration_unit = self.config.CONTRACT_DURATION_UNIT
-                contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
+                loss = target_trade.get('amount', 0)
+                target_trade['result'] = 'loss'
+                target_trade['profit'] = 0
+                self.daily_stats['losses'] += 1
+                self.daily_stats['profit_loss'] -= loss
+                self.consecutive_losses += 1
+                self.consecutive_wins = 0
+                logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
 
-            req_id = self._next_req()
-            self.pending_trade = {
-                'amount': amount, 'contract_type': contract_type,
-                'is_digit': is_digit, 'timestamp': time.time(),
-                'status': 'waiting_proposal', 'req_id': req_id
-            }
-            self.pending_trade_time = time.time()
+            self.update_stats()
+            if self.client:
+                self.client.get_balance()
 
-            try:
-                self.ws.send(json.dumps({
-                    "proposal": 1, "amount": amount, "basis": "stake",
-                    "contract_type": contract_type_full, "currency": self.currency,
-                    "duration": duration, "duration_unit": duration_unit,
-                    "symbol": self.current_symbol, "req_id": req_id
-                }))
-                logger.info(f"📝 Proposta de trade enviada (req_id={req_id})")
-                return True
-            except Exception as e:
-                logger.error(f"❌ Erro ao enviar trade: {e}")
-                self.pending_trade = None
-                return False
-
-    # ── Fluxo de Proposta / Compra (protegido contra duplicação) ──
-    def _on_proposal(self, data):
-        if self.pending_trade is None:
-            logger.info("Proposta recebida, mas sem trade pendente. Ignorando.")
-            return
-        if data.get('req_id') != self.pending_trade.get('req_id'):
-            logger.info("Proposta ignorada (req_id não coincide).")
-            return
-        if data.get('error'):
-            logger.error(f"❌ Erro na proposta: {data['error']}")
-            self.pending_trade = None
-            return
-        p = data.get('proposal', {})
-        pid, ask = p.get('id'), p.get('ask_price')
-        if not pid or ask is None:
-            logger.error("Proposta inválida (sem id ou ask_price).")
-            self.pending_trade = None
-            return
-        if self.pending_trade and 'proposal_id' in self.pending_trade:
-            logger.warning("⚠️ BUY já enviado para esta proposta. Ignorando duplicado.")
-            return
-        self.pending_trade['proposal_id'] = pid
-        self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
-        logger.info(f"📤 Ordem BUY enviada para proposta {pid}")
-
-    def _on_buy_response(self, data):
-        if data.get('error'):
-            logger.error(f"❌ Erro na compra: {data['error']}")
-            self.pending_trade = None
-            return
-        bd = data.get('buy', {})
-        cid, bp = bd.get('contract_id'), bd.get('buy_price', 0)
-        if not cid:
-            logger.error("Resposta de compra sem contract_id.")
-            self.pending_trade = None
-            return
-        logger.info(f"✅ Contrato adquirido: {cid} por ${bp}")
-        if self.pending_trade:
-            amt, action = self.pending_trade.get('amount', 0), self.pending_trade.get('contract_type', '')
-            if self.trading_bot:
-                self.trading_bot.register_trade({
-                    'contract_id': cid, 'symbol': self.current_symbol,
-                    'action': action, 'amount': amt, 'price': bp,
-                    'result': 'pending', 'confidence': 70
-                })
-            self.active_trades[cid] = {
-                'contract_id': cid, 'amount': amt, 'buy_price': bp,
-                'timestamp': time.time(), 'action': action
-            }
-            self._subscribe_contract(cid)
-            self.pending_trade = None
-
-    def _subscribe_contract(self, cid):
-        try:
-            self.ws.send(json.dumps({
-                "proposal_open_contract": 1, "contract_id": cid,
-                "subscribe": 1, "req_id": self._next_req()
-            }))
-            logger.info(f"📡 Subscrição de contrato {cid} enviada")
         except Exception as e:
-            logger.error(f"Erro ao subscrever contrato {cid}: {e}")
+            logger.error(f"Erro ao processar resultado: {e}")
 
-    def _on_poc(self, data):
-        c = data.get('proposal_open_contract', {})
-        cid = c.get('contract_id')
-        if not cid or not c.get('is_sold'): return
-        with self._processed_lock:
-            if cid in self._processed_contracts: return
-            self._processed_contracts.append(cid)
-        bp, sp = c.get('buy_price', 0), c.get('sell_price', 0)
-        profit = sp - bp
-        amt = self.active_trades.get(cid, {}).get('amount', bp)
-        logger.info(f"📊 RESULTADO [{cid}]: {'✅ GANHO' if profit > 0 else '❌ PERDA'} ${abs(profit):.2f}")
-        if self.trading_bot:
-            self.trading_bot.on_trade_result({
-                'contract_id': cid, 'buy_price': bp, 'sell_price': sp,
-                'profit': profit, 'amount': amt, 'is_win': profit > 0
-            })
-        if cid in self.active_trades: del self.active_trades[cid]
+    def get_trade_report(self):
+        self.check_pending_trades()
+        hoje = datetime.now().date()
+        trades_hoje = [t for t in self.trades if t['timestamp'].date() == hoje]
+        return {
+            'resumo': {
+                'total_trades': self.stats['total'],
+                'trades_hoje': len(trades_hoje),
+                'wins': self.stats['wins'],
+                'losses': self.stats['losses'],
+                'win_rate': round(self.stats['win_rate'], 2),
+                'profit_loss': round(self.stats['profit_loss'], 2),
+                'total_invested': round(self.stats['total_invested'], 2),
+                'total_return': round(self.stats['total_return'], 2)
+            },
+            'historico': [{
+                'time': t['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+                'symbol': t.get('symbol', ''),
+                'action': t.get('action', ''),
+                'amount': t.get('amount', 0),
+                'result': t.get('result', 'pending'),
+                'profit': t.get('profit', 0)
+            } for t in list(self.trades)[-50:]]
+        }
 
-    def _on_api_error(self, data):
-        err = data.get('error', {})
-        logger.error(f"Erro da API Deriv: {err.get('message', 'desconhecido')} (código: {err.get('code', 'N/A')})")
+    def get_status(self):
+        self.check_pending_trades()
+        signal, confidence = self.calculate_signal()
+        connected = self._client_connected
+        authorized = self._client_authorized
+        if not connected and self.client:
+            connected = self.client.connected
+        if not authorized and self.client:
+            authorized = self.client.authorized
 
-    def request_deposit(self, amount, currency, method):
-        return {'status': 'pending', 'message': f'Depósito ${amount} solicitado.', 'amount': amount, 'method': method}
+        return {
+            'connected': connected,
+            'authorized': authorized,
+            'price': self.current_price,
+            'symbol': self.current_symbol,
+            'balance': self.balance,
+            'currency': self.currency,
+            'signal': signal,
+            'confidence': round(confidence, 1),
+            'analysis': self.last_analysis,
+            'stats': self.stats,
+            'paused': self.paused,
+            'martingale': self.get_martingale_status(),
+            'daily_stats': self.daily_stats,
+            'consecutive_wins': self.consecutive_wins,
+            'consecutive_losses': self.consecutive_losses
+        }
 
-    def request_withdrawal(self, amount, currency, method):
-        if amount > self.balance: return {'error': 'Saldo insuficiente'}
-        return {'status': 'pending', 'message': f'Saque ${amount} solicitado.', 'amount': amount, 'method': method}
+    def get_martingale_status(self):
+        return {
+            'active': self.martingale['active'],
+            'step': self.martingale['step'],
+            'original_amount': self.martingale['original_amount'],
+            'next_amount': self.get_martingale_amount(config.DEFAULT_STAKE),
+            'max_steps': config.MARTINGALE_CONFIG.get('max_steps', 2),
+            'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
+            'enabled': config.MARTINGALE_CONFIG.get('enabled', True)
+        }
+
+    def get_martingale_amount(self, base_amount):
+        if not self.martingale['active'] or self.martingale['step'] == 0:
+            return base_amount
+        multiplier = config.MARTINGALE_CONFIG.get('multiplier', 2.0)
+        return base_amount * (multiplier ** self.martingale['step'])
+
+    def apply_martingale_after_loss(self, last_trade_amount):
+        if not config.MARTINGALE_CONFIG.get('enabled', True):
+            return False, "Martingale desativado"
+        max_steps = config.MARTINGALE_CONFIG.get('max_steps', 2)
+        if self.martingale['step'] >= max_steps:
+            return False, f"Máximo de {max_steps} perdas consecutivas atingido"
+        self.martingale['step'] += 1
+        self.martingale['active'] = True
+        self.martingale['original_amount'] = last_trade_amount
+        nxt = self.get_martingale_amount(last_trade_amount)
+        return True, {
+            'step': self.martingale['step'],
+            'next_amount': nxt,
+            'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
+            'message': f"📈 Martingale ativo - Passo {self.martingale['step']}/{max_steps} | Próximo: ${nxt:.2f}"
+        }
+
+    def reset_martingale(self):
+        self.martingale = {'active': False, 'step': 0, 'original_amount': 0, 'last_result': None}
+        self.consecutive_losses = 0
+        self.consecutive_wins = 0
+
+    def reset_stats(self):
+        self.stats = {
+            'total': 0, 'wins': 0, 'losses': 0,
+            'win_rate': 0, 'profit_loss': 0,
+            'total_invested': 0, 'total_return': 0
+        }
+        self.trades.clear()
+        self.consecutive_losses = 0
+        self.consecutive_wins = 0
+        logger.info("📊 Estatísticas e histórico resetados")
+
+
+trading_bot = TradingBot()
