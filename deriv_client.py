@@ -8,6 +8,7 @@ from collections import deque
 logger = logging.getLogger(__name__)
 
 class DerivWebSocketClient:
+    # Estados da conexão
     ST_CONNECTING   = 'CONNECTING'
     ST_CONNECTED    = 'CONNECTED'
     ST_STREAMING    = 'STREAMING'
