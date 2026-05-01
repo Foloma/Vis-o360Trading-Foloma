@@ -145,7 +145,6 @@ def get_user_session(user_id):
             payment = PaymentSystem(client)
             client.set_payment_system(payment)
 
-            # Associação para que o bot use o analisador correto
             bot.client = client
             bot.digit_analyzer = analyzer
 
@@ -296,7 +295,7 @@ def api_logout():
     user_id = session.get('user_id')
     if user_id and user_id in user_sessions:
         sess = user_sessions[user_id]
-        sess['client']._stop_event.set()  # para a thread de reconexão
+        sess['client']._stop_event.set()
         user_sessions.pop(user_id, None)
     session.clear()
     return jsonify({'status': 'ok'})
@@ -493,7 +492,6 @@ def api_status():
         bot = sess['trading_bot']
         analyzer = sess['digit_analyzer']
 
-        # Sincronizar estado do cliente com o bot
         if client:
             bot.balance = client.balance
             bot.currency = client.currency
@@ -501,7 +499,6 @@ def api_status():
             # Só considera conectado se o WebSocket estiver ligado, autorizado E a receber ticks
             bot._client_connected = (client.connected and client.authorized and client.streaming)
             bot._client_authorized = client.authorized
-            # Se o bot ainda não iniciou, força start
             if client.connected and client.authorized and not bot.client:
                 bot.start(client)
 
@@ -548,18 +545,6 @@ def api_debug():
     })
 
 
-@app.route('/api/display_digit')
-@require_auth
-def api_display_digit():
-    try:
-        user_id = session['user_id']
-        analyzer = get_user_session(user_id)['digit_analyzer']
-        d, p, tr = analyzer.get_next_display_digit()
-        return jsonify({'digit': d, 'parity': p, 'ticks_remaining': tr, 'timestamp': time.time()})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/symbol/change', methods=['POST'])
 @require_auth
 def api_symbol_change():
@@ -576,6 +561,7 @@ def api_symbol_change():
             sess['trading_bot'].current_symbol = sym
         return jsonify({'status': 'ok', 'symbol': sym})
     except Exception as e:
+        logger.error(f"Erro ao mudar símbolo: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -620,6 +606,7 @@ def api_trade():
             return jsonify({'status': 'ok', 'message': f'Trade {action} enviado', 'confidence': conf})
         return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
+        logger.error(f"Erro no trade: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -650,13 +637,10 @@ def api_trade_digit():
         if ok:
             credit_affiliate_commission(session.get('user_email'), amt)
             label = 'ÍMPAR' if pred == 'odd' else 'PAR'
-            return jsonify({
-                'status': 'ok',
-                'message': f'✅ ${amt:.2f} em {label}! Resultado em ~{tr} ticks.',
-                'ticks_remaining': tr
-            })
+            return jsonify({'status': 'ok', 'message': f'✅ ${amt:.2f} em {label}! Resultado em ~{tr} ticks.', 'ticks_remaining': tr})
         return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
+        logger.error(f"Erro no trade de dígito: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -702,6 +686,7 @@ def api_trade_hybrid():
             return jsonify({'status': 'ok', 'message': msg, 'confidence': comb})
         return jsonify({'error': 'Falha'}), 500
     except Exception as e:
+        logger.error(f"Erro no trade híbrido: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -724,6 +709,7 @@ def api_trade_manual():
             return jsonify({'status': 'ok', 'message': f'Trade manual {action}!'})
         return jsonify({'error': 'Falha'}), 500
     except Exception as e:
+        logger.error(f"Erro no trade manual: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -753,15 +739,18 @@ def api_report():
 @app.route('/api/pause', methods=['POST'])
 @require_auth
 def api_pause():
-    d = request.json
-    p = d.get('paused', True)
-    user_id = session['user_id']
-    bot = get_user_session(user_id)['trading_bot']
-    if p:
-        bot.pause()
-    else:
-        bot.resume()
-    return jsonify({'paused': p})
+    try:
+        d = request.json
+        p = d.get('paused', True)
+        user_id = session['user_id']
+        bot = get_user_session(user_id)['trading_bot']
+        if p:
+            bot.pause()
+        else:
+            bot.resume()
+        return jsonify({'paused': p})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/martingale/status', methods=['GET'])
