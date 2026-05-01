@@ -5,7 +5,7 @@ import logging
 load_dotenv()
 
 class Config:
-    DERIV_APP_ID = os.getenv('DERIV_APP_ID', '1089')
+    DERIV_APP_ID = os.getenv('DERIV_APP_ID', '133674')
 
     DEMO_API_TOKEN = os.getenv('DEMO_API_TOKEN', '')
     REAL_API_TOKEN = os.getenv('REAL_API_TOKEN', '')
