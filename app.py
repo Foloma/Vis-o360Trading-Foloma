@@ -30,24 +30,6 @@ app.secret_key = os.environ.get('SECRET_KEY', 'foloma_trading_secret_key_2024')
 DATA_DIR = os.environ.get('DATA_PATH', '.')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 
-# ── Kill Switch Global ───────────────────────────────────────────
-# Define TRADING_ENABLED=false no Render para desativar todas as operações de trading.
-TRADING_ENABLED = os.environ.get('TRADING_ENABLED', 'true').lower() == 'true'
-
-# ── Rate Limiter (trades) ───────────────────────────────────────
-_rate_limit_store = {}
-_rate_limit_lock = threading.Lock()
-
-def check_rate_limit(user_id, min_interval=2):
-    """Impede trades com intervalo inferior a min_interval segundos."""
-    with _rate_limit_lock:
-        now = time.time()
-        last = _rate_limit_store.get(user_id, 0)
-        if now - last < min_interval:
-            return False
-        _rate_limit_store[user_id] = now
-        return True
-
 
 def load_users():
     if os.path.exists(USERS_FILE):
@@ -144,9 +126,8 @@ class AffiliateSystem:
 
 affiliate = AffiliateSystem()
 
-# ── Sessões de Utilizador (thread‑safe) ─────────────────────────
 user_sessions = {}
-sessions_lock = threading.RLock()   # RLock permite reentrada segura
+sessions_lock = threading.Lock()
 
 
 def get_user_session(user_id):
@@ -164,6 +145,7 @@ def get_user_session(user_id):
             payment = PaymentSystem(client)
             client.set_payment_system(payment)
 
+            # Associação para que o bot use o analisador correto
             bot.client = client
             bot.digit_analyzer = analyzer
 
@@ -171,8 +153,7 @@ def get_user_session(user_id):
                 'client': client,
                 'trading_bot': bot,
                 'digit_analyzer': analyzer,
-                'payment_system': payment,
-                '_bot_started': False      # para evitar múltiplos start()
+                'payment_system': payment
             }
         return user_sessions[user_id]
 
@@ -312,6 +293,11 @@ def api_login():
 
 @app.route('/api/auth/logout', methods=['POST'])
 def api_logout():
+    user_id = session.get('user_id')
+    if user_id and user_id in user_sessions:
+        sess = user_sessions[user_id]
+        sess['client']._stop_event.set()  # para a thread de reconexão
+        user_sessions.pop(user_id, None)
     session.clear()
     return jsonify({'status': 'ok'})
 
@@ -457,9 +443,6 @@ def api_reset_password_confirm():
 @app.route('/api/connect', methods=['POST'])
 @require_auth
 def api_connect():
-    if not TRADING_ENABLED:
-        return jsonify({'error': 'Trading temporariamente desativado pelo administrador.'}), 503
-
     try:
         d = request.json
         at = d.get('account_type', 'demo')
@@ -473,37 +456,28 @@ def api_connect():
         if not token:
             return jsonify({'error': 'Token não configurado.'}), 400
 
-        user_id = user['id']
-        sess = get_user_session(user_id)
-        client = sess['client']
-
-        # Evitar múltiplas sessões WebSocket por utilizador
-        if client.ws_thread and client.ws_thread.is_alive():
-            logger.info("Sessão WebSocket já ativa para este utilizador.")
-            return jsonify({'status': 'conectando', 'message': 'Sessão já está ativa.'})
-
         if at == 'real':
             config.REAL_API_TOKEN = token
             config.MARKUP_PERCENTAGE = 0.5
         else:
             config.DEMO_API_TOKEN = token
 
+        sess = get_user_session(user['id'])
+        client = sess['client']
         client.set_user_token(token)
         client.connect()
 
-        # Aguardar autorização de forma não bloqueante (timeout curto)
+        # Aguardar até 10 segundos pela autorização
         timeout = time.time() + 10
         while not client.authorized and time.time() < timeout:
-            time.sleep(0.3)
+            time.sleep(0.5)
 
-        if client.authorized:
-            # Iniciar o bot uma única vez
-            if not sess.get('_bot_started'):
-                sess['trading_bot'].start(client)
-                sess['_bot_started'] = True
-            return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
-        else:
+        if not client.authorized:
             return jsonify({'error': 'Autorização falhou. Verifique o token.'}), 500
+
+        sess['trading_bot'].start(client)
+
+        return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
     except Exception as e:
         logger.error(f"❌ Erro na conexão: {e}")
         return jsonify({'error': str(e)}), 500
@@ -519,14 +493,21 @@ def api_status():
         bot = sess['trading_bot']
         analyzer = sess['digit_analyzer']
 
+        # Sincronizar estado do cliente com o bot
         if client:
             bot.balance = client.balance
             bot.currency = client.currency
             bot.client = client
-            bot._client_connected = client.connected
+            # Só considera conectado se o WebSocket estiver ligado, autorizado E a receber ticks
+            bot._client_connected = (client.connected and client.authorized and client.streaming)
             bot._client_authorized = client.authorized
+            # Se o bot ainda não iniciou, força start
+            if client.connected and client.authorized and not bot.client:
+                bot.start(client)
 
         bot_status = bot.get_status()
+        bot_status['streaming'] = client.streaming if client else False
+
         analysis = analyzer.get_analysis()
         all_digits = analyzer.get_recent_digits()
 
@@ -545,6 +526,26 @@ def api_status():
     except Exception as e:
         logger.error(f"Status: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/debug')
+def api_debug():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Não autenticado'}), 401
+    user_id = session['user_id']
+    sess = get_user_session(user_id)
+    client = sess['client']
+    return jsonify({
+        'connected': client.connected,
+        'authorized': client.authorized,
+        'streaming': client.streaming,
+        'balance': client.balance,
+        'symbol': client.current_symbol,
+        'state': client.connection_state,
+        'ws_thread_alive': client.ws_thread.is_alive() if client.ws_thread else False,
+        'pending_trade': client.pending_trade is not None,
+        'last_tick_seconds_ago': round(time.time() - client._last_tick_time, 1) if client._last_tick_time else None
+    })
 
 
 @app.route('/api/display_digit')
@@ -592,31 +593,19 @@ def credit_affiliate_commission(user_email, amount):
             break
 
 
-# ── Helpers de validação de conexão ──────────────────────────────
-def _is_connected(sess):
-    client = sess.get('client')
-    return client and client.connected and client.authorized
-
-
 @app.route('/api/trade', methods=['POST'])
 @require_auth
 def api_trade():
-    if not TRADING_ENABLED:
-        return jsonify({'error': 'Trading desativado.'}), 503
-
     try:
-        user_id = session['user_id']
-        if not check_rate_limit(user_id):
-            return jsonify({'error': 'Aguarde pelo menos 2 segundos entre trades.'}), 429
-
         d = request.json
         action = d.get('action')
         amt = float(d.get('amount', 0.35))
+        user_id = session['user_id']
         sess = get_user_session(user_id)
         client = sess['client']
         bot = sess['trading_bot']
 
-        if not _is_connected(sess):
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
         if amt < 0.35 or amt > 100:
             return jsonify({'error': 'Valor inválido'}), 400
@@ -637,22 +626,16 @@ def api_trade():
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
 def api_trade_digit():
-    if not TRADING_ENABLED:
-        return jsonify({'error': 'Trading desativado.'}), 503
-
     try:
-        user_id = session['user_id']
-        if not check_rate_limit(user_id):
-            return jsonify({'error': 'Aguarde pelo menos 2 segundos entre trades.'}), 429
-
         d = request.json
         pred = d.get('prediction')
         amt = float(d.get('amount', 0.35))
+        user_id = session['user_id']
         sess = get_user_session(user_id)
         client = sess['client']
         analyzer = sess['digit_analyzer']
 
-        if not _is_connected(sess):
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
         if amt < 0.35 or amt > 100:
             return jsonify({'error': 'Valor inválido'}), 400
@@ -680,22 +663,16 @@ def api_trade_digit():
 @app.route('/api/trade/hybrid', methods=['POST'])
 @require_auth
 def api_trade_hybrid():
-    if not TRADING_ENABLED:
-        return jsonify({'error': 'Trading desativado.'}), 503
-
     try:
-        user_id = session['user_id']
-        if not check_rate_limit(user_id):
-            return jsonify({'error': 'Aguarde pelo menos 2 segundos entre trades.'}), 429
-
         d = request.json
         amt = float(d.get('amount', 0.35))
+        user_id = session['user_id']
         sess = get_user_session(user_id)
         client = sess['client']
         bot = sess['trading_bot']
         analyzer = sess['digit_analyzer']
 
-        if not _is_connected(sess):
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
         if 'R_' not in bot.current_symbol:
             return jsonify({'error': 'Modo híbrido disponível apenas para índices de volatilidade (R_)'}), 400
@@ -731,21 +708,15 @@ def api_trade_hybrid():
 @app.route('/api/trade/manual', methods=['POST'])
 @require_auth
 def api_trade_manual():
-    if not TRADING_ENABLED:
-        return jsonify({'error': 'Trading desativado.'}), 503
-
     try:
-        user_id = session['user_id']
-        if not check_rate_limit(user_id):
-            return jsonify({'error': 'Aguarde pelo menos 2 segundos entre trades.'}), 429
-
         d = request.json
         action = d.get('action')
         amt = float(d.get('amount', 0.35))
+        user_id = session['user_id']
         sess = get_user_session(user_id)
         client = sess['client']
 
-        if not _is_connected(sess):
+        if not client or not client.authorized:
             return jsonify({'error': 'Não conectado'}), 400
 
         ok = client.place_trade('CALL' if action == 'BUY' else 'PUT', amt, is_digit=False)
