@@ -45,7 +45,6 @@ class DerivWebSocketClient:
         self.connection_state = self.ST_CONNECTING
         self._keep_alive_thread = None
         self._thread_monitor_enabled = False
-        self._auth_time = None
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
@@ -62,7 +61,7 @@ class DerivWebSocketClient:
         if self._stop_event.is_set():
             self._stop_event.clear()
         if self.ws_thread and self.ws_thread.is_alive():
-            logger.info("Thread de conexão já ativa – a monitorizar.")
+            logger.info("Thread de conexão já ativa")
             self._start_thread_monitor()
             return
         logger.info("🔌 A iniciar thread de ligação...")
