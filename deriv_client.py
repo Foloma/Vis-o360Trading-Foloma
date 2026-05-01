@@ -11,6 +11,7 @@ class DerivWebSocketClient:
     # Estados da conexão
     ST_CONNECTING   = 'CONNECTING'
     ST_CONNECTED    = 'CONNECTED'
+    ST_STREAMING    = 'STREAMING'
     ST_STALE        = 'STALE'
     ST_RECONNECTING = 'RECONNECTING'
 
@@ -20,6 +21,7 @@ class DerivWebSocketClient:
         self.ws_thread = None
         self.connected = False
         self.authorized = False
+        self.streaming = False
         self.balance = 0
         self.currency = 'USD'
         self.current_symbol = 'R_100'
@@ -37,9 +39,10 @@ class DerivWebSocketClient:
         self._balance_subscribed = False
         self._stop_event = threading.Event()
         self._last_message_time = time.time()
+        self._last_tick_time = None
         self._last_trade_time = 0
         self._processed_contracts = deque(maxlen=1000)
-        self._req_counter = 1000                # contador para req_id único
+        self._req_counter = 1000
         self.connection_state = self.ST_CONNECTING
         self._watchdog_active = False
 
@@ -59,7 +62,7 @@ class DerivWebSocketClient:
             logger.info("Thread de conexão já ativa")
             return
         self._stop_event.clear()
-        self._ensure_watchdog()            # watchdog persistente
+        self._ensure_watchdog()
         self.ws_thread = threading.Thread(target=self._run_forever, daemon=True)
         self.ws_thread.start()
         logger.info("🔌 Thread de conexão iniciada")
@@ -81,7 +84,7 @@ class DerivWebSocketClient:
             except Exception as e:
                 logger.error(f"Erro no loop de conexão: {e}")
             finally:
-                self.connected, self.authorized = False, False
+                self.connected, self.authorized, self.streaming = False, False, False
                 if self.ws: self.ws = None
             if not self._stop_event.is_set():
                 self.connection_state = self.ST_RECONNECTING
@@ -89,11 +92,11 @@ class DerivWebSocketClient:
 
     def _cleanup_state(self):
         self.subscribed_symbols.clear()
-        # NÃO limpar active_trades (correção #3)
         self.pending_trade = None
         self.pending_trade_time = 0
         self._balance_subscribed = False
-        self.connected, self.authorized = False, False
+        self.connected, self.authorized, self.streaming = False, False, False
+        self._last_tick_time = None
 
     # ── Callbacks do WebSocket ──────────────────────────────────
     def _on_open(self, ws):
@@ -133,24 +136,32 @@ class DerivWebSocketClient:
 
     def _on_close(self, ws, close_code, close_msg):
         logger.warning(f"WebSocket fechado ({close_code}): {close_msg}")
-        self.connected, self.authorized = False, False
+        self.connected, self.authorized, self.streaming = False, False, False
         self.connection_state = self.ST_STALE
 
-    # ── Watchdog Persistente (correção #2) ──────────────────────
+    # ── Watchdog Persistente ─────────────────────────────────────
     def _ensure_watchdog(self):
         if self._watchdog_active: return
         self._watchdog_active = True
         def monitor():
             while not self._stop_event.is_set():
                 time.sleep(5)
-                silent = time.time() - self._last_message_time
-                if self.connected and silent > 40:
-                    logger.warning("🛑 Watchdog: 40s sem mensagens. A forçar reconexão.")
-                    try: self.ws.close()
-                    except: pass
-                    self.connected, self.authorized = False, False
-                elif self.connected and silent > 20:
-                    logger.warning("⏳ Watchdog: 20s sem mensagens. Alerta.")
+                if self.streaming and self._last_tick_time is not None:
+                    since_last_tick = time.time() - self._last_tick_time
+                    if since_last_tick > 15:
+                        logger.warning("🛑 Watchdog: >15s sem ticks. Forçando reconexão.")
+                        self.streaming = False
+                        self.connection_state = self.ST_STALE
+                        try: self.ws.close()
+                        except: pass
+                        self.connected, self.authorized = False, False
+                elif self.connected and not self.streaming:
+                    since_connect = time.time() - self._last_message_time
+                    if since_connect > 30:
+                        logger.warning("🛑 Watchdog: 30s ligado sem stream. Forçando reconexão.")
+                        try: self.ws.close()
+                        except: pass
+                        self.connected, self.authorized = False, False
         threading.Thread(target=monitor, daemon=True).start()
 
     # ── Autenticação ────────────────────────────────────────────
@@ -167,7 +178,7 @@ class DerivWebSocketClient:
             logger.info("✅ Autorizado!"); self.authorized = True
             self._subscribe_balance()
             if self.current_symbol: self._subscribe_ticks(self.current_symbol)
-            # Re-subscrever contratos ativos (correção #3)
+            # Re-subscrever contratos ativos
             for cid in list(self.active_trades.keys()):
                 self._subscribe_contract(cid)
 
@@ -198,8 +209,13 @@ class DerivWebSocketClient:
     def _on_tick(self, data):
         tick = data.get('tick', {})
         if not tick: return
-        # Validação de latência (correção #5 – 5 segundos)
         if 'epoch' in tick and time.time() - tick['epoch'] > 5: return
+        # Acionar estado de streaming ao receber o primeiro tick
+        if not self.streaming:
+            self.streaming = True
+            self.connection_state = self.ST_STREAMING
+            logger.info("📡 Streaming de ticks iniciado")
+        self._last_tick_time = time.time()
         if self.on_tick_callback:
             self.on_tick_callback({
                 'symbol':    tick.get('symbol', self.current_symbol),
@@ -207,24 +223,25 @@ class DerivWebSocketClient:
                 'timestamp': tick.get('epoch', time.time())
             })
 
-    # ── Colocar Trade (com req_id único e proteções) ──────────
+    # ── Colocar Trade ──────────────────────────────────────────
     def _next_req(self):
         self._req_counter += 1
         return self._req_counter
 
     def place_trade(self, contract_type, amount, is_digit=False):
         with self._trade_lock:
-            # Gestão de risco: 2% do saldo
+            # Bloquear trades se não houver stream ativo
+            if not self.streaming:
+                logger.warning("🚫 Sem stream de ticks. Trade bloqueado.")
+                return False
             if amount > self.balance * 0.02:
                 logger.warning("🚫 Trade excede 2% do saldo. Rejeitado.")
                 return False
-            # Controlo de frequência
             if time.time() - self._last_trade_time < 2:
                 logger.warning("⏱️ Intervalo mínimo de 2s entre trades.")
                 return False
             if not self.authorized: return False
 
-            # Garantir apenas 1 trade pendente (correção #6)
             if self.pending_trade is not None:
                 if time.time() - self.pending_trade_time > 20:
                     logger.warning("Trade pendente expirou. A limpar...")
@@ -265,17 +282,15 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return False
 
-    # ── Fluxo de Proposta / Compra (com proteção contra duplicação) ──
+    # ── Fluxo de Proposta / Compra ────────────────────────────────
     def _on_proposal(self, data):
-        # Validar req_id (correção #1)
         if self.pending_trade and data.get('req_id') != self.pending_trade.get('req_id'):
-            return  # ignorar propostas que não sejam do trade atual
+            return
         if data.get('error'): self.pending_trade = None; return
         p = data.get('proposal', {})
         pid, ask = p.get('id'), p.get('ask_price')
         if not pid or ask is None: self.pending_trade = None; return
 
-        # Evitar duplicação de BUY (correção #4)
         if self.pending_trade and 'proposal_id' in self.pending_trade:
             logger.warning("Já foi enviado um BUY para esta proposta. Ignorando.")
             return
