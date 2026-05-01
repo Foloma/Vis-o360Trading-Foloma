@@ -8,7 +8,6 @@ from collections import deque
 logger = logging.getLogger(__name__)
 
 class DerivWebSocketClient:
-    # Estados da conexão
     ST_CONNECTING   = 'CONNECTING'
     ST_CONNECTED    = 'CONNECTED'
     ST_STREAMING    = 'STREAMING'
@@ -46,6 +45,7 @@ class DerivWebSocketClient:
         self.connection_state = self.ST_CONNECTING
         self._keep_alive_thread = None
         self._thread_monitor_enabled = False
+        self._auth_time = None
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
@@ -71,7 +71,6 @@ class DerivWebSocketClient:
         self._start_thread_monitor()
 
     def _start_thread_monitor(self):
-        """Vigia a thread de ligação e reinicia-a se morrer."""
         if self._thread_monitor_enabled:
             return
         self._thread_monitor_enabled = True
@@ -98,7 +97,7 @@ class DerivWebSocketClient:
                     on_error=self._on_ws_error,
                     on_close=self._on_close
                 )
-                # Desativamos o ping da biblioteca (ping_interval enorme) e usamos o nosso keep-alive manual
+                # Desativamos o ping da biblioteca e usamos keep-alive manual
                 self._start_keep_alive()
                 self.ws.run_forever(ping_interval=86400, ping_timeout=10)
             except Exception as e:
@@ -106,15 +105,13 @@ class DerivWebSocketClient:
             finally:
                 self.connected, self.authorized, self.streaming = False, False, False
                 if self.ws: self.ws = None
-                if self._keep_alive_thread:
-                    self._keep_alive_thread = None
+                if self._keep_alive_thread: self._keep_alive_thread = None
             if not self._stop_event.is_set():
                 self.connection_state = self.ST_RECONNECTING
                 logger.info("🔄 A aguardar 2 segundos antes de nova tentativa...")
                 time.sleep(2)
 
     def _start_keep_alive(self):
-        """Envia um ping a cada 30 segundos para manter a ligação ativa."""
         if self._keep_alive_thread and self._keep_alive_thread.is_alive():
             return
         def ping_loop():
@@ -241,7 +238,7 @@ class DerivWebSocketClient:
                 'timestamp': tick.get('epoch', time.time())
             })
 
-    # ── Colocar Trade ──────────────────────────────────────────
+    # ── Colocar Trade (com lock global e timeout robusto) ─────────
     def _next_req(self):
         self._req_counter += 1
         return self._req_counter
@@ -298,7 +295,7 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return False
 
-    # ── Fluxo de Proposta / Compra ────────────────────────────────
+    # ── Fluxo de Proposta / Compra (protegido contra duplicação) ──
     def _on_proposal(self, data):
         if self.pending_trade is None:
             logger.info("Proposta recebida, mas sem trade pendente. Ignorando.")
