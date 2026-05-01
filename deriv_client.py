@@ -8,6 +8,7 @@ from collections import deque
 logger = logging.getLogger(__name__)
 
 class DerivWebSocketClient:
+    # Estados da conexão
     ST_CONNECTING   = 'CONNECTING'
     ST_CONNECTED    = 'CONNECTED'
     ST_STREAMING    = 'STREAMING'
@@ -42,6 +43,8 @@ class DerivWebSocketClient:
         self._processed_contracts = deque(maxlen=1000)
         self._req_counter = 1000
         self.connection_state = self.ST_CONNECTING
+        self._auth_time = None
+        self._subscribed_at = None
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
@@ -94,13 +97,28 @@ class DerivWebSocketClient:
         self._balance_subscribed = False
         self.connected, self.authorized, self.streaming = False, False, False
         self._last_tick_time = None
+        self._auth_time = None
+        self._subscribed_at = None
 
     # ── Callbacks do WebSocket ──────────────────────────────────
     def _on_open(self, ws):
-        logger.info("✅ WebSocket conectado")
+        logger.info("✅ WebSocket conectado (on_open)")
         self.connected = True
+        self._auth_time = time.time()
         self.connection_state = self.ST_CONNECTED
         self.authorize()
+        # Iniciar watchdog e timeout de autorização
+        threading.Thread(target=self._watchdog, daemon=True).start()
+        threading.Thread(target=self._auth_timeout_check, daemon=True).start()
+
+    def _auth_timeout_check(self):
+        """Se a autorização não chegar em 10s, força reconexão."""
+        time.sleep(10)
+        if not self.authorized and self.connected:
+            logger.error("❌ Timeout de autorização (10s). Forçando reconexão.")
+            try: self.ws.close()
+            except: pass
+            self.connected, self.authorized, self.streaming = False, False, False
 
     def _on_message(self, ws, message):
         try:
@@ -119,8 +137,10 @@ class DerivWebSocketClient:
             }
             handler = handlers.get(msg_type)
             if handler: handler(data)
-        except json.JSONDecodeError: logger.error("JSON inválido")
-        except Exception as e: logger.error(f"Erro ao processar mensagem: {e}")
+        except json.JSONDecodeError:
+            logger.error("Mensagem JSON inválida recebida: %s", message[:200])
+        except Exception as e:
+            logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
     def _on_ws_error(self, ws, error):
         logger.error(f"Erro de conexão WebSocket: {error}")
@@ -130,11 +150,11 @@ class DerivWebSocketClient:
         logger.error(f"Erro da API Deriv: {err.get('message', 'desconhecido')} (código: {err.get('code', 'N/A')})")
 
     def _on_close(self, ws, close_code, close_msg):
-        logger.warning(f"WebSocket fechado ({close_code}): {close_msg}")
+        logger.warning(f"WebSocket fechado (código {close_code}): {close_msg}")
         self.connected, self.authorized, self.streaming = False, False, False
         self.connection_state = self.ST_STALE
 
-    # ── Watchdog baseado em ticks ────────────────────────────────
+    # ── Watchdog (baseado exclusivamente em ticks) ───────────────
     def _watchdog(self):
         """Monitoriza o fluxo de ticks. Se >15s sem tick, força reconexão."""
         while self.connected and not self._stop_event.is_set():
@@ -150,72 +170,91 @@ class DerivWebSocketClient:
                     self.connected, self.authorized = False, False
                     break
             elif self.connected and not self.streaming:
-                # Ainda não recebeu o primeiro tick; aguardar até 30s
-                if time.time() - self._last_open_time > 30:
-                    logger.warning("🛑 Watchdog: 30s ligado sem stream. Forçando reconexão.")
+                # Ainda não recebeu o primeiro tick; se passaram 30s desde a subscrição, recomeçar
+                if self._subscribed_at and time.time() - self._subscribed_at > 30:
+                    logger.warning("🛑 Watchdog: 30s após subscrição sem ticks. Forçando reconexão.")
                     try: self.ws.close()
                     except: pass
                     self.connected, self.authorized = False, False
                     break
 
-    def _on_open(self, ws):
-        logger.info("✅ WebSocket conectado")
-        self.connected = True
-        self._last_open_time = time.time()
-        self.connection_state = self.ST_CONNECTED
-        threading.Thread(target=self._watchdog, daemon=True).start()
-        self.authorize()
-
     # ── Autenticação ────────────────────────────────────────────
     def authorize(self):
-        if not self.user_token: return logger.error("❌ Token não configurado!")
+        if not self.user_token:
+            logger.error("❌ Token não configurado!")
+            return
         try:
             self.ws.send(json.dumps({"authorize": self.user_token, "req_id": self._next_req()}))
-            logger.info("🔐 A autorizar...")
-        except Exception as e: logger.error(f"Erro autorizar: {e}")
+            logger.info("🔐 Pedido de autorização enviado")
+        except Exception as e:
+            logger.error(f"Erro ao enviar autorização: {e}")
 
     def _on_authorize(self, data):
-        if data.get('error'): self.authorized = False; logger.error(f"❌ Auth erro: {data['error']}")
+        logger.info("📬 Resposta de autorização recebida: %s", json.dumps(data, indent=2)[:500])
+        if data.get('error'):
+            self.authorized = False
+            logger.error(f"❌ Auth erro: {data['error']}")
         else:
-            logger.info("✅ Autorizado!"); self.authorized = True
+            logger.info("✅ Autorizado com sucesso!")
+            self.authorized = True
             self._subscribe_balance()
-            if self.current_symbol: self._subscribe_ticks(self.current_symbol)
-            for cid in list(self.active_trades.keys()): self._subscribe_contract(cid)
+            if self.current_symbol:
+                self._subscribe_ticks(self.current_symbol)
+            # Re-subscrever contratos ativos
+            for cid in list(self.active_trades.keys()):
+                self._subscribe_contract(cid)
 
     # ── Saldo ───────────────────────────────────────────────────
     def _subscribe_balance(self):
         try:
             self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
             self._balance_subscribed = True
-        except Exception as e: logger.error(f"Erro subs. saldo: {e}")
+            logger.info("💰 Pedido de subscrição de saldo enviado")
+        except Exception as e:
+            logger.error(f"Erro ao subscrever saldo: {e}")
 
     def _on_balance(self, data):
         bd = data.get('balance', {})
         if bd:
             self.balance = float(bd.get('balance', 0))
             self.currency = bd.get('currency', 'USD')
-            if self.trading_bot: self.trading_bot.balance, self.trading_bot.currency = self.balance, self.currency
+            if self.trading_bot:
+                self.trading_bot.balance, self.trading_bot.currency = self.balance, self.currency
+            logger.info(f"💰 Saldo atualizado: {self.balance:.2f} {self.currency}")
 
     # ── Ticks ───────────────────────────────────────────────────
     def _subscribe_ticks(self, symbol):
-        if not self.authorized: return
-        if symbol in self.subscribed_symbols: return
+        if not self.authorized:
+            logger.warning("⚠️ Tentativa de subscrição de ticks antes da autorização. Ignorando.")
+            return
+        if symbol in self.subscribed_symbols:
+            logger.info(f"⚠️ Símbolo {symbol} já subscrito.")
+            return
         try:
             self.ws.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": self._next_req()}))
             self.subscribed_symbols.add(symbol)
             self.current_symbol = symbol
-            logger.info(f"📊 Subscrito ticks: {symbol}")
-        except Exception as e: logger.error(f"Erro subs. ticks: {e}")
+            self._subscribed_at = time.time()
+            logger.info(f"📊 Pedido de subscrição de ticks para {symbol} enviado")
+        except Exception as e:
+            logger.error(f"Erro ao subscrever ticks: {e}")
 
     def _on_tick(self, data):
         tick = data.get('tick', {})
-        if not tick: return
-        if 'epoch' in tick and time.time() - tick['epoch'] > 5: return
+        if not tick:
+            logger.warning("⚠️ Mensagem 'tick' recebida sem dados.")
+            return
+        # Validação de latência
+        if 'epoch' in tick and time.time() - tick['epoch'] > 5:
+            logger.info(f"⏰ Tick ignorado (latência > 5s): {tick.get('symbol')} @ {tick.get('quote')}")
+            return
+        # Registar o primeiro tick e ativar streaming
         if not self.streaming:
             self.streaming = True
             self.connection_state = self.ST_STREAMING
-            logger.info("📡 Streaming de ticks iniciado")
+            logger.info("📡 Estado STREAMING ativado! Primeiro tick real recebido.")
         self._last_tick_time = time.time()
+        logger.debug(f"📈 Tick recebido: {tick.get('symbol')} @ {tick.get('quote')}")
         if self.on_tick_callback:
             self.on_tick_callback({
                 'symbol':    tick.get('symbol', self.current_symbol),
@@ -230,21 +269,25 @@ class DerivWebSocketClient:
 
     def place_trade(self, contract_type, amount, is_digit=False):
         with self._trade_lock:
+            # Bloquear trades se não houver stream ativo
             if not self.streaming:
-                logger.warning("🚫 Sem stream de ticks. Trade bloqueado.")
+                logger.warning("🚫 Trade bloqueado: sistema não está em estado STREAMING.")
                 return False
             if amount > self.balance * 0.02:
-                logger.warning("🚫 Trade excede 2% do saldo.")
+                logger.warning("🚫 Trade bloqueado: excede 2% do saldo.")
                 return False
             if time.time() - self._last_trade_time < 2:
-                logger.warning("⏱️ Intervalo mínimo de 2s.")
+                logger.warning("⏱️ Trade bloqueado: intervalo mínimo de 2s entre trades.")
                 return False
-            if not self.authorized: return False
+            if not self.authorized:
+                logger.warning("🚫 Trade bloqueado: não autorizado.")
+                return False
             if self.pending_trade is not None:
                 if time.time() - self.pending_trade_time > 20:
+                    logger.warning("Trade pendente expirou. A limpar...")
                     self.pending_trade = None
                 else:
-                    logger.warning("Trade pendente.")
+                    logger.warning("⚠️ Trade pendente. Aguarde a conclusão do atual.")
                     return False
 
             self._last_trade_time = time.time()
@@ -270,26 +313,47 @@ class DerivWebSocketClient:
                     "duration": duration, "duration_unit": duration_unit,
                     "symbol": self.current_symbol, "req_id": req_id
                 }))
+                logger.info(f"📝 Trade enviado (req_id={req_id})")
                 return True
             except Exception as e:
-                logger.error(f"❌ Erro trade: {e}")
+                logger.error(f"❌ Erro ao enviar trade: {e}")
                 self.pending_trade = None
                 return False
 
     # ── Proposta / Compra ────────────────────────────────────────
     def _on_proposal(self, data):
-        if self.pending_trade and data.get('req_id') != self.pending_trade.get('req_id'): return
-        if data.get('error'): self.pending_trade = None; return
-        p = data.get('proposal', {}); pid, ask = p.get('id'), p.get('ask_price')
-        if not pid or ask is None: self.pending_trade = None; return
-        if self.pending_trade and 'proposal_id' in self.pending_trade: return
+        if self.pending_trade and data.get('req_id') != self.pending_trade.get('req_id'):
+            logger.info("Proposta ignorada (req_id não coincide).")
+            return
+        if data.get('error'):
+            logger.error(f"❌ Erro na proposta: {data['error']}")
+            self.pending_trade = None
+            return
+        p = data.get('proposal', {})
+        pid, ask = p.get('id'), p.get('ask_price')
+        if not pid or ask is None:
+            logger.error("Proposta inválida (sem id ou ask_price).")
+            self.pending_trade = None
+            return
+        if self.pending_trade and 'proposal_id' in self.pending_trade:
+            logger.warning("⚠️ BUY já enviado para esta proposta. Ignorando duplicado.")
+            return
         self.pending_trade['proposal_id'] = pid
         self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
+        logger.info(f"📤 Ordem BUY enviada para proposta {pid}")
 
     def _on_buy_response(self, data):
-        if data.get('error'): self.pending_trade = None; return
-        bd = data.get('buy', {}); cid, bp = bd.get('contract_id'), bd.get('buy_price', 0)
-        if not cid: self.pending_trade = None; return
+        if data.get('error'):
+            logger.error(f"❌ Erro na compra: {data['error']}")
+            self.pending_trade = None
+            return
+        bd = data.get('buy', {})
+        cid, bp = bd.get('contract_id'), bd.get('buy_price', 0)
+        if not cid:
+            logger.error("Resposta de compra sem contract_id.")
+            self.pending_trade = None
+            return
+        logger.info(f"✅ Contrato {cid} comprado por ${bp}")
         if self.pending_trade:
             amt, action = self.pending_trade.get('amount', 0), self.pending_trade.get('contract_type', '')
             if self.trading_bot:
@@ -298,20 +362,31 @@ class DerivWebSocketClient:
                     'action': action, 'amount': amt, 'price': bp,
                     'result': 'pending', 'confidence': 70
                 })
-            self.active_trades[cid] = {'contract_id': cid, 'amount': amt, 'buy_price': bp,
-                                       'timestamp': time.time(), 'action': action}
+            self.active_trades[cid] = {
+                'contract_id': cid, 'amount': amt, 'buy_price': bp,
+                'timestamp': time.time(), 'action': action
+            }
             self._subscribe_contract(cid)
             self.pending_trade = None
 
     def _subscribe_contract(self, cid):
-        try: self.ws.send(json.dumps({"proposal_open_contract": 1, "contract_id": cid, "subscribe": 1, "req_id": self._next_req()}))
-        except Exception as e: logger.error(f"Erro sub contrato: {e}")
+        try:
+            self.ws.send(json.dumps({
+                "proposal_open_contract": 1, "contract_id": cid,
+                "subscribe": 1, "req_id": self._next_req()
+            }))
+            logger.info(f"📡 Subscrição de contrato {cid} enviada")
+        except Exception as e:
+            logger.error(f"Erro ao subscrever contrato {cid}: {e}")
 
     def _on_poc(self, data):
-        c = data.get('proposal_open_contract', {}); cid = c.get('contract_id')
-        if not cid or not c.get('is_sold') or cid in self._processed_contracts: return
+        c = data.get('proposal_open_contract', {})
+        cid = c.get('contract_id')
+        if not cid or not c.get('is_sold') or cid in self._processed_contracts:
+            return
         self._processed_contracts.append(cid)
-        bp, sp = c.get('buy_price', 0), c.get('sell_price', 0); profit = sp - bp
+        bp, sp = c.get('buy_price', 0), c.get('sell_price', 0)
+        profit = sp - bp
         amt = self.active_trades.get(cid, {}).get('amount', bp)
         logger.info(f"📊 RESULTADO [{cid}]: {'✅ GANHO' if profit > 0 else '❌ PERDA'} ${abs(profit):.2f}")
         if self.trading_bot:
@@ -319,11 +394,13 @@ class DerivWebSocketClient:
                 'contract_id': cid, 'buy_price': bp, 'sell_price': sp,
                 'profit': profit, 'amount': amt, 'is_win': profit > 0
             })
-        if cid in self.active_trades: del self.active_trades[cid]
+        if cid in self.active_trades:
+            del self.active_trades[cid]
 
     def request_deposit(self, amount, currency, method):
         return {'status': 'pending', 'message': f'Depósito ${amount} solicitado.', 'amount': amount, 'method': method}
 
     def request_withdrawal(self, amount, currency, method):
-        if amount > self.balance: return {'error': 'Saldo insuficiente'}
+        if amount > self.balance:
+            return {'error': 'Saldo insuficiente'}
         return {'status': 'pending', 'message': f'Saque ${amount} solicitado.', 'amount': amount, 'method': method}
