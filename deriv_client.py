@@ -16,19 +16,15 @@ class DerivWebSocketClient:
     ST_RECONNECTING = 'RECONNECTING'
 
     def __init__(self, config, on_tick_callback=None):
+        self.config = config
+        self.ws = None
+        self.ws_thread = None
         self.connected = False
         self.authorized = False
         self.streaming = False
         self.balance = 0
         self.currency = 'USD'
-        WS_URL = config.WS_URL
-        self._ws_args = (WS_URL,)  # only need to pass the URL
-        self._ws_kwargs = {
-            'on_open': self._on_open,
-            'on_message': self._on_message,
-            'on_error': self._on_error,
-            'on_close': self._on_close,
-        }
+        self.current_symbol = 'R_100'
         self.on_tick_callback = on_tick_callback
         self.trading_bot = None
         self.payment_system = None
@@ -48,11 +44,8 @@ class DerivWebSocketClient:
         self._processed_lock = threading.Lock()
         self._req_counter = 1000
         self.connection_state = self.ST_CONNECTING
-        self._keep_alive_timer = None
-        self._ws_app = None
-        self._ws_thread = None
+        self._keep_alive_thread = None
         self._thread_monitor_enabled = False
-        self.config = config
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
@@ -68,14 +61,13 @@ class DerivWebSocketClient:
     def connect(self):
         if self._stop_event.is_set():
             self._stop_event.clear()
-        # Sinalizar a thread antiga para parar, se existir
-        if self._ws_thread and self._ws_thread.is_alive():
+        if self.ws_thread and self.ws_thread.is_alive():
             logger.info("Thread de conexão já ativa – a monitorizar.")
             self._start_thread_monitor()
             return
         logger.info("🔌 A iniciar thread de ligação...")
-        self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
-        self._ws_thread.start()
+        self.ws_thread = threading.Thread(target=self._run_forever, daemon=True)
+        self.ws_thread.start()
         self._start_thread_monitor()
 
     def _start_thread_monitor(self):
@@ -86,10 +78,10 @@ class DerivWebSocketClient:
         def monitor():
             while not self._stop_event.is_set():
                 time.sleep(10)
-                if self._ws_thread is None or not self._ws_thread.is_alive():
+                if self.ws_thread is None or not self.ws_thread.is_alive():
                     logger.warning("🔄 Thread de ligação morreu! Reiniciando...")
-                    self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
-                    self._ws_thread.start()
+                    self.ws_thread = threading.Thread(target=self._run_forever, daemon=True)
+                    self.ws_thread.start()
         threading.Thread(target=monitor, daemon=True).start()
 
     def _run_forever(self):
@@ -99,34 +91,44 @@ class DerivWebSocketClient:
             self.connection_state = self.ST_CONNECTING
             try:
                 logger.info("🔌 A ligar à Deriv...")
-                self._ws_app = websocket.WebSocketApp(*self._ws_args, **self._ws_kwargs)
-                # Iniciar keep-alive manual para garantir resiliência máxima
-                self._keep_alive_timer = threading.Thread(target=self._keep_alive_loop)
-                self._keep_alive_timer.daemon = True
-                self._keep_alive_timer.start()
-                self._ws_app.run_forever(ping_interval=0, ping_timeout=0)  # Desativamos o ping da lib
+                self.ws = websocket.WebSocketApp(
+                    self.config.WS_URL,
+                    on_open=self._on_open,
+                    on_message=self._on_message,
+                    on_error=self._on_ws_error,
+                    on_close=self._on_close
+                )
+                # Desativamos o ping da biblioteca (ping_interval enorme) e usamos o nosso keep-alive manual
+                self._start_keep_alive()
+                self.ws.run_forever(ping_interval=86400, ping_timeout=10)
             except Exception as e:
                 logger.error(f"Erro no loop de conexão: {e}", exc_info=True)
             finally:
                 self.connected, self.authorized, self.streaming = False, False, False
-                if self._ws_app: self._ws_app = None
-                if self._keep_alive_timer: self._keep_alive_timer = None
+                if self.ws: self.ws = None
+                if self._keep_alive_thread:
+                    self._keep_alive_thread = None
             if not self._stop_event.is_set():
                 self.connection_state = self.ST_RECONNECTING
                 logger.info("🔄 A aguardar 2 segundos antes de nova tentativa...")
                 time.sleep(2)
 
-    def _keep_alive_loop(self):
+    def _start_keep_alive(self):
         """Envia um ping a cada 30 segundos para manter a ligação ativa."""
-        while not self._stop_event.is_set() and self._ws_app:
-            time.sleep(30)
-            if self._ws_app and self._ws_app.sock and self._ws_app.sock.connected:
-                try:
-                    self._ws_app.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
-                    logger.debug("📶 Ping manual enviado")
-                except Exception as e:
-                    logger.warning(f"Falha ao enviar ping: {e}")
-                    break
+        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
+            return
+        def ping_loop():
+            while not self._stop_event.is_set() and self.ws:
+                time.sleep(30)
+                if self.ws and self.ws.sock and self.ws.sock.connected:
+                    try:
+                        self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
+                        logger.debug("📶 Ping manual enviado")
+                    except Exception as e:
+                        logger.warning(f"Falha ao enviar ping: {e}")
+                        break
+        self._keep_alive_thread = threading.Thread(target=ping_loop, daemon=True)
+        self._keep_alive_thread.start()
 
     def _cleanup_state(self):
         self.subscribed_symbols.clear()
@@ -167,7 +169,7 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
-    def _on_error(self, ws, error):
+    def _on_ws_error(self, ws, error):
         logger.error(f"Erro de conexão WebSocket: {error}")
 
     def _on_close(self, ws, close_code, close_msg):
@@ -181,7 +183,7 @@ class DerivWebSocketClient:
     def authorize(self):
         if not self.user_token: return
         try:
-            self._ws_app.send(json.dumps({"authorize": self.user_token, "req_id": self._next_req()}))
+            self.ws.send(json.dumps({"authorize": self.user_token, "req_id": self._next_req()}))
             self._auth_time = time.time()
             logger.info("🔐 Pedido de autorização enviado")
         except Exception as e: logger.error(f"Erro autorizar: {e}")
@@ -202,7 +204,7 @@ class DerivWebSocketClient:
     # ── Saldo ───────────────────────────────────────────────────
     def _subscribe_balance(self):
         try:
-            self._ws_app.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
+            self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
             self._balance_subscribed = True
         except Exception as e: logger.error(f"Erro subs. saldo: {e}")
 
@@ -218,7 +220,7 @@ class DerivWebSocketClient:
         if not self.authorized: return
         if symbol in self.subscribed_symbols: return
         try:
-            self._ws_app.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": self._next_req()}))
+            self.ws.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": self._next_req()}))
             self.subscribed_symbols.add(symbol)
             self.current_symbol = symbol
             logger.info(f"📊 Subscrição de ticks para {symbol} enviada")
@@ -283,7 +285,7 @@ class DerivWebSocketClient:
             self.pending_trade_time = time.time()
 
             try:
-                self._ws_app.send(json.dumps({
+                self.ws.send(json.dumps({
                     "proposal": 1, "amount": amount, "basis": "stake",
                     "contract_type": contract_type_full, "currency": self.currency,
                     "duration": duration, "duration_unit": duration_unit,
@@ -318,7 +320,7 @@ class DerivWebSocketClient:
             logger.warning("⚠️ BUY já enviado para esta proposta. Ignorando duplicado.")
             return
         self.pending_trade['proposal_id'] = pid
-        self._ws_app.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
+        self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
         logger.info(f"📤 Ordem BUY enviada para proposta {pid}")
 
     def _on_buy_response(self, data):
@@ -350,7 +352,7 @@ class DerivWebSocketClient:
 
     def _subscribe_contract(self, cid):
         try:
-            self._ws_app.send(json.dumps({
+            self.ws.send(json.dumps({
                 "proposal_open_contract": 1, "contract_id": cid,
                 "subscribe": 1, "req_id": self._next_req()
             }))
