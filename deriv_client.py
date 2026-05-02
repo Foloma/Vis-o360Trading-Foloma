@@ -79,23 +79,18 @@ class DerivWebSocketClient:
             try:
                 logger.info("🔌 A ligar à Deriv...")
                 self.ws = websocket.create_connection(self.config.WS_URL)
-                # Fase de autorização
                 self.state = self.ST_AUTHORIZING
                 self._authorize()
-                # Aguardar resposta de autorização
                 if not self._wait_for_authorization(timeout=10):
                     logger.error("Timeout de autorização")
                     continue
-                # Subscreen saldo e ticks
                 self._subscribe_balance()
                 if self.current_symbol:
                     self._subscribe_ticks(self.current_symbol)
                 self.state = self.ST_CONNECTED
                 logger.info("🟢 Conectado e autorizado")
-                # Iniciar keep‑alive e watchdog
                 self._start_keep_alive()
                 self._start_watchdog()
-                # Loop de leitura
                 self._read_loop()
             except Exception as e:
                 logger.error(f"Erro na conexão: {e}", exc_info=True)
