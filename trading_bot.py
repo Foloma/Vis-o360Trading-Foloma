@@ -200,6 +200,7 @@ class TradingBot:
                 self.consecutive_wins += 1
                 self.consecutive_losses = 0
                 logger.info(f"✅ GANHO! +${profit:.2f} | Vitórias consecutivas: {self.consecutive_wins}")
+                self.reset_martingale()                 # ✅ reset após ganho
             else:
                 loss = target_trade.get('amount', 0)
                 target_trade['result'] = 'loss'
@@ -209,6 +210,12 @@ class TradingBot:
                 self.consecutive_losses += 1
                 self.consecutive_wins = 0
                 logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
+                # ✅ aplicar martingale após perda
+                can_martingale, mg_result = self.apply_martingale_after_loss(loss)
+                if can_martingale:
+                    logger.info(mg_result['message'])
+                else:
+                    logger.warning(f"⛔ Martingale parado: {mg_result}")
 
             self.update_stats()
             if self.client:
