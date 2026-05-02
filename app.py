@@ -156,16 +156,18 @@ def get_user_session(user_id):
                 'payment_system': payment
             }
 
-            # NOVO: reconectar automaticamente se tiver token guardado
+            # ✅ Reconexão automática se o utilizador já tiver token guardado
             email = next((e for e, u in users.items() if u.get('id') == user_id), None)
             if email:
                 token = users[email].get('deriv_token')
                 if token:
                     client.set_user_token(token)
                     threading.Thread(target=client.connect, daemon=True).start()
+                    bot.start(client)                          # ✅ Correção #3
                     bot.daily_stats['start_balance'] = bot.balance
 
         return user_sessions[user_id]
+
 
 def require_auth(f):
     @wraps(f)
@@ -475,7 +477,10 @@ def api_connect():
         sess = get_user_session(user['id'])
         client = sess['client']
         client.set_user_token(token)
-        client.connect()
+
+        # ✅ Correção #1: só reconectar se não estiver já autorizado
+        if not client.authorized:
+            client.connect()
 
         # Aguardar até 10 segundos pela autorização
         timeout = time.time() + 10
@@ -485,11 +490,9 @@ def api_connect():
         if not client.authorized:
             return jsonify({'error': 'Autorização falhou. Verifique o token.'}), 500
 
-        if client.connected and client.authorized:
-            sess['trading_bot'].start(client)
-            return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
-        else:
-            return jsonify({'error': 'Falha ao iniciar a sessão de trading.'}), 500
+        sess['trading_bot'].start(client)
+
+        return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
     except Exception as e:
         logger.error(f"❌ Erro na conexão: {e}")
         return jsonify({'error': str(e)}), 500
@@ -511,8 +514,6 @@ def api_status():
             bot.client = client
             bot._client_connected = client.connected
             bot._client_authorized = client.authorized
-            if client.connected and client.authorized and not bot.client:
-                bot.start(client)
 
         bot_status = bot.get_status()
         bot_status['streaming'] = client.streaming if client else False
