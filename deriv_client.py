@@ -44,7 +44,7 @@ class DerivWebSocketClient:
         self._req_counter = 1000
         self.connection_state = self.ST_CONNECTING
         self._keep_alive_thread = None
-        self._thread_monitor_enabled = False
+        self._watchdog_thread = None
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
@@ -62,25 +62,10 @@ class DerivWebSocketClient:
             self._stop_event.clear()
         if self.ws_thread and self.ws_thread.is_alive():
             logger.info("Thread de conexão já ativa")
-            self._start_thread_monitor()
             return
         logger.info("🔌 A iniciar thread de ligação...")
         self.ws_thread = threading.Thread(target=self._run_forever, daemon=True)
         self.ws_thread.start()
-        self._start_thread_monitor()
-
-    def _start_thread_monitor(self):
-        if self._thread_monitor_enabled:
-            return
-        self._thread_monitor_enabled = True
-        def monitor():
-            while not self._stop_event.is_set():
-                time.sleep(10)
-                if self.ws_thread is None or not self.ws_thread.is_alive():
-                    logger.warning("🔄 Thread de ligação morreu! Reiniciando...")
-                    self.ws_thread = threading.Thread(target=self._run_forever, daemon=True)
-                    self.ws_thread.start()
-        threading.Thread(target=monitor, daemon=True).start()
 
     def _run_forever(self):
         logger.info("▶️ Thread de ligação iniciada.")
@@ -96,47 +81,75 @@ class DerivWebSocketClient:
                     on_error=self._on_ws_error,
                     on_close=self._on_close
                 )
-                # Iniciamos o keep‑alive manual ANTES de entrar no loop bloqueante
+                # Iniciar keep‑alive manual e watchdog de ticks após a abertura
                 self._start_keep_alive()
-                # ping_interval=45, ping_timeout=10 como redundância saudável
-                self.ws.run_forever(ping_interval=45, ping_timeout=10)
+                self._start_watchdog()
+                self.ws.run_forever(ping_interval=86400, ping_timeout=10)
             except Exception as e:
                 logger.error(f"Erro no loop de conexão: {e}", exc_info=True)
             finally:
                 self.connected, self.authorized, self.streaming = False, False, False
-                # Parar a thread de keep‑alive actual
-                self._stop_keep_alive()
                 if self.ws: self.ws = None
+                self._stop_keep_alive()
             if not self._stop_event.is_set():
                 self.connection_state = self.ST_RECONNECTING
-                logger.info("🔄 A aguardar 2 segundos antes de nova tentativa...")
                 time.sleep(2)
 
+    # ── Watchdog de ticks ────────────────────────────────────────
+    def _start_watchdog(self):
+        """Vigia o fluxo de ticks. Se >60s sem tick, força reconexão."""
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            self._watchdog_thread = None
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+        self._watchdog_thread.start()
+
+    def _watchdog_loop(self):
+        while not self._stop_event.is_set() and self.ws:
+            time.sleep(10)
+            # Só actua se o streaming já tiver sido iniciado
+            if self.streaming and self._last_tick_time is not None:
+                if time.time() - self._last_tick_time > 60:
+                    logger.warning("🛑 Watchdog: >60s sem ticks! Forçando reconexão.")
+                    self.streaming = False
+                    self.connection_state = self.ST_STALE
+                    try:
+                        self.ws.close()
+                    except:
+                        pass
+                    self.connected, self.authorized = False, False
+                    break
+            elif self.connected and not self.streaming:
+                # Ainda não recebeu o primeiro tick; aguarda até 120s antes de forçar
+                if self._auth_time and time.time() - self._auth_time > 120:
+                    logger.warning("🛑 Watchdog: 120s ligado sem stream. Forçando reconexão.")
+                    try:
+                        self.ws.close()
+                    except:
+                        pass
+                    self.connected, self.authorized = False, False
+                    break
+
+    # ── Keep‑alive manual ───────────────────────────────────────
     def _start_keep_alive(self):
-        """Inicia (ou substitui) a thread que envia um ping a cada 30 segundos."""
-        self._stop_keep_alive()               # termina qualquer thread anterior
+        self._stop_keep_alive()
         self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
         self._keep_alive_thread.start()
 
     def _stop_keep_alive(self):
         if self._keep_alive_thread and self._keep_alive_thread.is_alive():
-            self._keep_alive_thread = None   # a thread antiga usava o socket antigo e vai morrer quando tentar enviar
+            self._keep_alive_thread = None
 
     def _keep_alive_loop(self):
-        """Envia um ping a cada 30 segundos enquanto o socket estiver ativo."""
         while not self._stop_event.is_set() and self.ws:
             time.sleep(30)
-            # Verificamos se o socket ainda está realmente conectado
             if self.ws and self.ws.sock and getattr(self.ws.sock, 'connected', False):
                 try:
                     self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
                     logger.debug("📶 Ping manual enviado")
                 except Exception as e:
-                    logger.warning(f"Falha ao enviar ping manual: {e}")
-                    # Se o envio falhar, a ligação provavelmente caiu – saímos do loop
+                    logger.warning(f"Falha ao enviar ping: {e}")
                     break
             else:
-                # Se o socket já não está conectado, o run_forever vai sair e recriar tudo
                 break
 
     def _cleanup_state(self):
@@ -226,9 +239,7 @@ class DerivWebSocketClient:
             if self.trading_bot: self.trading_bot.balance, self.trading_bot.currency = self.balance, self.currency
             logger.info(f"💰 Saldo atualizado: {self.balance:.2f} {self.currency}")
 
-    # ⚡ Método chamado pelo trading_bot após cada resultado de trade
     def get_balance(self, force=False):
-        """Força uma actualização imediata do saldo, se necessário."""
         if not self._balance_subscribed:
             self._subscribe_balance()
         elif force:
@@ -263,7 +274,7 @@ class DerivWebSocketClient:
                 'timestamp': tick.get('epoch', time.time())
             })
 
-    # ── Colocar Trade (com lock global e timeout robusto) ─────────
+    # ── Colocar Trade ──────────────────────────────────────────
     def _next_req(self):
         self._req_counter += 1
         return self._req_counter
@@ -320,7 +331,7 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return False
 
-    # ── Fluxo de Proposta / Compra (protegido contra duplicação) ──
+    # ── Proposta / Compra / Resultado ────────────────────────────
     def _on_proposal(self, data):
         if self.pending_trade is None:
             logger.info("Proposta recebida, mas sem trade pendente. Ignorando.")
