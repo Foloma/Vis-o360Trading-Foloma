@@ -96,35 +96,48 @@ class DerivWebSocketClient:
                     on_error=self._on_ws_error,
                     on_close=self._on_close
                 )
-                # Desativamos o ping da biblioteca e usamos keep-alive manual
+                # Iniciamos o keep‑alive manual ANTES de entrar no loop bloqueante
                 self._start_keep_alive()
-                self.ws.run_forever(ping_interval=86400, ping_timeout=10)
+                # ping_interval=45, ping_timeout=10 como redundância saudável
+                self.ws.run_forever(ping_interval=45, ping_timeout=10)
             except Exception as e:
                 logger.error(f"Erro no loop de conexão: {e}", exc_info=True)
             finally:
                 self.connected, self.authorized, self.streaming = False, False, False
+                # Parar a thread de keep‑alive actual
+                self._stop_keep_alive()
                 if self.ws: self.ws = None
-                if self._keep_alive_thread: self._keep_alive_thread = None
             if not self._stop_event.is_set():
                 self.connection_state = self.ST_RECONNECTING
                 logger.info("🔄 A aguardar 2 segundos antes de nova tentativa...")
                 time.sleep(2)
 
     def _start_keep_alive(self):
-        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
-            return
-        def ping_loop():
-            while not self._stop_event.is_set() and self.ws:
-                time.sleep(30)
-                if self.ws and self.ws.sock and self.ws.sock.connected:
-                    try:
-                        self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
-                        logger.debug("📶 Ping manual enviado")
-                    except Exception as e:
-                        logger.warning(f"Falha ao enviar ping: {e}")
-                        break
-        self._keep_alive_thread = threading.Thread(target=ping_loop, daemon=True)
+        """Inicia (ou substitui) a thread que envia um ping a cada 30 segundos."""
+        self._stop_keep_alive()               # termina qualquer thread anterior
+        self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
         self._keep_alive_thread.start()
+
+    def _stop_keep_alive(self):
+        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
+            self._keep_alive_thread = None   # a thread antiga usava o socket antigo e vai morrer quando tentar enviar
+
+    def _keep_alive_loop(self):
+        """Envia um ping a cada 30 segundos enquanto o socket estiver ativo."""
+        while not self._stop_event.is_set() and self.ws:
+            time.sleep(30)
+            # Verificamos se o socket ainda está realmente conectado
+            if self.ws and self.ws.sock and getattr(self.ws.sock, 'connected', False):
+                try:
+                    self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
+                    logger.debug("📶 Ping manual enviado")
+                except Exception as e:
+                    logger.warning(f"Falha ao enviar ping manual: {e}")
+                    # Se o envio falhar, a ligação provavelmente caiu – saímos do loop
+                    break
+            else:
+                # Se o socket já não está conectado, o run_forever vai sair e recriar tudo
+                break
 
     def _cleanup_state(self):
         self.subscribed_symbols.clear()
@@ -202,6 +215,7 @@ class DerivWebSocketClient:
         try:
             self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
             self._balance_subscribed = True
+            logger.info("💰 Subscrição de saldo enviada")
         except Exception as e: logger.error(f"Erro subs. saldo: {e}")
 
     def _on_balance(self, data):
@@ -210,6 +224,18 @@ class DerivWebSocketClient:
             self.balance = float(bd.get('balance', 0))
             self.currency = bd.get('currency', 'USD')
             if self.trading_bot: self.trading_bot.balance, self.trading_bot.currency = self.balance, self.currency
+            logger.info(f"💰 Saldo atualizado: {self.balance:.2f} {self.currency}")
+
+    # ⚡ Método chamado pelo trading_bot após cada resultado de trade
+    def get_balance(self, force=False):
+        """Força uma actualização imediata do saldo, se necessário."""
+        if not self._balance_subscribed:
+            self._subscribe_balance()
+        elif force:
+            try:
+                self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
+            except Exception as e:
+                logger.error(f"Erro ao pedir saldo: {e}")
 
     # ── Ticks ───────────────────────────────────────────────────
     def _subscribe_ticks(self, symbol):
