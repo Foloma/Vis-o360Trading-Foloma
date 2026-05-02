@@ -4,8 +4,9 @@ import logging
 
 load_dotenv()
 
+
 class Config:
-    DERIV_APP_ID = os.getenv('DERIV_APP_ID', '133674')
+    DERIV_APP_ID = os.getenv('DERIV_APP_ID', '1089')
 
     DEMO_API_TOKEN = os.getenv('DEMO_API_TOKEN', '')
     REAL_API_TOKEN = os.getenv('REAL_API_TOKEN', '')
@@ -15,15 +16,10 @@ class Config:
 
     DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
 
-    ACCOUNT_TYPES = {
-        'demo': {'name': 'Conta Demo', 'token': DEMO_API_TOKEN, 'is_virtual': 1},
-        'real': {'name': 'Conta Real', 'token': REAL_API_TOKEN, 'is_virtual': 0}
-    }
-
     AVAILABLE_SYMBOLS = {
         'R_100': 'Volatility 100',
-        'R_75': 'Volatility 75',
-        'R_50': 'Volatility 50'
+        'R_75':  'Volatility 75',
+        'R_50':  'Volatility 50'
     }
 
     DEFAULT_STAKE = 0.35
@@ -51,7 +47,7 @@ class Config:
         'max_daily_loss_percent': 5,
         'max_consecutive_losses': 2,
         'min_confidence': 50,
-        'min_confidence_digits': 42,   # recomendado > 0
+        'min_confidence_digits': 42,
         'max_stake_percent': 5,
         'stop_loss_enabled': True,
         'take_profit_enabled': True,
@@ -66,5 +62,6 @@ class Config:
     }
 
     LOG_LEVEL = logging.INFO
+
 
 config = Config()
