@@ -155,6 +155,17 @@ def get_user_session(user_id):
                 'digit_analyzer': analyzer,
                 'payment_system': payment
             }
+
+            # ✅ NOVO: Conexão automática se o utilizador já tiver token guardado
+            email = next((e for e, u in users.items() if u.get('id') == user_id), None)
+            if email:
+                token = users[email].get('deriv_token')
+                if token:
+                    client.set_user_token(token)
+                    # Inicia a ligação numa thread separada, sem bloquear o arranque
+                    threading.Thread(target=client.connect, daemon=True).start()
+                    logger.info(f"🔌 Auto‑conexão iniciada para {email}")
+
         return user_sessions[user_id]
 
 
