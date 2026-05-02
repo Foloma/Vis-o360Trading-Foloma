@@ -26,6 +26,7 @@ from payment_system import PaymentSystem
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'foloma_trading_secret_key_2024')
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400  # 24 horas
 
 DATA_DIR = os.environ.get('DATA_PATH', '.')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
@@ -269,6 +270,7 @@ def api_login():
         user['last_login'] = time.time()
         save_users(users)
 
+        session.permanent = True
         session['user_id'] = user['id']
         session['user_name'] = user['name']
         session['user_email'] = user['email']
@@ -496,8 +498,7 @@ def api_status():
             bot.balance = client.balance
             bot.currency = client.currency
             bot.client = client
-            # Só considera conectado se o WebSocket estiver ligado, autorizado E a receber ticks
-            bot._client_connected = (client.connected and client.authorized and client.streaming)
+            bot._client_connected = client.connected
             bot._client_authorized = client.authorized
             if client.connected and client.authorized and not bot.client:
                 bot.start(client)
@@ -523,26 +524,6 @@ def api_status():
     except Exception as e:
         logger.error(f"Status: {e}")
         return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/debug')
-def api_debug():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Não autenticado'}), 401
-    user_id = session['user_id']
-    sess = get_user_session(user_id)
-    client = sess['client']
-    return jsonify({
-        'connected': client.connected,
-        'authorized': client.authorized,
-        'streaming': client.streaming,
-        'balance': client.balance,
-        'symbol': client.current_symbol,
-        'state': client.connection_state,
-        'ws_thread_alive': client.ws_thread.is_alive() if client.ws_thread else False,
-        'pending_trade': client.pending_trade is not None,
-        'last_tick_seconds_ago': round(time.time() - client._last_tick_time, 1) if client._last_tick_time else None
-    })
 
 
 @app.route('/api/symbol/change', methods=['POST'])
