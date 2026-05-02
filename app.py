@@ -476,9 +476,11 @@ def api_connect():
         if not client.authorized:
             return jsonify({'error': 'Autorização falhou. Verifique o token.'}), 500
 
-        sess['trading_bot'].start(client)
-
-        return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
+        if client.connected and client.authorized:
+            sess['trading_bot'].start(client)
+            return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
+        else:
+            return jsonify({'error': 'Falha ao iniciar a sessão de trading.'}), 500
     except Exception as e:
         logger.error(f"❌ Erro na conexão: {e}")
         return jsonify({'error': str(e)}), 500
@@ -524,6 +526,26 @@ def api_status():
     except Exception as e:
         logger.error(f"Status: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/debug')
+def api_debug():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Não autenticado'}), 401
+    user_id = session['user_id']
+    sess = get_user_session(user_id)
+    client = sess['client']
+    return jsonify({
+        'connected': client.connected,
+        'authorized': client.authorized,
+        'streaming': client.streaming,
+        'balance': client.balance,
+        'symbol': client.current_symbol,
+        'state': client.state,
+        'ws_thread_alive': client._ws_thread.is_alive() if client._ws_thread else False,
+        'pending_trade': client.pending_trade is not None,
+        'last_tick_seconds_ago': round(time.time() - client._last_tick_time, 1) if client._last_tick_time else None
+    })
 
 
 @app.route('/api/symbol/change', methods=['POST'])
@@ -618,7 +640,11 @@ def api_trade_digit():
         if ok:
             credit_affiliate_commission(session.get('user_email'), amt)
             label = 'ÍMPAR' if pred == 'odd' else 'PAR'
-            return jsonify({'status': 'ok', 'message': f'✅ ${amt:.2f} em {label}! Resultado em ~{tr} ticks.', 'ticks_remaining': tr})
+            return jsonify({
+                'status': 'ok',
+                'message': f'✅ ${amt:.2f} em {label}! Resultado em ~{tr} ticks.',
+                'ticks_remaining': tr
+            })
         return jsonify({'error': 'Falha no trade'}), 500
     except Exception as e:
         logger.error(f"Erro no trade de dígito: {e}")
