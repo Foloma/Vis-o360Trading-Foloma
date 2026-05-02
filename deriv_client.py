@@ -8,6 +8,7 @@ from collections import deque
 logger = logging.getLogger(__name__)
 
 class DerivWebSocketClient:
+    # Estados
     ST_DISCONNECTED = 'DISCONNECTED'
     ST_CONNECTING   = 'CONNECTING'
     ST_CONNECTED    = 'CONNECTED'
@@ -46,6 +47,7 @@ class DerivWebSocketClient:
         self._watchdog_thread = None
         self._ws_thread = None
 
+    # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
     def set_trading_bot(self, b):
         self.trading_bot = b
@@ -55,17 +57,19 @@ class DerivWebSocketClient:
         self.user_token = t
         logger.info("🔑 Token configurado")
 
+    # ── Conexão pública ─────────────────────────────────────────
     def connect(self):
-        """Inicia uma nova ligação (ou reinicia se já existir)."""
-        self._stop_event.set()
+        """Inicia (ou reinicia) a ligação WebSocket."""
+        self._stop_event.set()                       # pede à thread antiga para terminar
         if self._ws_thread and self._ws_thread.is_alive():
-            self._ws_thread.join(timeout=2)
-        self._close_connection()
+            self._ws_thread.join(timeout=2)          # espera até 2s
+        self._close_connection()                     # fecha o socket antigo
         self._stop_event.clear()
         self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
         self._ws_thread.start()
         logger.info("🔌 Thread de ligação iniciada")
 
+    # ── Loop principal (reconexão automática) ────────────────────
     def _run_forever(self):
         backoff = 1
         while not self._stop_event.is_set():
@@ -75,18 +79,22 @@ class DerivWebSocketClient:
                 self.ws = websocket.create_connection(self.config.WS_URL, timeout=5)
                 self.ws.settimeout(1.0)
                 self.connected = True
+                # Autorizar
                 if not self._authorize_and_wait():
                     logger.error("Falha na autorização")
                     continue
+                # Subscrever saldo e ticks
                 self._subscribe_balance()
                 if self.current_symbol:
                     self._subscribe_ticks(self.current_symbol)
                 logger.info("🟢 Conectado e autorizado")
+                # Iniciar keep‑alive e watchdog
                 self._start_keep_alive()
                 self._start_watchdog()
+                # Loop de leitura (bloqueante até à desconexão)
                 self._read_loop()
             except Exception as e:
-                logger.error(f"Erro na conexão: {e}", exc_info=True)
+                logger.error(f"Erro no loop principal: {e}", exc_info=True)
             finally:
                 self._teardown_connection()
             if self._stop_event.is_set():
@@ -96,6 +104,7 @@ class DerivWebSocketClient:
             backoff = min(backoff * 2, 60)
 
     def _reset_state(self):
+        """Prepara o estado para uma nova tentativa de ligação."""
         self.subscribed_symbols.clear()
         self.pending_trade = None
         self.pending_trade_time = 0
@@ -107,6 +116,7 @@ class DerivWebSocketClient:
         self._last_tick_time = None
         self.state = self.ST_DISCONNECTED
 
+    # ── Autorização ─────────────────────────────────────────────
     def _authorize_and_wait(self, timeout=10):
         if not self.user_token:
             raise Exception("Token não configurado")
@@ -132,71 +142,30 @@ class DerivWebSocketClient:
                 return False
         return False
 
+    # ── Limpeza da ligação ──────────────────────────────────────
     def _teardown_connection(self):
-        if self.ws and self.connected:
-            try:
-                self.ws.send(json.dumps({"forget_all": "ticks", "req_id": self._next_req()}))
-                logger.info("📤 Cancelamento de ticks enviado")
-            except:
-                pass
-        self._close_connection()
-
-    def _start_keep_alive(self):
+        """Cancelar ticks e fechar o socket em segurança."""
         self._stop_keep_alive()
-        self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
-        self._keep_alive_thread.start()
-
-    def _stop_keep_alive(self):
-        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
-            self._keep_alive_thread = None
-
-    def _keep_alive_loop(self):
-        while not self._stop_event.is_set() and self.ws and self.connected:
-            time.sleep(30)
-            if self.ws and self.connected:
-                try:
-                    self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
-                except Exception:
-                    break
-            else:
-                break
-
-    def _start_watchdog(self):
-        if self._watchdog_thread and self._watchdog_thread.is_alive():
-            self._watchdog_thread = None
-        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
-        self._watchdog_thread.start()
-
-    def _watchdog_loop(self):
-        time.sleep(15)
-        while not self._stop_event.is_set() and self.ws and self.connected:
-            time.sleep(10)
-            if self.streaming and self._last_tick_time is not None:
-                if time.time() - self._last_tick_time > 45:
-                    logger.warning("🛑 Watchdog: >45s sem ticks. Forçando reconexão.")
-                    self._close_connection()
-                    break
-            elif not self.streaming:
-                if self._auth_time and time.time() - self._auth_time > 90:
-                    logger.warning("🛑 Watchdog: 90s sem stream. Forçando reconexão.")
-                    self._close_connection()
-                    break
+        self._close_connection()
 
     def _close_connection(self):
         if self.ws:
+            # Cancelar ticks para evitar acumulação no servidor
             try:
                 self.ws.send(json.dumps({"forget_all": "ticks", "req_id": self._next_req()}))
-            except:
+            except Exception:
                 pass
             try:
                 self.ws.close()
-            except:
+            except Exception:
                 pass
             self.ws = None
         self.connected = False
         self.authorized = False
         self.streaming = False
+        self.state = self.ST_DISCONNECTED
 
+    # ── Leitura de mensagens ────────────────────────────────────
     def _read_loop(self):
         while not self._stop_event.is_set() and self.ws:
             try:
@@ -231,6 +200,57 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
+    # ── Keep‑alive manual ──────────────────────────────────────
+    def _start_keep_alive(self):
+        self._stop_keep_alive()
+        self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
+        self._keep_alive_thread.start()
+
+    def _stop_keep_alive(self):
+        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
+            self._keep_alive_thread = None
+
+    def _keep_alive_loop(self):
+        while not self._stop_event.is_set() and self.ws and self.connected:
+            time.sleep(30)
+            if self.ws and self.connected:
+                try:
+                    self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
+                except Exception:
+                    break
+            else:
+                break
+
+    # ── Watchdog de ticks (força reconexão se não houver ticks) ──
+    def _start_watchdog(self):
+        """
+        Inicia um monitor que fecha a ligação se:
+        - >45s sem ticks (quando o streaming já começou)
+        - >90s após autorização sem que o streaming tenha começado
+        """
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            self._watchdog_thread = None
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+        self._watchdog_thread.start()
+
+    def _watchdog_loop(self):
+        time.sleep(15)  # dá tempo ao primeiro tick
+        while not self._stop_event.is_set() and self.ws and self.connected:
+            time.sleep(10)
+            # Situação 1: streaming ativo, mas sem ticks recentes
+            if self.streaming and self._last_tick_time is not None:
+                if time.time() - self._last_tick_time > 45:
+                    logger.warning("🛑 Watchdog: >45s sem ticks. Sessão inválida? Forçando reconexão.")
+                    self._close_connection()
+                    break
+            # Situação 2: ligado há muito tempo sem nunca ter recebido ticks
+            elif not self.streaming:
+                if self._auth_time and time.time() - self._auth_time > 90:
+                    logger.warning("🛑 Watchdog: 90s ligado sem stream. Forçando reconexão.")
+                    self._close_connection()
+                    break
+
+    # ── Saldo ───────────────────────────────────────────────────
     def _subscribe_balance(self):
         try:
             self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
@@ -256,6 +276,7 @@ class DerivWebSocketClient:
             except Exception as e:
                 logger.error(f"Erro ao pedir saldo: {e}")
 
+    # ── Ticks ───────────────────────────────────────────────────
     def _subscribe_ticks(self, symbol):
         if not self.authorized:
             return
@@ -283,6 +304,7 @@ class DerivWebSocketClient:
                 'timestamp': tick.get('epoch', time.time())
             })
 
+    # ── Trade ───────────────────────────────────────────────────
     def _next_req(self):
         self._req_counter += 1
         return self._req_counter
@@ -331,6 +353,7 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return False
 
+    # ── Handlers de trade ────────────────────────────────────────
     def _on_proposal(self, data):
         if self.pending_trade is None: return
         if data.get('req_id') != self.pending_trade.get('req_id'): return
