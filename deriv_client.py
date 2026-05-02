@@ -8,7 +8,6 @@ from collections import deque
 logger = logging.getLogger(__name__)
 
 class DerivWebSocketClient:
-    # Estados
     ST_DISCONNECTED = 'DISCONNECTED'
     ST_CONNECTING   = 'CONNECTING'
     ST_CONNECTED    = 'CONNECTED'
@@ -47,7 +46,6 @@ class DerivWebSocketClient:
         self._watchdog_thread = None
         self._ws_thread = None
 
-    # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
     def set_trading_bot(self, b):
         self.trading_bot = b
@@ -57,7 +55,6 @@ class DerivWebSocketClient:
         self.user_token = t
         logger.info("🔑 Token configurado")
 
-    # ── Conexão Pública ──────────────────────────────────────────
     def connect(self):
         if self._stop_event.is_set():
             self._stop_event.clear()
@@ -68,28 +65,24 @@ class DerivWebSocketClient:
         self._ws_thread.start()
         logger.info("🔌 Thread de ligação iniciada")
 
-    # ── Loop Principal (reconexão automática) ────────────────────
     def _run_forever(self):
         backoff = 1
         while not self._stop_event.is_set():
             self._reset_state()
             try:
                 logger.info("🔌 A ligar à Deriv...")
-                self.ws = websocket.create_connection(self.config.WS_URL)
+                self.ws = websocket.create_connection(self.config.WS_URL, timeout=5)
+                self.ws.settimeout(1.0)
                 self.connected = True
-                # Autorizar
                 if not self._authorize_and_wait():
                     logger.error("Falha na autorização")
                     continue
-                # Subscrever saldo e ticks
                 self._subscribe_balance()
                 if self.current_symbol:
                     self._subscribe_ticks(self.current_symbol)
                 logger.info("🟢 Conectado e autorizado")
-                # Iniciar keep‑alive e watchdog
                 self._start_keep_alive()
                 self._start_watchdog()
-                # Loop de leitura
                 self._read_loop()
             except Exception as e:
                 logger.error(f"Erro na conexão: {e}", exc_info=True)
@@ -113,11 +106,11 @@ class DerivWebSocketClient:
         self._last_tick_time = None
         self.state = self.ST_DISCONNECTED
 
-    # ── Autorização ───────────────────────────────────────────────
     def _authorize_and_wait(self, timeout=10):
         if not self.user_token:
             raise Exception("Token não configurado")
         self.ws.send(json.dumps({"authorize": self.user_token, "req_id": self._next_req()}))
+        self._auth_time = time.time()
         logger.info("🔐 Pedido de autorização enviado")
         deadline = time.time() + timeout
         while time.time() < deadline and not self._stop_event.is_set():
@@ -131,14 +124,14 @@ class DerivWebSocketClient:
                     logger.info("✅ Autorizado com sucesso!")
                     self.authorized = True
                     return True
+            except websocket.WebSocketTimeoutException:
+                continue
             except Exception as e:
                 logger.error(f"Erro ao aguardar autorização: {e}")
                 return False
         return False
 
-    # ── Limpeza e fecho ──────────────────────────────────────────
     def _teardown_connection(self):
-        # Cancelar subscrição de ticks para evitar acúmulo no servidor
         if self.ws and self.connected:
             try:
                 self.ws.send(json.dumps({"forget_all": "ticks", "req_id": self._next_req()}))
@@ -157,7 +150,6 @@ class DerivWebSocketClient:
         self._stop_keep_alive()
         self.state = self.ST_DISCONNECTED
 
-    # ── Keep‑alive e Watchdog ────────────────────────────────────
     def _start_keep_alive(self):
         self._stop_keep_alive()
         self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
@@ -214,7 +206,6 @@ class DerivWebSocketClient:
         self.authorized = False
         self.streaming = False
 
-    # ── Leitura de mensagens ─────────────────────────────────────
     def _read_loop(self):
         while not self._stop_event.is_set() and self.ws:
             try:
@@ -249,7 +240,6 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
-    # ── Saldo ───────────────────────────────────────────────────
     def _subscribe_balance(self):
         try:
             self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
@@ -275,7 +265,6 @@ class DerivWebSocketClient:
             except Exception as e:
                 logger.error(f"Erro ao pedir saldo: {e}")
 
-    # ── Ticks ───────────────────────────────────────────────────
     def _subscribe_ticks(self, symbol):
         if not self.authorized:
             return
@@ -303,7 +292,6 @@ class DerivWebSocketClient:
                 'timestamp': tick.get('epoch', time.time())
             })
 
-    # ── Trade (inalterado) ──────────────────────────────────────
     def _next_req(self):
         self._req_counter += 1
         return self._req_counter
@@ -352,7 +340,6 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return False
 
-    # ── Proposta / Compra / Resultado ────────────────────────────
     def _on_proposal(self, data):
         if self.pending_trade is None: return
         if data.get('req_id') != self.pending_trade.get('req_id'): return
