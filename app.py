@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, session
+from flask import Flask, render_template, jsonify, request, session, redirect
 import threading
 import time
 import logging
@@ -71,6 +71,8 @@ def ensure_admin_exists():
             logger.info(f"ℹ️ Utilizador {admin_email} já é admin.")
     else:
         uid = str(int(time.time() * 1000))
+        # Gerar referral_link_code automaticamente
+        referral_code = base64.b64encode(hashlib.md5(uid.encode()).digest())[:8].decode()
         users[admin_email] = {
             'id': uid,
             'name': 'Administrador',
@@ -85,7 +87,8 @@ def ensure_admin_exists():
             'active': True,
             'role': 'admin',
             'affiliate_earnings': 0.0,
-            'referred_users': []
+            'referred_users': [],
+            'referral_link_code': referral_code
         }
         save_users(users)
         logger.info(f"🔑 Admin criado: {admin_email}")
@@ -156,14 +159,14 @@ def get_user_session(user_id):
                 'payment_system': payment
             }
 
-            # ✅ Reconexão automática se o utilizador já tiver token guardado
+            # Reconexão automática se o utilizador já tiver token guardado
             email = next((e for e, u in users.items() if u.get('id') == user_id), None)
             if email:
                 token = users[email].get('deriv_token')
                 if token:
                     client.set_user_token(token)
                     threading.Thread(target=client.connect, daemon=True).start()
-                    bot.start(client)                          # ✅ Correção #3
+                    bot.start(client)
                     bot.daily_stats['start_balance'] = bot.balance
 
         return user_sessions[user_id]
@@ -233,6 +236,8 @@ def api_register():
             return jsonify({'error': 'Email já registado'}), 400
 
         uid = str(int(time.time() * 1000))
+        # Gerar referral_link_code automaticamente no registo
+        referral_code = base64.b64encode(hashlib.md5(uid.encode()).digest())[:8].decode()
         users[email] = {
             'id': uid,
             'name': name,
@@ -247,7 +252,8 @@ def api_register():
             'active': True,
             'role': 'user',
             'affiliate_earnings': 0.0,
-            'referred_users': []
+            'referred_users': [],
+            'referral_link_code': referral_code
         }
         save_users(users)
 
@@ -258,7 +264,7 @@ def api_register():
                     ud.setdefault('referred_users', []).append(email)
                     save_users(users)
                     break
-        return jsonify({'status': 'ok', 'message': 'Conta criada!'})
+        return jsonify({'status': 'ok', 'message': 'Conta criada!', 'referral_code': referral_code})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -346,9 +352,12 @@ def api_generate_referral_link():
         if not user:
             return jsonify({'error': 'Utilizador não encontrado'}), 404
 
-        code = base64.b64encode(hashlib.md5(str(user['id']).encode()).digest())[:8].decode()
-        user['referral_link_code'] = code
-        save_users(users)
+        # Usar o referral_link_code já existente ou gerar um novo
+        code = user.get('referral_link_code')
+        if not code:
+            code = base64.b64encode(hashlib.md5(str(user['id']).encode()).digest())[:8].decode()
+            user['referral_link_code'] = code
+            save_users(users)
         return jsonify({'link': f"https://foloma.com/?ref={code}", 'code': code})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -478,7 +487,7 @@ def api_connect():
         client = sess['client']
         client.set_user_token(token)
 
-        # ✅ Correção #1: só reconectar se não estiver já autorizado
+        # Só reconectar se não estiver já autorizado
         if not client.authorized:
             client.connect()
 
@@ -556,6 +565,46 @@ def api_debug():
         'pending_trade': client.pending_trade is not None,
         'last_tick_seconds_ago': round(time.time() - client._last_tick_time, 1) if client._last_tick_time else None
     })
+
+
+@app.route('/oauth/callback')
+def oauth_callback():
+    """Recebe o token da Deriv após autorização OAuth."""
+    token = request.args.get('token1')
+    acct = request.args.get('acct1')
+    
+    if not token:
+        logger.error("Callback OAuth sem token")
+        return redirect('/?error=oauth_failed')
+    
+    if 'user_id' not in session:
+        logger.warning("Utilizador não autenticado na sessão")
+        return redirect('/?error=not_logged_in')
+    
+    email = session.get('user_email')
+    users[email]['deriv_token'] = token
+    users[email]['deriv_account'] = acct
+    save_users(users)
+    
+    # Conectar automaticamente
+    user_id = session['user_id']
+    sess = get_user_session(user_id)
+    client = sess['client']
+    client.set_user_token(token)
+    if not client.authorized:
+        threading.Thread(target=client.connect, daemon=True).start()
+    
+    logger.info(f"✅ OAuth bem‑sucedido para {email}")
+    return redirect('/?connected=true')
+
+
+@app.route('/api/auth/deriv_oauth_url')
+@require_auth
+def deriv_oauth_url():
+    """Retorna o URL para iniciar o fluxo OAuth da Deriv."""
+    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
+    url = f"https://oauth.deriv.com/oauth2/authorize?app_id={config.DERIV_APP_ID}&redirect_uri={redirect_uri}&l=PT"
+    return jsonify({'url': url})
 
 
 @app.route('/api/symbol/change', methods=['POST'])
@@ -881,45 +930,6 @@ def api_withdraw():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
-@app.route('/oauth/callback')
-def oauth_callback():
-    """Recebe o token da Deriv após autorização OAuth."""
-    token = request.args.get('token1')
-    acct = request.args.get('acct1')
-    
-    if not token:
-        logger.error("Callback OAuth sem token")
-        return redirect('/?error=oauth_failed')
-    
-    if 'user_id' not in session:
-        logger.warning("Utilizador não autenticado na sessão")
-        return redirect('/?error=not_logged_in')
-    
-    email = session.get('user_email')
-    users[email]['deriv_token'] = token
-    users[email]['deriv_account'] = acct
-    save_users(users)
-    
-    # Conectar automaticamente
-    user_id = session['user_id']
-    sess = get_user_session(user_id)
-    client = sess['client']
-    client.set_user_token(token)
-    if not client.authorized:
-        threading.Thread(target=client.connect, daemon=True).start()
-    
-    logger.info(f"✅ OAuth bem‑sucedido para {email}")
-    return redirect('/?connected=true')
-
-
-@app.route('/api/auth/deriv_oauth_url')
-@require_auth
-def deriv_oauth_url():
-    """Retorna o URL para iniciar o fluxo OAuth da Deriv."""
-    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
-    url = f"https://oauth.deriv.com/oauth2/authorize?app_id={config.DERIV_APP_ID}&redirect_uri={redirect_uri}&l=PT"
-    return jsonify({'url': url})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
