@@ -880,7 +880,44 @@ def api_withdraw():
         return jsonify(client.request_withdrawal(amt, d.get('currency', 'USD'), d.get('method', 'cryptocurrency')))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+@app.route('/oauth/callback')
+def oauth_callback():
+    """Recebe o token da Deriv após autorização OAuth."""
+    token = request.args.get('token1')
+    acct = request.args.get('acct1')
+    
+    if not token:
+        logger.error("Callback OAuth sem token")
+        return redirect('/?error=oauth_failed')
+    
+    if 'user_id' not in session:
+        logger.warning("Utilizador não autenticado na sessão")
+        return redirect('/?error=not_logged_in')
+    
+    email = session.get('user_email')
+    users[email]['deriv_token'] = token
+    users[email]['deriv_account'] = acct
+    save_users(users)
+    
+    # Conectar automaticamente
+    user_id = session['user_id']
+    sess = get_user_session(user_id)
+    client = sess['client']
+    client.set_user_token(token)
+    if not client.authorized:
+        threading.Thread(target=client.connect, daemon=True).start()
+    
+    logger.info(f"✅ OAuth bem‑sucedido para {email}")
+    return redirect('/?connected=true')
 
+
+@app.route('/api/auth/deriv_oauth_url')
+@require_auth
+def deriv_oauth_url():
+    """Retorna o URL para iniciar o fluxo OAuth da Deriv."""
+    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
+    url = f"https://oauth.deriv.com/oauth2/authorize?app_id={config.DERIV_APP_ID}&redirect_uri={redirect_uri}&l=PT"
+    return jsonify({'url': url})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
