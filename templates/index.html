@@ -148,6 +148,16 @@
           <div id="cdown" style="color:#ffaa00;font-size:14px;margin-top:8px">⏱ 10 ticks</div>
         </div>
         <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
+        <!-- Input de valor + martingale para dígitos -->
+        <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" style="margin-top:8px">
+        <div class="ms">
+          <div>Martingale: <span id="mgtActDig">DESATIVADO</span></div>
+          <div>Próximo: <span id="mgtNxtDig">$0.35</span></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <button class="bm" onclick="mgt('amtDigit')">MARTINGALE</button>
+          <button class="bmr" onclick="rstMgtDigit()">RESET</button>
+        </div>
         <div class="dbet" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
           <button class="btn-buy" onclick="tradeDigit('odd')">ÍMPAR</button>
           <button class="btn-sell" onclick="tradeDigit('even')">PAR</button>
@@ -168,6 +178,15 @@
       </div>
       <div class="ms"><div>Martingale: <span id="mgtAct">DESATIVADO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
     </div>
+    <!-- Histórico diretamente no dashboard -->
+    <div class="card">
+      <div class="card-title">
+        📋 HISTÓRICO
+        <button class="bmr" style="font-size:11px;padding:4px 8px" onclick="loadHistory()">🔄</button>
+      </div>
+      <div id="histSummary" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px"></div>
+      <div id="histList" style="max-height:300px;overflow-y:auto"></div>
+    </div>
   </div>
   <div id="affiliate-section" class="hidden">
     <div class="card"><div class="card-title">🔗 SEU LINK</div><div class="lc"><input type="text" id="refLink" readonly><button class="bmr" onclick="cpLink()">📋 COPIAR</button></div></div>
@@ -175,9 +194,9 @@
   <div id="history-section" class="hidden">
     <div class="card">
       <div class="card-title">📊 RESUMO</div>
-      <div id="histSummary" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px"></div>
+      <div id="histSummary2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px"></div>
       <div class="card-title">📋 OPERAÇÕES</div>
-      <div id="histList"></div>
+      <div id="histList2"></div>
     </div>
   </div>
   <div id="payment-section" class="hidden"><div class="card"><div class="card-title">💰 DEPÓSITO / SAQUE</div><p style="color:var(--muted)">Disponível em breve.</p></div></div>
@@ -254,6 +273,10 @@ function updateAll(){
     if(data.error)return;
     const bot=data.bot;if(!bot)return;
     const conn=bot.connected&&bot.authorized;
+
+    // ✅ Sincronizar isConn com o estado real
+    if(conn && !isConn) isConn = true;
+
     document.getElementById('sDot').className='dot'+(conn?' on':'');
     document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
     document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
@@ -267,9 +290,21 @@ function updateAll(){
     document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
     document.getElementById('bbS').textContent=bot.analysis?.bollinger?.desc||'---';
     if(data.digits)updateDigits(data.digits);
+
+    // Atualizar estado do martingale para ativos e dígitos
     fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
-      document.getElementById('mgtAct').textContent = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
-      document.getElementById('mgtNxt').textContent = '$' + (m.next_amount||0.35).toFixed(2);
+      const act = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
+      const nxt = '$' + (m.next_amount||0.35).toFixed(2);
+      document.getElementById('mgtAct').textContent = act;
+      document.getElementById('mgtNxt').textContent = nxt;
+      const dAct = document.getElementById('mgtActDig');
+      const dNxt = document.getElementById('mgtNxtDig');
+      if(dAct) dAct.textContent = act;
+      if(dNxt) dNxt.textContent = nxt;
+      if(m.active){
+        const ad = document.getElementById('amtDigit');
+        if(ad) ad.value = (m.next_amount||0.35).toFixed(2);
+      }
     }).catch(console.error);
   }).catch(console.error);
 }
@@ -313,11 +348,24 @@ function trade(action){
   const amt=parseFloat(document.getElementById('amt').value);
   const endpoint = modo==='hybrid' ? '/api/trade/hybrid' : '/api/trade';
   fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,amount:amt})})
-  .then(r=>r.json()).then(d=>{if(d.error)toast('❌ '+d.error,'loss');else toast('⏳ Trade enviado','info');});
+  .then(r=>r.json()).then(d=>{
+    if(d.error) toast('❌ '+d.error,'loss');
+    else {
+      toast('⏳ Trade enviado','info');
+      setTimeout(loadHistory, 3000);
+    }
+  });
 }
 function tradeDigit(pred){
-  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:0.35})})
-  .then(r=>r.json()).then(d=>{if(d.error)toast('❌ '+d.error,'loss');else toast('⏳ Aposta enviada!','info');});
+  const amt = parseFloat(document.getElementById('amtDigit').value) || 0.35;
+  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred, amount:amt})})
+  .then(r=>r.json()).then(d=>{
+    if(d.error) toast('❌ '+d.error,'loss');
+    else {
+      toast('⏳ Aposta enviada!','info');
+      setTimeout(loadHistory, 3000);
+    }
+  });
 }
 async function mgt(fieldId){
   const amt = parseFloat(document.getElementById(fieldId).value);
@@ -326,11 +374,19 @@ async function mgt(fieldId){
   if(d.error) toast('❌ '+d.error,'loss');
   else {
     document.getElementById('amt').value = d.martingale.next_amount.toFixed(2);
+    document.getElementById('amtDigit').value = d.martingale.next_amount.toFixed(2);
     toast('📈 '+d.martingale.message,'info');
   }
 }
 async function rstMgt(){
   await fetch('/api/martingale/reset',{method:'POST'});
+  document.getElementById('amt').value = '0.35';
+  document.getElementById('amtDigit').value = '0.35';
+  toast('🔄 Martingale resetado','info');
+}
+async function rstMgtDigit(){
+  await fetch('/api/martingale/reset',{method:'POST'});
+  document.getElementById('amtDigit').value = '0.35';
   document.getElementById('amt').value = '0.35';
   toast('🔄 Martingale resetado','info');
 }
@@ -343,7 +399,8 @@ function loadAffiliate(){fetch('/api/affiliate/link').then(r=>r.json()).then(d=>
 function loadHistory(){
   fetch('/api/report').then(r=>r.json()).then(data=>{
     const s = data.resumo;
-    document.getElementById('histSummary').innerHTML = `
+    const sum = document.getElementById('histSummary');
+    if(sum) sum.innerHTML = `
       <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
         <div style="font-size:10px;color:var(--muted)">TOTAL TRADES</div>
         <div style="font-size:20px;font-weight:bold">${s.total_trades}</div>
@@ -383,7 +440,34 @@ function loadHistory(){
           </div>
         </div>`;
     });
-    document.getElementById('histList').innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+    const list = document.getElementById('histList');
+    if(list) list.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+
+    // Duplicar para a secção history page (se existir)
+    const sum2 = document.getElementById('histSummary2');
+    if(sum2) {
+      sum2.innerHTML = sum ? sum.innerHTML : `
+        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+          <div style="font-size:10px;color:var(--muted)">TOTAL TRADES</div>
+          <div style="font-size:20px;font-weight:bold">${s.total_trades}</div>
+        </div>
+        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+          <div style="font-size:10px;color:var(--muted)">WIN RATE</div>
+          <div style="font-size:20px;font-weight:bold;color:var(--accent)">${s.win_rate}%</div>
+        </div>
+        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+          <div style="font-size:10px;color:var(--muted)">LUCRO/PERDA</div>
+          <div style="font-size:20px;font-weight:bold;color:${s.profit_loss>=0?'var(--accent)':'var(--danger)'}">
+            ${s.profit_loss>=0?'+':''}$${s.profit_loss.toFixed(2)}
+          </div>
+        </div>
+        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+          <div style="font-size:10px;color:var(--muted)">HOJE</div>
+          <div style="font-size:20px;font-weight:bold">${s.trades_hoje}</div>
+        </div>`;
+    }
+    const list2 = document.getElementById('histList2');
+    if(list2) list2.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
   });
 }
 
@@ -430,7 +514,7 @@ function doLogin(){
     document.getElementById('authModal').style.display='none';
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
-    initSyms();loadAffiliate();startPolling();
+    initSyms();loadAffiliate();startPolling();loadHistory();
   });
 }
 function doRegister(){
@@ -510,7 +594,7 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     document.getElementById('authModal').style.display='none';
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';
-    initSyms();loadAffiliate();startPolling();
+    initSyms();loadAffiliate();startPolling();loadHistory();
   }
 });
 </script>
