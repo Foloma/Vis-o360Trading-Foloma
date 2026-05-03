@@ -880,6 +880,8 @@ def api_withdraw():
         return jsonify(client.request_withdrawal(amt, d.get('currency', 'USD'), d.get('method', 'cryptocurrency')))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
 @app.route('/oauth/callback')
 def oauth_callback():
     """Recebe o token da Deriv após autorização OAuth."""
