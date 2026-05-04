@@ -13,6 +13,7 @@
       --danger: #ff4d4d;
       --text: #e2e8f0;
       --muted: #64748b;
+      --warning: #ffaa00;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     body { background: linear-gradient(180deg, #020617, #020617 60%, #020617); color: var(--text); min-height: 100vh; }
@@ -47,12 +48,15 @@
     .btn-sell { background: var(--danger); }
     .btn-buy:hover { box-shadow: 0 0 20px #00f0b580; }
     .btn-sell:hover { box-shadow: 0 0 20px #ff4d4d80; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
     .indicators { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
     .ind { background: #020617; padding: 10px; border-radius: 10px; text-align: center; }
     .ind span { display: block; } .ind .label { font-size: 10px; color: var(--muted); } .ind .value { font-weight: 700; }
     .status { display: flex; justify-content: space-between; align-items: center; }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); display: inline-block; margin-right: 6px; }
     .dot.on { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+    .dot.connecting { background: var(--warning); box-shadow: 0 0 10px var(--warning); animation: pulse 1s infinite; }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
     .balance { font-weight: 800; color: var(--accent); }
     .hidden { display: none; }
     .sym-row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -82,6 +86,8 @@
     @keyframes su { from { transform: translateX(-50%) translateY(16px); opacity: 0 } to { transform: translateX(-50%) translateY(0); opacity: 1 } }
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 1100; display: flex; align-items: center; justify-content: center; }
     .mbox { background: var(--card); padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
+    .connecting-msg { text-align: center; font-size: 11px; color: var(--warning); margin-top: 6px; display: none; }
+    .connecting-msg.show { display: block; }
   </style>
 </head>
 <body>
@@ -116,7 +122,7 @@
       </div>
       <button class="btn-buy" style="width:100%;margin-top:12px" onclick="connectWithDeriv()">🔗 Conectar com Deriv</button>
       <button class="btn-sell" style="width:100%;margin-top:8px" id="conBtn" onclick="conectar()">🔌 CONECTAR (token manual)</button>
-      <div id="conSt" style="text-align:center;font-size:11px;color:#ffaa00;margin-top:6px"></div>
+      <div id="conSt" class="connecting-msg"></div>
     </div>
     <div class="card">
       <div class="card-title">🎮 MODO</div>
@@ -239,16 +245,74 @@
 // ══════════════ ESTADO GLOBAL ══════════════
 let selectedAcct='demo', paused=false, isConn=false, curSym='R_100', modo='ativos';
 let lastDigitCount=0, lastDigitCounter=0;
-let _updateInterval=null;
+let _updateInterval=null, _pollInterval=null;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
+
+// Debounce / locks
+let _trading=false, _loggingIn=false, _registering=false, _resetting=false, _savingToken=false;
 
 // ══════════════ UTILS ══════════════
 function toast(msg,type='info',ms=4000){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
   clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',ms);
 }
+function setConnectingUI(show){
+  const dot = document.getElementById('sDot');
+  const status = document.getElementById('connStatus');
+  const msg = document.getElementById('conSt');
+  if(show){
+    dot.className = 'dot connecting';
+    status.textContent = 'A conectar...';
+    msg.classList.add('show');
+    msg.textContent = '⏳ Estabelecendo ligação...';
+  } else {
+    msg.classList.remove('show');
+  }
+}
 
-// ══════════════ FUNÇÕES DE INICIALIZAÇÃO ══════════════
+// ══════════════ GERIR POLLING ══════════════
+function stopPolling(){
+  if(_updateInterval){ clearInterval(_updateInterval); _updateInterval=null; }
+  if(_pollInterval){ clearInterval(_pollInterval); _pollInterval=null; }
+}
+function startPollingIfNeeded(){
+  if(!isConn) return;
+  if(_updateInterval) return;
+  _updateInterval = setInterval(updateAll, 5000); // 5s
+}
+
+// ══════════════ POLLING DE CONEXÃO (5s) ══════════════
+function waitForConnection(timeout=20){
+  if(_pollInterval) clearInterval(_pollInterval);
+  setConnectingUI(true);
+  let elapsed = 0;
+  _pollInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/debug');
+      const data = await res.json();
+      elapsed++;
+      if(data.authorized && data.connected){
+        clearInterval(_pollInterval);
+        _pollInterval = null;
+        setConnectingUI(false);
+        isConn = true;
+        document.getElementById('sDot').className = 'dot on';
+        document.getElementById('connStatus').textContent = 'Conectado';
+        document.getElementById('bal').textContent = (data.balance||0).toFixed(2);
+        toast('✅ Conexão estabelecida!','win',3000);
+        startPollingIfNeeded();
+        updateAll();
+      } else if(elapsed >= timeout){
+        clearInterval(_pollInterval);
+        _pollInterval = null;
+        setConnectingUI(false);
+        toast('⚠️ Tempo de conexão esgotado.','loss',5000);
+      }
+    } catch(e) {}
+  }, 5000);
+}
+
+// ══════════════ INICIALIZAÇÃO ══════════════
 function initSyms(){
   let h='';
   for(const[k,v]of Object.entries(syms))h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}', this)">${v}</button>`;
@@ -259,10 +323,6 @@ function chgSym(s, el){
   fetch('/api/symbol/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})});
   document.querySelectorAll('.sym-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-}
-function startPolling(){
-  if(_updateInterval) return;
-  _updateInterval = setInterval(updateAll, 2000);
 }
 
 // ══════════════ UPDATE / UI ══════════════
@@ -320,59 +380,118 @@ function updateDigits(digits){
   }
 }
 
+// ══════════════ VALIDAÇÃO ══════════════
+function validAmount(v){
+  const n = parseFloat(v);
+  return !isNaN(n) && n>=0.35 && n<=100;
+}
+
 // ══════════════ CONEXÃO ══════════════
 function conectar(){
-  document.getElementById('conSt').textContent='⏳ A conectar...';
+  setConnectingUI(true);
   fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:selectedAcct,symbol:curSym})})
   .then(r=>r.json()).then(d=>{
-    document.getElementById('conSt').textContent='';
-    if(d.error) toast('❌ '+d.error,'loss');
-    else { toast('✅ Conectado!','win'); isConn=true; }
+    if(d.error) {
+      setConnectingUI(false);
+      toast('❌ Erro ao conectar','loss');
+    } else {
+      toast('⏳ A conectar...','info',2000);
+      waitForConnection();
+    }
+  }).catch(e=>{
+    setConnectingUI(false);
+    toast('❌ Erro de rede','loss');
   });
 }
 async function connectWithDeriv(){
-    const confirmMsg = selectedAcct === 'real' 
-        ? '⚠️ Vai conectar a CONTA REAL. Confirma?' 
-        : 'Vai conectar a conta Demo.';
-    if(selectedAcct === 'real' && !confirm(confirmMsg)) return;
-    const r = await fetch(`/api/auth/deriv_oauth_url?account_type=${selectedAcct}`);
-    const d = await r.json();
-    window.location.href = d.url;
+  const r = await fetch(`/api/auth/deriv_oauth_url?account_type=${selectedAcct}`);
+  const d = await r.json();
+  window.location.href = d.url;
 }
 
-// ══════════════ TRADES / MARTINGALE ══════════════
+// ══════════════ TROCA DE CONTA ══════════════
+function selAcct(a){
+  selectedAcct = a;
+  document.getElementById('btnDemo').classList.toggle('active', a==='demo');
+  document.getElementById('btnReal').classList.toggle('active', a==='real');
+  if(isConn){
+    fetch('/api/auth/switch-account', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({account_type: a})
+    }).then(r=>r.json()).then(d=>{
+      if(d.error) toast('❌ Erro ao trocar conta','loss');
+      else {
+        toast(`✅ Conta ${a} activada! A aguardar reconexão...`, 'win', 2000);
+        waitForConnection();
+      }
+    }).catch(e=>toast('❌ Erro de rede','loss'));
+  }
+}
+
+// ══════════════ TRADES (com debounce) ══════════════
 function trade(action){
-  const amt=parseFloat(document.getElementById('amt').value);
+  if(_trading) return;
+  const amt = document.getElementById('amt').value;
+  if(!validAmount(amt)){
+    toast('❌ Valor inválido (min $0.35, max $100)','loss');
+    return;
+  }
+  _trading = true;
   const endpoint = modo==='hybrid' ? '/api/trade/hybrid' : '/api/trade';
-  fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,amount:amt})})
+  fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,amount:parseFloat(amt)})})
   .then(r=>r.json()).then(d=>{
-    if(d.error) toast('❌ '+d.error,'loss');
+    _trading = false;
+    if(d.error) toast('❌ Erro ao enviar trade','loss');
     else {
       toast('⏳ Trade enviado','info');
-      setTimeout(loadHistory, 8000);
+      setTimeout(loadHistory, 3000);
     }
+  }).catch(e=>{
+    _trading = false;
+    toast('❌ Erro de rede','loss');
   });
 }
 function tradeDigit(pred){
-  const amt = parseFloat(document.getElementById('amtDigit').value) || 0.35;
-  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred, amount:amt})})
+  if(_trading) return;
+  const amt = document.getElementById('amtDigit').value;
+  if(!validAmount(amt)){
+    toast('❌ Valor inválido','loss');
+    return;
+  }
+  _trading = true;
+  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred, amount:parseFloat(amt)})})
   .then(r=>r.json()).then(d=>{
-    if(d.error) toast('❌ '+d.error,'loss');
+    _trading = false;
+    if(d.error) toast('❌ Erro na aposta','loss');
     else {
       toast('⏳ Aposta enviada!','info');
-      setTimeout(loadHistory, 13000);
+      setTimeout(loadHistory, 3000);
     }
+  }).catch(e=>{
+    _trading = false;
+    toast('❌ Erro de rede','loss');
   });
 }
+
+// Martingale
 async function mgt(fieldId){
-  const amt = parseFloat(document.getElementById(fieldId).value);
-  const r = await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount: amt})});
+  if(_trading) return;
+  const amt = document.getElementById(fieldId).value;
+  if(!validAmount(amt)){
+    toast('❌ Valor inválido','loss');
+    return;
+  }
+  _trading = true;
+  const r = await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount: parseFloat(amt)})});
   const d = await r.json();
-  if(d.error) toast('❌ '+d.error,'loss');
-  else {
+  _trading = false;
+  if(d.error) {
+    toast('❌ Erro ao aplicar martingale','loss');
+  } else {
     document.getElementById('amt').value = d.martingale.next_amount.toFixed(2);
     document.getElementById('amtDigit').value = d.martingale.next_amount.toFixed(2);
-    toast('📈 '+d.martingale.message,'info');
+    toast('📈 Martingale aplicado','info');
   }
 }
 async function rstMgt(){
@@ -416,7 +535,6 @@ function loadHistory(){
         <div style="font-size:10px;color:var(--muted)">HOJE</div>
         <div style="font-size:20px;font-weight:bold">${s.trades_hoje}</div>
       </div>`;
-
     let html = '';
     const trades = (data.historico || []).reverse();
     trades.forEach(t => {
@@ -469,7 +587,7 @@ function loadHistory(){
 // ══════════════ ADMIN ══════════════
 function loadAdminUsers(){
   fetch('/api/admin/users').then(r=>r.json()).then(data=>{
-    if(data.error){ toast('❌ '+data.error,'loss'); return; }
+    if(data.error){ toast('❌ Erro ao carregar','loss'); return; }
     let html='';
     data.users.forEach(u=>{
       const cor = u.active ? 'var(--accent)' : 'var(--danger)';
@@ -485,73 +603,116 @@ function loadAdminUsers(){
         </div>`;
     });
     document.getElementById('adminUserList').innerHTML = html || '<p style="color:var(--muted)">Sem utilizadores.</p>';
-  }).catch(()=>toast('❌ Erro ao carregar utilizadores','loss'));
+  }).catch(()=>toast('❌ Erro ao carregar','loss'));
 }
 function toggleUser(email, enable){
   fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email, enable})})
   .then(r=>r.json()).then(d=>{
-    if(d.error) toast('❌ '+d.error,'loss');
+    if(d.error) toast('❌ Erro','loss');
     else { toast('✅ '+d.message,'win'); loadAdminUsers(); }
   });
 }
 
-// ══════════════ AUTENTICAÇÃO ══════════════
+// ══════════════ AUTENTICAÇÃO (com debounce) ══════════════
 function showTab(t){
   document.getElementById('loginForm').style.display=t==='login'?'block':'none';
   document.getElementById('registerForm').style.display=t==='register'?'block':'none';
   document.getElementById('forgotForm').style.display=t==='forgot'?'block':'none';
 }
 function doLogin(){
-  const email=document.getElementById('lEmail').value,password=document.getElementById('lPass').value;
+  if(_loggingIn) return;
+  const email=document.getElementById('lEmail').value.trim();
+  const password=document.getElementById('lPass').value;
+  if(!email || !password){ document.getElementById('authErr').textContent='Preencha todos os campos.'; return; }
+  _loggingIn = true;
   fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
   .then(r=>r.json()).then(d=>{
-    if(d.error){document.getElementById('authErr').textContent=d.error;return;}
+    _loggingIn = false;
+    if(d.error){ document.getElementById('authErr').textContent='Credenciais inválidas.'; return; }
     document.getElementById('authModal').style.display='none';
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
-    initSyms();loadAffiliate();startPolling();loadHistory();
+    initSyms();loadAffiliate();loadHistory();
+    if(d.user?.has_deriv_token){
+      fetch('/api/auth/auto-connect').then(r=>r.json()).then(autoData=>{
+        if(autoData.status === 'connecting'){
+          toast('🔌 Auto-conectando...','info',2000);
+          waitForConnection();
+        } else if(autoData.status === 'already_connected'){
+          isConn = true;
+          document.getElementById('sDot').className = 'dot on';
+          document.getElementById('connStatus').textContent = 'Conectado';
+          startPollingIfNeeded();
+        } else if(autoData.status === 'no_token'){
+          startPollingIfNeeded();
+        }
+      });
+    }
+  }).catch(e=>{
+    _loggingIn = false;
+    document.getElementById('authErr').textContent='Erro de rede.';
   });
 }
 function doRegister(){
-  const d={name:document.getElementById('rName').value,email:document.getElementById('rEmail').value,password:document.getElementById('rPass').value,referral_code:document.getElementById('rRef').value};
+  if(_registering) return;
+  const name=document.getElementById('rName').value.trim();
+  const email=document.getElementById('rEmail').value.trim();
+  const password=document.getElementById('rPass').value;
+  if(!name||!email||password.length<6){ document.getElementById('authErr').textContent='Campos inválidos.'; return; }
+  _registering = true;
+  const d={name,email,password,referral_code:document.getElementById('rRef').value};
   fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
   .then(r=>r.json()).then(d=>{
-    if(d.error) document.getElementById('authErr').textContent=d.error;
+    _registering = false;
+    if(d.error) document.getElementById('authErr').textContent='Erro ao registar.';
     else {
-      toast('✅ Conta criada! Faça login e conecte a Deriv.','win');
+      toast('✅ Conta criada!','win');
       showTab('login');
-      document.getElementById('lEmail').value = document.getElementById('rEmail').value;
+      document.getElementById('lEmail').value = email;
     }
+  }).catch(e=>{
+    _registering = false;
+    document.getElementById('authErr').textContent='Erro de rede.';
   });
 }
 function doReset(){
-  fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('fEmail').value})})
-  .then(r=>r.json()).then(d=>{document.getElementById('fMsg').innerHTML=d.error?'❌ '+d.error:'✅ '+(d.message||'Link enviado!');});
+  if(_resetting) return;
+  const email=document.getElementById('fEmail').value.trim();
+  if(!email){ document.getElementById('fMsg').innerHTML='❌ Email obrigatório.'; return; }
+  _resetting = true;
+  fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})
+  .then(r=>r.json()).then(d=>{
+    _resetting = false;
+    document.getElementById('fMsg').innerHTML=d.error?'❌ Erro ao solicitar.':'✅ Link enviado!';
+  }).catch(e=>{
+    _resetting = false;
+    document.getElementById('fMsg').innerHTML='❌ Erro de rede.';
+  });
 }
-function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload());}
+function doLogout(){stopPolling();fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload());}
 async function saveTok(){
+  if(_savingToken) return;
   const token=document.getElementById('tokIn').value.trim();
-  if(!token)return toast('❌ Cole o token','loss');
+  if(!token){ toast('❌ Cole o token','loss'); return; }
+  _savingToken = true;
   const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,account_type:selectedAcct})});
   const d=await r.json();
-  if(d.error)toast('❌ '+d.error,'loss');else{toast('✅ Token guardado','win');conectar();}
+  _savingToken = false;
+  if(d.error) toast('❌ Erro ao guardar','loss');
+  else { toast('✅ Token guardado','win'); conectar(); }
 }
 
 // ══════════════ MENU / UI ══════════════
 function toggleMenu(){document.getElementById('sideMenu').classList.toggle('open');document.getElementById('overlay').classList.toggle('show');}
 function showSec(s){
+  stopPolling(); // interrompe polling ao navegar
   ['dashboard','affiliate','payment','settings','admin','history'].forEach(x=>document.getElementById(x+'-section').classList.add('hidden'));
   document.getElementById(s+'-section').classList.remove('hidden');
   toggleMenu();
   if(s==='affiliate') loadAffiliate();
   if(s==='admin') loadAdminUsers();
   if(s==='history') loadHistory();
-}
-function selAcct(a){
-  selectedAcct=a;
-  document.getElementById('btnDemo').classList.toggle('active',a==='demo');
-  document.getElementById('btnReal').classList.toggle('active',a==='real');
-  if(isConn) conectar();
+  if(s==='dashboard' && isConn) startPollingIfNeeded();
 }
 function setModo(m){
   modo=m;
@@ -565,33 +726,49 @@ function setModo(m){
   document.querySelector('.trade-actions').classList.toggle('hidden', m==='hybrid');
 }
 
-// ══════════════ CALLBACKS / INICIALIZAÇÃO ══════════════
+// ══════════════ INICIALIZAÇÃO AUTOMÁTICA ══════════════
+(async function autoInit(){
+  const st = await fetch('/api/auth/status');
+  const stData = await st.json();
+  if(stData.authenticated){
+    document.getElementById('authModal').style.display='none';
+    document.getElementById('mainContent').style.display='block';
+    if(stData.user?.role==='admin') document.getElementById('adminMI').style.display='block';
+    initSyms(); loadAffiliate(); loadHistory();
+    if(stData.user?.has_deriv_token){
+      const auto = await fetch('/api/auth/auto-connect');
+      const autoData = await auto.json();
+      if(autoData.status === 'connecting'){
+        toast('🔌 Auto-conectando...','info',2000);
+        waitForConnection();
+      } else if(autoData.status === 'already_connected'){
+        isConn = true;
+        document.getElementById('sDot').className = 'dot on';
+        document.getElementById('connStatus').textContent = 'Conectado';
+        startPollingIfNeeded();
+      } else if(autoData.status === 'no_token'){
+        startPollingIfNeeded();
+      }
+    }
+  }
+})();
+
+// ══════════════ CALLBACK OAUTH ══════════════
 (function(){
   const p=new URLSearchParams(location.search);
   if(p.get('connected')==='true'){
     toast('✅ Deriv conectada!','win',5000);
-    setTimeout(async ()=>{
-      const r=await fetch('/api/status');
-      const d=await r.json();
-      if(d.bot?.authorized){toast('🟢 Bot activo!','win');}
-      else{conectar();}
-    },2000);
+    waitForConnection(25);
     history.replaceState({},'',location.pathname);
   }
 })();
+
+// ══════════════ CÓDIGO DE REF ══════════════
 (function(){
   const p=new URLSearchParams(location.search);
   const ref=p.get('ref');
   if(ref){const el=document.getElementById('rRef');if(el)el.value=ref;}
 })();
-fetch('/api/auth/status').then(r=>r.json()).then(d=>{
-  if(d.authenticated){
-    document.getElementById('authModal').style.display='none';
-    document.getElementById('mainContent').style.display='block';
-    if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';
-    initSyms();loadAffiliate();startPolling();loadHistory();
-  }
-});
 </script>
 </body>
 </html>
