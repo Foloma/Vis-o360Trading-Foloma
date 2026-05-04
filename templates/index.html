@@ -404,6 +404,12 @@ function conectar(){
   });
 }
 async function connectWithDeriv(){
+  // ✅ CONFIRMAÇÃO PARA CONTA REAL
+  if(selectedAcct === 'real'){
+    if(!confirm('⚠️ Está a conectar com a conta REAL. As operações usarão dinheiro real. Continuar?')){
+      return;
+    }
+  }
   const r = await fetch(`/api/auth/deriv_oauth_url?account_type=${selectedAcct}`);
   const d = await r.json();
   window.location.href = d.url;
@@ -445,7 +451,8 @@ function trade(action){
     if(d.error) toast('❌ Erro ao enviar trade','loss');
     else {
       toast('⏳ Trade enviado','info');
-      setTimeout(loadHistory, 3000);
+      // ✅ Atraso maior para trades normais (8s)
+      setTimeout(loadHistory, 8000);
     }
   }).catch(e=>{
     _trading = false;
@@ -466,7 +473,8 @@ function tradeDigit(pred){
     if(d.error) toast('❌ Erro na aposta','loss');
     else {
       toast('⏳ Aposta enviada!','info');
-      setTimeout(loadHistory, 3000);
+      // ✅ Atraso maior para dígitos (13s)
+      setTimeout(loadHistory, 13000);
     }
   }).catch(e=>{
     _trading = false;
@@ -474,18 +482,16 @@ function tradeDigit(pred){
   });
 }
 
-// Martingale
+// Martingale (SEM bloqueio _trading)
 async function mgt(fieldId){
-  if(_trading) return;
+  // ✅ Removida a verificação _trading para não bloquear martingale
   const amt = document.getElementById(fieldId).value;
   if(!validAmount(amt)){
     toast('❌ Valor inválido','loss');
     return;
   }
-  _trading = true;
   const r = await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount: parseFloat(amt)})});
   const d = await r.json();
-  _trading = false;
   if(d.error) {
     toast('❌ Erro ao aplicar martingale','loss');
   } else {
@@ -588,8 +594,10 @@ function loadHistory(){
 function loadAdminUsers(){
   fetch('/api/admin/users').then(r=>r.json()).then(data=>{
     if(data.error){ toast('❌ Erro ao carregar','loss'); return; }
+    // ✅ O backend já envia {users: [...]}
+    const users = data.users || data;
     let html='';
-    data.users.forEach(u=>{
+    users.forEach(u=>{
       const cor = u.active ? 'var(--accent)' : 'var(--danger)';
       const label = u.active ? 'DESATIVAR' : 'ATIVAR';
       html += `
@@ -705,14 +713,15 @@ async function saveTok(){
 // ══════════════ MENU / UI ══════════════
 function toggleMenu(){document.getElementById('sideMenu').classList.toggle('open');document.getElementById('overlay').classList.toggle('show');}
 function showSec(s){
-  stopPolling(); // interrompe polling ao navegar
+  // ✅ NÃO para o polling automaticamente (removido stopPolling)
+  // Apenas esconde/mostra secções
   ['dashboard','affiliate','payment','settings','admin','history'].forEach(x=>document.getElementById(x+'-section').classList.add('hidden'));
   document.getElementById(s+'-section').classList.remove('hidden');
   toggleMenu();
   if(s==='affiliate') loadAffiliate();
   if(s==='admin') loadAdminUsers();
   if(s==='history') loadHistory();
-  if(s==='dashboard' && isConn) startPollingIfNeeded();
+  // Não interfere no polling de status/trading
 }
 function setModo(m){
   modo=m;
