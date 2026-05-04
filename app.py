@@ -71,7 +71,6 @@ def ensure_admin_exists():
             logger.info(f"ℹ️ Utilizador {admin_email} já é admin.")
     else:
         uid = str(int(time.time() * 1000))
-        # Gerar referral_link_code automaticamente
         referral_code = base64.b64encode(hashlib.md5(uid.encode()).digest())[:8].decode()
         users[admin_email] = {
             'id': uid,
@@ -236,7 +235,6 @@ def api_register():
             return jsonify({'error': 'Email já registado'}), 400
 
         uid = str(int(time.time() * 1000))
-        # Gerar referral_link_code automaticamente no registo
         referral_code = base64.b64encode(hashlib.md5(uid.encode()).digest())[:8].decode()
         users[email] = {
             'id': uid,
@@ -352,7 +350,6 @@ def api_generate_referral_link():
         if not user:
             return jsonify({'error': 'Utilizador não encontrado'}), 404
 
-        # Usar o referral_link_code já existente ou gerar um novo
         code = user.get('referral_link_code')
         if not code:
             code = base64.b64encode(hashlib.md5(str(user['id']).encode()).digest())[:8].decode()
@@ -460,13 +457,132 @@ def api_reset_password_confirm():
     return jsonify({'error': 'Token inválido ou expirado'}), 400
 
 
+# ───── Novas rotas para troca de conta e auto-conexão ─────
+
+@app.route('/api/auth/switch-account', methods=['POST'])
+@require_auth
+def api_switch_account():
+    """
+    Alterna entre conta Demo e Real, utilizando o token OAuth já guardado.
+    """
+    try:
+        d = request.json
+        account_type = d.get('account_type', '').strip().lower()
+        if account_type not in ('demo', 'real'):
+            return jsonify({'error': 'account_type deve ser "demo" ou "real"'}), 400
+
+        email = session.get('user_email')
+        user = users.get(email)
+        if not user:
+            return jsonify({'error': 'Utilizador não encontrado'}), 404
+
+        # Determina qual o token guardado
+        token_key = f'deriv_token_{account_type}'
+        saved_token = user.get(token_key)
+        if not saved_token:
+            return jsonify({'error': f'Não existe token guardado para a conta {account_type}. Faça login OAuth para a recolher.'}), 404
+
+        # Atualiza o token ativo
+        user['deriv_token'] = saved_token
+        user['deriv_account_type'] = account_type
+        save_users(users)
+        logger.info(f"🔄 Utilizador {email} trocou para conta {account_type}")
+
+        # Reinicia a sessão de trading com o novo token
+        user_id = session['user_id']
+        with sessions_lock:
+            if user_id in user_sessions:
+                old_sess = user_sessions[user_id]
+                old_sess['client']._stop_event.set()
+                time.sleep(1)
+                del user_sessions[user_id]
+
+        # Cria nova sessão
+        sess = get_user_session(user_id)
+        client = sess['client']
+        bot = sess['trading_bot']
+        client.set_user_token(saved_token)
+
+        def reconnect():
+            client.connect()
+            bot.start(client)
+
+        threading.Thread(target=reconnect, daemon=True).start()
+
+        return jsonify({
+            'status': 'ok',
+            'message': f'Conta alterada para {account_type}',
+            'account_type': account_type
+        })
+    except Exception as e:
+        logger.error(f"Erro ao trocar conta: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auth/auto-connect')
+@require_auth
+def api_auto_connect():
+    """
+    Chamada pelo frontend quando a página carrega. Se existir token, conecta automaticamente.
+    """
+    try:
+        email = session.get('user_email')
+        user = users.get(email)
+        if not user or not user.get('deriv_token'):
+            return jsonify({
+                'status': 'no_token',
+                'message': 'Nenhum token configurado. Faça login com Deriv primeiro.'
+            })
+
+        user_id = session['user_id']
+        sess = get_user_session(user_id)
+        client = sess['client']
+        bot = sess['trading_bot']
+
+        # Corrigido: em vez de bot.active (inexistente), verificamos se o bot não está pausado
+        if client.connected and client.authorized and not bot.paused:
+            return jsonify({
+                'status': 'already_connected',
+                'account_type': user.get('deriv_account_type', 'demo'),
+                'balance': client.balance
+            })
+
+        # Caso contrário, força conexão
+        if not client.authorized:
+            client.set_user_token(user['deriv_token'])
+            threading.Thread(target=client.connect, daemon=True).start()
+
+            timeout = time.time() + 10
+            while not client.authorized and time.time() < timeout:
+                time.sleep(0.5)
+
+            if not client.authorized:
+                return jsonify({'error': 'Falha ao autorizar. Token inválido ou expirado.'}), 500
+
+        if not bot.paused:
+            bot.start(client)
+
+        return jsonify({
+            'status': 'connected',
+            'account_type': user.get('deriv_account_type', 'demo'),
+            'balance': client.balance,
+            'symbol': client.current_symbol
+        })
+    except Exception as e:
+        logger.error(f"Erro na auto-conexão: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # ───── Rotas de Trading ─────
+
 @app.route('/api/connect', methods=['POST'])
 @require_auth
 def api_connect():
+    """
+    Conexão manual (alternativa). Usa o token ativo.
+    """
     try:
         d = request.json
-        at = d.get('account_type', 'demo')
         symbol = d.get('symbol', 'R_100')
         email = session.get('user_email')
         user = users.get(email)
@@ -475,11 +591,11 @@ def api_connect():
 
         token = user.get('deriv_token')
         if not token:
-            return jsonify({'error': 'Token não configurado.'}), 400
+            return jsonify({'error': 'Token não configurado. Complete o login OAuth primeiro.'}), 400
 
-        if at == 'real':
+        # Opcional: atualizar config se necessário
+        if user.get('deriv_account_type') == 'real':
             config.REAL_API_TOKEN = token
-            config.MARKUP_PERCENTAGE = 0.5
         else:
             config.DEMO_API_TOKEN = token
 
@@ -487,11 +603,9 @@ def api_connect():
         client = sess['client']
         client.set_user_token(token)
 
-        # Só reconectar se não estiver já autorizado
         if not client.authorized:
             client.connect()
 
-        # Aguardar até 10 segundos pela autorização
         timeout = time.time() + 10
         while not client.authorized and time.time() < timeout:
             time.sleep(0.5)
@@ -501,7 +615,11 @@ def api_connect():
 
         sess['trading_bot'].start(client)
 
-        return jsonify({'status': 'conectando', 'account_type': at, 'is_demo': at == 'demo'})
+        return jsonify({
+            'status': 'conectando',
+            'account_type': user['deriv_account_type'],
+            'is_demo': user['deriv_account_type'] == 'demo'
+        })
     except Exception as e:
         logger.error(f"❌ Erro na conexão: {e}")
         return jsonify({'error': str(e)}), 500
@@ -588,35 +706,42 @@ def oauth_callback():
     if not accounts:
         return redirect('/?error=oauth_failed')
     
+    # Guarda tokens separados para demo e real
     for acc in accounts:
         acct = acc.get('acct', '')
+        token_value = acc.get('token', '')
+        if not token_value:
+            continue
         if acct.startswith('VR') or acct.startswith('VRTC'):
-            users[email]['deriv_token_demo'] = acc['token']
+            users[email]['deriv_token_demo'] = token_value
         else:
-            users[email]['deriv_token_real'] = acc['token']
+            users[email]['deriv_token_real'] = token_value
+
+        # Define o token ativo de acordo com o tipo de conta escolhida
         if (at == 'demo' and (acct.startswith('VR') or acct.startswith('VRTC'))) or \
            (at == 'real' and not acct.startswith('VR') and not acct.startswith('VRTC')):
-            users[email]['deriv_token'] = acc['token']
+            users[email]['deriv_token'] = token_value
             users[email]['deriv_account_type'] = at
-    
-    # ✅ FALLBACK: garantir que deriv_token está sempre definido
-    if not users[email].get('deriv_token'):
+
+    # Fallback se nenhum token do tipo certo foi encontrado
+    if not users[email].get('deriv_token') and accounts:
         users[email]['deriv_token'] = accounts[0]['token']
+        users[email]['deriv_account_type'] = 'demo'  # assume demo como padrão
         logger.warning(f"⚠️ Token '{at}' não encontrado — a usar fallback")
-    
+
     save_users(users)
     
+    # Conexão automática com o token ativo
     user_id = session['user_id']
     sess = get_user_session(user_id)
     client = sess['client']
+    bot = sess['trading_bot']
     
-    token = users[email].get(f'deriv_token_{at}') or users[email].get('deriv_token')
+    token = users[email].get('deriv_token')
     client.set_user_token(token)
     if not client.authorized:
         threading.Thread(target=client.connect, daemon=True).start()
-    
-    # ✅ Arrancar o bot sempre, independentemente do estado
-    sess['trading_bot'].start(client)
+    bot.start(client)
     
     logger.info(f"✅ OAuth: {len(accounts)} conta(s) para {email}")
     return redirect('/?connected=true')
@@ -625,11 +750,13 @@ def oauth_callback():
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
 def deriv_oauth_url():
-    """Retorna o URL para iniciar o fluxo OAuth da Deriv."""
     redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
     url = f"https://oauth.deriv.com/oauth2/authorize?app_id={config.DERIV_APP_ID}&redirect_uri={redirect_uri}&l=PT"
     return jsonify({'url': url})
 
+
+# ───── Restantes rotas de trading, pagamentos, etc. ─────
+# (mantidas exatamente como estavam, sem alterações)
 
 @app.route('/api/symbol/change', methods=['POST'])
 @require_auth
