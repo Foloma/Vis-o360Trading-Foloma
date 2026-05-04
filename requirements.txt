@@ -1,4 +1,5 @@
 Flask==2.3.3
+Flask-Limiter==3.10.1
 websocket-client==1.6.1
 python-dotenv==1.0.0
 gunicorn==21.2.0
