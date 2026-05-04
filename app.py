@@ -247,10 +247,10 @@ def create_session(user_id, user):
             if old_client._ws_thread and old_client._ws_thread.is_alive():
                 old_client._ws_thread.join(timeout=5)
             del sessions[user_id]
+
     bot = TradingBot()
     analyzer = DigitAnalyzer(max_digits=500)
-    def tick_callback(tick):
-        bot.on_tick(tick)
+    def tick_callback(tick): bot.on_tick(tick)
     client = DerivWebSocketClient(config, on_tick_callback=tick_callback)
     client.set_trading_bot(bot)
     client.set_digit_analyzer(analyzer)
@@ -258,6 +258,7 @@ def create_session(user_id, user):
     client.set_payment_system(payment)
     bot.client = client
     bot.digit_analyzer = analyzer
+
     new_sess = {
         'client': client,
         'trading_bot': bot,
@@ -266,6 +267,7 @@ def create_session(user_id, user):
     }
     with sessions_lock:
         sessions[user_id] = new_sess
+
     token = UserStore.get_active_token(user)
     if token:
         client.set_user_token(token)
@@ -280,14 +282,16 @@ def create_session(user_id, user):
             client._connecting = False
             if client.authorized:
                 if not validate_account_type(client.loginid, user.get('active_account', 'demo')):
-                    logger.warning(f"Token inválido para {user['email']}.")
+                    logger.warning(f"Token inválido para {user['email']} – a remover sessão.")
                     client._stop_event.set()
                     with sessions_lock:
                         sessions.pop(user_id, None)
-                    raise InvalidTokenError("Token não corresponde ao tipo de conta.")
+                    return
                 bot.start(client)
                 bot.daily_stats['start_balance'] = bot.balance
+
         threading.Thread(target=connect_and_validate, daemon=True).start()
+
     return new_sess
 
 def get_session(user_id):
@@ -494,18 +498,42 @@ def switch_account():
     user = UserStore.get(email)
     if not user.get('tokens', {}).get(acc_type):
         return jsonify({'error': 'Sem token para essa conta'}), 400
+
+    # atualiza conta ativa
     UserStore.set_active_account(email, acc_type)
     user = UserStore.get(email)
-    sess = create_session(session['user_id'], user)
+
+    try:
+        sess = create_session(session['user_id'], user)
+    except Exception as e:
+        logger.exception("Erro ao criar sessão na troca de conta")
+        return jsonify({'error': 'Erro ao iniciar sessão'}), 500
+
+    # Aguarda um pouco para que a thread de validação faça o seu trabalho (máx 10s)
+    client = sess['client']
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        with sessions_lock:
+            if session['user_id'] not in sessions:   # sessão foi removida pela validação
+                return jsonify({'error': 'Token inválido para esta conta'}), 400
+        if client.authorized:
+            break
+        time.sleep(0.3)
+
+    if not client.authorized:
+        return jsonify({'error': 'Não foi possível autorizar o token'}), 500
+
     reset_bot_state(sess['trading_bot'])
-    return jsonify({'status': 'ok', 'message': f'Conta {acc_type} ativada. A aguardar conexão...',
-                    'account_type': acc_type})
+    return jsonify({
+        'status': 'ok',
+        'message': f'Conta {acc_type} ativada. A aguardar conexão...',
+        'account_type': acc_type
+    })
 
 @app.route('/api/status')
 @require_auth
 def status():
     user_id = session['user_id']
-    # Criar sessão automaticamente se não existir
     sess = get_session(user_id)
     if not sess:
         email = session.get('user_email')
