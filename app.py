@@ -11,13 +11,15 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY é obrigatória. Defina a variável de ambiente.")
 
-DATABASE_PATH = os.environ.get('DATABASE_PATH', 'foloma.db')
+DATA_PATH = os.environ.get('DATA_PATH', '/var/data')
+DATABASE_PATH = os.path.join(DATA_PATH, 'foloma.db')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 # ==================== INICIALIZAÇÃO DA BASE DE DADOS ====================
 def init_db():
+    os.makedirs(DATA_PATH, exist_ok=True)
     conn = sqlite3.connect(DATABASE_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -61,7 +63,7 @@ init_db()
 
 # ==================== MIGRAÇÃO DE users.json PARA SQLite ====================
 def migrate_from_json():
-    json_path = os.environ.get('DATA_PATH', '.') + '/users.json'
+    json_path = os.path.join(DATA_PATH, 'users.json')
     if not os.path.exists(json_path):
         return
     with open(json_path, 'r') as f:
@@ -220,9 +222,13 @@ sessions = {}
 sessions_lock = threading.RLock()
 
 def reset_bot_state(bot):
+    """Reseta o estado do bot para evitar mistura entre contas."""
     bot.reset_stats()
     bot.reset_martingale()
-    bot.daily_stats = {'start_balance': 0, 'trades': 0, 'wins': 0, 'losses': 0, 'profit': 0}
+    if hasattr(bot, 'reset_daily_stats'):
+        bot.reset_daily_stats()
+    else:
+        bot.daily_stats = {'start_balance': 0, 'trades': 0, 'wins': 0, 'losses': 0, 'profit': 0}
 
 class InvalidTokenError(Exception):
     pass
@@ -426,7 +432,6 @@ def reset_password():
                  (email, hashed, time.time() + 3600))
     conn.commit()
     conn.close()
-    # Enviar email aqui (omitido)
     return jsonify({'status': 'ok', 'message': 'Se o email existir, receberá um link.'})
 
 @app.route('/api/auth/reset-password-confirm', methods=['POST'])
@@ -499,9 +504,16 @@ def switch_account():
 @app.route('/api/status')
 @require_auth
 def status():
-    sess = get_session(session['user_id'])
+    user_id = session['user_id']
+    # Criar sessão automaticamente se não existir
+    sess = get_session(user_id)
     if not sess:
-        return jsonify({'error': 'Sessão não encontrada'}), 500
+        email = session.get('user_email')
+        user = UserStore.get(email)
+        if user and UserStore.get_active_token(user):
+            sess = create_session(user_id, user)
+        else:
+            return jsonify({'bot': {}, 'digits': {}, 'symbols': config.AVAILABLE_SYMBOLS})
     client = sess['client']
     bot = sess['trading_bot']
     analyzer = sess['digit_analyzer']
@@ -584,7 +596,9 @@ def oauth_callback():
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
 def deriv_oauth_url():
-    redirect_uri = request.host_url.rstrip('/') + '/oauth/callback'
+    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
+    at = request.args.get('account_type', 'demo')
+    session['pending_account_type'] = at
     url = f"https://oauth.deriv.com/oauth2/authorize?app_id={config.DERIV_APP_ID}&redirect_uri={redirect_uri}&l=PT"
     return jsonify({'url': url})
 
@@ -801,7 +815,6 @@ def credit_affiliate_commission(user_email, amount):
 @app.route('/api/affiliate/stats')
 @require_auth
 def affiliate_stats():
-    # retornar estatísticas globais do sistema de afiliados (pode ser simplificado)
     return jsonify({'total_referrals': 0, 'total_commission': 0.0, 'pending_commission': 0.0, 'paid_commission': 0.0})
 
 @app.route('/api/affiliate/link')
@@ -867,7 +880,7 @@ def admin_users():
     conn = sqlite3.connect(DATABASE_PATH)
     rows = conn.execute('SELECT email, name, active FROM users').fetchall()
     conn.close()
-    return jsonify([{'email': r[0], 'name': r[1], 'active': bool(r[2])} for r in rows])
+    return jsonify({'users': [{'email': r[0], 'name': r[1], 'active': bool(r[2])} for r in rows]})
 
 @app.route('/api/admin/toggle-user', methods=['POST'])
 @require_admin
@@ -879,7 +892,7 @@ def toggle_user():
     conn.execute('UPDATE users SET active = ? WHERE email = ?', (1 if en else 0, email))
     conn.commit()
     conn.close()
-    return jsonify({'status': 'ok'})
+    return jsonify({'status': 'ok', 'message': f'Utilizador {"ativado" if en else "desativado"}.'})
 
 # ==================== INICIAR ====================
 if __name__ == '__main__':
