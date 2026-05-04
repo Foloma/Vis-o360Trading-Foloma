@@ -48,9 +48,9 @@ class DerivWebSocketClient:
         self._watchdog_thread = None
         self._ws_thread = None
 
-        # ✅ NOVOS ATRIBUTOS (correções estruturais)
+        # ✅ Atributos para produção
         self.loginid = None                # preenchido após autorização
-        self._connecting = False           # flag para evitar múltiplas conexões simultâneas
+        self._connecting = False           # evita múltiplas conexões simultâneas
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
@@ -101,7 +101,6 @@ class DerivWebSocketClient:
                 break
             backoff = min(backoff * 2, 60)
             logger.info(f"🔄 Nova tentativa em {backoff}s...")
-            # ✅ Substituído time.sleep(backoff) por wait() para paragem imediata
             if self._stop_event.wait(timeout=backoff):
                 break
 
@@ -116,7 +115,7 @@ class DerivWebSocketClient:
         self.streaming = False
         self._last_tick_time = None
         self.state = self.ST_DISCONNECTED
-        self.loginid = None          # ✅ reset também
+        self.loginid = None
 
     # ── Autorização ─────────────────────────────────────────────
     def _authorize_and_wait(self, timeout=10):
@@ -136,8 +135,8 @@ class DerivWebSocketClient:
                         return False
                     logger.info("✅ Autorizado com sucesso!")
                     self.authorized = True
-                    # ✅ GUARDAR LOGINID
-                    self.loginid = data.get('loginid', '')
+                    # ✅ Extrai loginid do objeto authorize
+                    self.loginid = data.get('authorize', {}).get('loginid', '')
                     logger.info(f"LoginID: {self.loginid}")
                     return True
             except websocket.WebSocketTimeoutException:
@@ -204,7 +203,7 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
-    # ── Keep‑alive (com wait) ───────────────────────────────────
+    # ── Keep‑alive ──────────────────────────────────────────────
     def _start_keep_alive(self):
         self._keep_alive_stop.clear()
         self._stop_keep_alive()
@@ -216,7 +215,7 @@ class DerivWebSocketClient:
 
     def _keep_alive_loop(self):
         while not self._stop_event.is_set() and not self._keep_alive_stop.is_set():
-            if self._keep_alive_stop.wait(timeout=30):   # ✅ paragem imediata
+            if self._keep_alive_stop.wait(timeout=30):
                 break
             if self.ws and self.connected:
                 try:
@@ -226,7 +225,7 @@ class DerivWebSocketClient:
             else:
                 break
 
-    # ── Watchdog (com wait) ─────────────────────────────────────
+    # ── Watchdog ─────────────────────────────────────────────────
     def _start_watchdog(self):
         self._watchdog_stop.clear()
         self._stop_watchdog()
@@ -238,7 +237,7 @@ class DerivWebSocketClient:
 
     def _watchdog_loop(self):
         while not self._stop_event.is_set() and not self._watchdog_stop.is_set():
-            if self._watchdog_stop.wait(timeout=10):    # ✅ paragem imediata
+            if self._watchdog_stop.wait(timeout=10):
                 break
             if not self.ws or not self.connected:
                 break
