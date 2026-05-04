@@ -148,7 +148,6 @@
           <div id="cdown" style="color:#ffaa00;font-size:14px;margin-top:8px">⏱ 10 ticks</div>
         </div>
         <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
-        <!-- Input de valor + martingale para dígitos -->
         <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" style="margin-top:8px">
         <div class="ms">
           <div>Martingale: <span id="mgtActDig">DESATIVADO</span></div>
@@ -178,7 +177,6 @@
       </div>
       <div class="ms"><div>Martingale: <span id="mgtAct">DESATIVADO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
     </div>
-    <!-- Histórico diretamente no dashboard -->
     <div class="card">
       <div class="card-title">
         📋 HISTÓRICO
@@ -273,10 +271,7 @@ function updateAll(){
     if(data.error)return;
     const bot=data.bot;if(!bot)return;
     const conn=bot.connected&&bot.authorized;
-
-    // ✅ Sincronizar isConn com o estado real
     if(conn && !isConn) isConn = true;
-
     document.getElementById('sDot').className='dot'+(conn?' on':'');
     document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
     document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
@@ -290,8 +285,6 @@ function updateAll(){
     document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
     document.getElementById('bbS').textContent=bot.analysis?.bollinger?.desc||'---';
     if(data.digits)updateDigits(data.digits);
-
-    // Atualizar estado do martingale para ativos e dígitos
     fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
       const act = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
       const nxt = '$' + (m.next_amount||0.35).toFixed(2);
@@ -338,6 +331,10 @@ function conectar(){
   });
 }
 async function connectWithDeriv(){
+    const confirmMsg = selectedAcct === 'real' 
+        ? '⚠️ Vai conectar a CONTA REAL. Confirma?' 
+        : 'Vai conectar a conta Demo.';
+    if(selectedAcct === 'real' && !confirm(confirmMsg)) return;
     const r = await fetch(`/api/auth/deriv_oauth_url?account_type=${selectedAcct}`);
     const d = await r.json();
     window.location.href = d.url;
@@ -352,7 +349,7 @@ function trade(action){
     if(d.error) toast('❌ '+d.error,'loss');
     else {
       toast('⏳ Trade enviado','info');
-      setTimeout(loadHistory, 3000);
+      setTimeout(loadHistory, 8000);
     }
   });
 }
@@ -363,7 +360,7 @@ function tradeDigit(pred){
     if(d.error) toast('❌ '+d.error,'loss');
     else {
       toast('⏳ Aposta enviada!','info');
-      setTimeout(loadHistory, 3000);
+      setTimeout(loadHistory, 13000);
     }
   });
 }
@@ -442,8 +439,6 @@ function loadHistory(){
     });
     const list = document.getElementById('histList');
     if(list) list.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
-
-    // Duplicar para a secção history page (se existir)
     const sum2 = document.getElementById('histSummary2');
     if(sum2) {
       sum2.innerHTML = sum ? sum.innerHTML : `
