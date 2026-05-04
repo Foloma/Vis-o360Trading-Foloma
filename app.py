@@ -569,32 +569,52 @@ def api_debug():
 
 @app.route('/oauth/callback')
 def oauth_callback():
-    """Recebe o token da Deriv após autorização OAuth."""
-    token = request.args.get('token1')
-    acct = request.args.get('acct1')
-    
-    if not token:
-        logger.error("Callback OAuth sem token")
-        return redirect('/?error=oauth_failed')
+    at = session.pop('pending_account_type', 'demo')
     
     if 'user_id' not in session:
-        logger.warning("Utilizador não autenticado na sessão")
         return redirect('/?error=not_logged_in')
     
     email = session.get('user_email')
-    users[email]['deriv_token'] = token
-    users[email]['deriv_account'] = acct
+    
+    # Capturar TODOS os tokens que a Deriv devolve
+    accounts = []
+    i = 1
+    while request.args.get(f'token{i}'):
+        accounts.append({
+            'token': request.args.get(f'token{i}'),
+            'acct': request.args.get(f'acct{i}'),
+        })
+        i += 1
+    
+    if not accounts:
+        return redirect('/?error=oauth_failed')
+    
+    # Separar demo (VR/VRTC) de real (outros prefixos)
+    for acc in accounts:
+        acct = acc.get('acct', '')
+        if acct.startswith('VR') or acct.startswith('VRTC'):
+            users[email]['deriv_token_demo'] = acc['token']
+        else:
+            users[email]['deriv_token_real'] = acc['token']
+        # Guardar o token do tipo pedido como activo
+        if (at == 'demo' and (acct.startswith('VR') or acct.startswith('VRTC'))) or \
+           (at == 'real' and not acct.startswith('VR') and not acct.startswith('VRTC')):
+            users[email]['deriv_token'] = acc['token']
+            users[email]['deriv_account_type'] = at
+    
     save_users(users)
     
-    # Conectar automaticamente
     user_id = session['user_id']
     sess = get_user_session(user_id)
     client = sess['client']
+    
+    # Usar o token correcto
+    token = users[email].get(f'deriv_token_{at}') or users[email].get('deriv_token')
     client.set_user_token(token)
     if not client.authorized:
         threading.Thread(target=client.connect, daemon=True).start()
     
-    logger.info(f"✅ OAuth bem‑sucedido para {email}")
+    logger.info(f"✅ OAuth: {len(accounts)} conta(s) para {email}")
     return redirect('/?connected=true')
 
 
