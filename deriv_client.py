@@ -35,8 +35,8 @@ class DerivWebSocketClient:
         self._digit_analyzer = None
         self._balance_subscribed = False
         self._stop_event = threading.Event()
-        self._keep_alive_stop = threading.Event()          # ✅ correção #1
-        self._watchdog_stop = threading.Event()            # ✅ mesmo mecanismo para watchdog
+        self._keep_alive_stop = threading.Event()
+        self._watchdog_stop = threading.Event()
         self._last_tick_time = None
         self._last_trade_time = 0
         self._processed_contracts = deque(maxlen=1000)
@@ -47,6 +47,10 @@ class DerivWebSocketClient:
         self._keep_alive_thread = None
         self._watchdog_thread = None
         self._ws_thread = None
+
+        # ✅ NOVOS ATRIBUTOS (correções estruturais)
+        self.loginid = None                # preenchido após autorização
+        self._connecting = False           # flag para evitar múltiplas conexões simultâneas
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
@@ -95,9 +99,11 @@ class DerivWebSocketClient:
                 self._teardown_connection()
             if self._stop_event.is_set():
                 break
-            logger.info(f"🔄 Nova tentativa em {backoff}s...")
-            time.sleep(backoff)
             backoff = min(backoff * 2, 60)
+            logger.info(f"🔄 Nova tentativa em {backoff}s...")
+            # ✅ Substituído time.sleep(backoff) por wait() para paragem imediata
+            if self._stop_event.wait(timeout=backoff):
+                break
 
     def _reset_state(self):
         self.subscribed_symbols.clear()
@@ -110,6 +116,7 @@ class DerivWebSocketClient:
         self.streaming = False
         self._last_tick_time = None
         self.state = self.ST_DISCONNECTED
+        self.loginid = None          # ✅ reset também
 
     # ── Autorização ─────────────────────────────────────────────
     def _authorize_and_wait(self, timeout=10):
@@ -129,6 +136,9 @@ class DerivWebSocketClient:
                         return False
                     logger.info("✅ Autorizado com sucesso!")
                     self.authorized = True
+                    # ✅ GUARDAR LOGINID
+                    self.loginid = data.get('loginid', '')
+                    logger.info(f"LoginID: {self.loginid}")
                     return True
             except websocket.WebSocketTimeoutException:
                 continue
@@ -194,20 +204,20 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
-    # ── Keep‑alive (corrigido – usa Event para parar) ────────────
+    # ── Keep‑alive (com wait) ───────────────────────────────────
     def _start_keep_alive(self):
-        self._keep_alive_stop.clear()                            # ✅ correção #3
-        self._stop_keep_alive()                                  # garante que a anterior terminou
+        self._keep_alive_stop.clear()
+        self._stop_keep_alive()
         self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
         self._keep_alive_thread.start()
 
     def _stop_keep_alive(self):
-        self._keep_alive_stop.set()                              # ✅ correção #2
+        self._keep_alive_stop.set()
 
     def _keep_alive_loop(self):
-        """Envia ping a cada 30 segundos. Termina quando o evento de paragem é setado."""
-        while not self._stop_event.is_set() and not self._keep_alive_stop.is_set():   # ✅ correção #4
-            time.sleep(30)
+        while not self._stop_event.is_set() and not self._keep_alive_stop.is_set():
+            if self._keep_alive_stop.wait(timeout=30):   # ✅ paragem imediata
+                break
             if self.ws and self.connected:
                 try:
                     self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
@@ -216,7 +226,7 @@ class DerivWebSocketClient:
             else:
                 break
 
-    # ── Watchdog (corrigido – mesmo padrão) ─────────────────────
+    # ── Watchdog (com wait) ─────────────────────────────────────
     def _start_watchdog(self):
         self._watchdog_stop.clear()
         self._stop_watchdog()
@@ -228,12 +238,13 @@ class DerivWebSocketClient:
 
     def _watchdog_loop(self):
         while not self._stop_event.is_set() and not self._watchdog_stop.is_set():
-            time.sleep(10)
+            if self._watchdog_stop.wait(timeout=10):    # ✅ paragem imediata
+                break
             if not self.ws or not self.connected:
                 break
             if self.streaming and self._last_tick_time is not None:
                 if time.time() - self._last_tick_time > 45:
-                    logger.warning("🛑 Watchdog: >45s sem ticks. Sessão inválida? Forçando reconexão.")
+                    logger.warning("🛑 Watchdog: >45s sem ticks. Forçando reconexão.")
                     self._close_connection()
                     break
             elif not self.streaming:
@@ -244,7 +255,6 @@ class DerivWebSocketClient:
 
     # ── Mudança de símbolo ──────────────────────────────────────
     def change_symbol(self, symbol):
-        """Muda o símbolo de trading, forçando uma nova subscrição."""
         if symbol in self.subscribed_symbols:
             self.subscribed_symbols.discard(symbol)
         self.current_symbol = symbol
@@ -281,7 +291,7 @@ class DerivWebSocketClient:
     def _subscribe_ticks(self, symbol):
         if not self.authorized:
             return
-        if symbol in self.subscribed_symbols:                 # ✅ correção #6
+        if symbol in self.subscribed_symbols:
             return
         try:
             self.ws.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": self._next_req()}))
@@ -316,7 +326,7 @@ class DerivWebSocketClient:
         with self._trade_lock:
             if not self.streaming:
                 logger.warning("🚫 Sem streaming"); return False
-            if self.balance > 0 and amount > self.balance * 0.02:       # ✅ correção #5
+            if self.balance > 0 and amount > self.balance * 0.02:
                 logger.warning("🚫 Excede 2%"); return False
             if time.time() - self._last_trade_time < 2:
                 logger.warning("⏱️ Intervalo mínimo 2s"); return False
