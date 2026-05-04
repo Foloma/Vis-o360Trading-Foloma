@@ -576,7 +576,6 @@ def oauth_callback():
     
     email = session.get('user_email')
     
-    # Capturar TODOS os tokens que a Deriv devolve
     accounts = []
     i = 1
     while request.args.get(f'token{i}'):
@@ -589,18 +588,21 @@ def oauth_callback():
     if not accounts:
         return redirect('/?error=oauth_failed')
     
-    # Separar demo (VR/VRTC) de real (outros prefixos)
     for acc in accounts:
         acct = acc.get('acct', '')
         if acct.startswith('VR') or acct.startswith('VRTC'):
             users[email]['deriv_token_demo'] = acc['token']
         else:
             users[email]['deriv_token_real'] = acc['token']
-        # Guardar o token do tipo pedido como activo
         if (at == 'demo' and (acct.startswith('VR') or acct.startswith('VRTC'))) or \
            (at == 'real' and not acct.startswith('VR') and not acct.startswith('VRTC')):
             users[email]['deriv_token'] = acc['token']
             users[email]['deriv_account_type'] = at
+    
+    # ✅ FALLBACK: garantir que deriv_token está sempre definido
+    if not users[email].get('deriv_token'):
+        users[email]['deriv_token'] = accounts[0]['token']
+        logger.warning(f"⚠️ Token '{at}' não encontrado — a usar fallback")
     
     save_users(users)
     
@@ -608,11 +610,13 @@ def oauth_callback():
     sess = get_user_session(user_id)
     client = sess['client']
     
-    # Usar o token correcto
     token = users[email].get(f'deriv_token_{at}') or users[email].get('deriv_token')
     client.set_user_token(token)
     if not client.authorized:
         threading.Thread(target=client.connect, daemon=True).start()
+    
+    # ✅ Arrancar o bot sempre, independentemente do estado
+    sess['trading_bot'].start(client)
     
     logger.info(f"✅ OAuth: {len(accounts)} conta(s) para {email}")
     return redirect('/?connected=true')
