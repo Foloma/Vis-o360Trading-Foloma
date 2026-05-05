@@ -706,25 +706,87 @@ def debug():
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
     })
 
+def exchange_code_for_tokens(code):
+    """Troca o authorization_code por tokens junto da API da Deriv."""
+    import urllib.request
+    import urllib.parse
+
+    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
+    token_url = "https://oauth.deriv.com/oauth2/token"
+    data = urllib.parse.urlencode({
+        'code': code,
+        'redirect_uri': redirect_uri,
+        'grant_type': 'authorization_code',
+        'client_id': str(config.DERIV_APP_ID)   # app_id é o client_id
+    }).encode()
+
+    try:
+        req = urllib.request.Request(token_url, data=data, method='POST')
+        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode())
+            logger.info(f"Resposta da troca de code: {result}")
+            # A resposta contém 'access_token' e possivelmente 'account_list'
+            # Vamos extrair os tokens e informações de conta
+            accounts = []
+            # A Deriv pode devolver uma lista de contas dentro do JSON
+            account_list = result.get('accounts', []) or result.get('account_list', [])
+            if not account_list:
+                # Se não houver lista, usamos o próprio token retornado
+                accounts.append({
+                    'token': result.get('access_token', ''),
+                    'acct': ''   # loginid será obtido após autorização
+                })
+            else:
+                for acc in account_list:
+                    accounts.append({
+                        'token': acc.get('token', ''),
+                        'acct': acc.get('loginid', '')
+                    })
+            return accounts
+    except Exception as e:
+        logger.error(f"Erro ao trocar code por token: {e}")
+        return None
+
 @app.route('/oauth/callback')
 def oauth_callback():
+    logger.info(f"OAuth callback params: {request.args}")
     at = session.pop('pending_account_type', 'demo')
+
     if 'user_id' not in session:
         return redirect('/?error=not_logged_in')
+
     email = session.get('user_email')
     accounts = []
-    i = 1
-    while request.args.get(f'token{i}'):
-        accounts.append({
-            'token': request.args.get(f'token{i}'),
-            'acct': request.args.get(f'acct{i}')
-        })
-        i += 1
+
+    # Verificar se veio um "code" (fluxo Authorization Code)
+    code = request.args.get('code')
+    if code:
+        # Trocar o code por tokens usando a API da Deriv
+        try:
+            tokens_data = exchange_code_for_tokens(code)
+            if tokens_data:
+                accounts = tokens_data
+        except Exception as e:
+            logger.error(f"Falha ao trocar code por tokens: {e}")
+            return redirect('/?error=oauth_token_exchange_failed')
+    else:
+        # Fluxo antigo: tokens diretos na URL
+        i = 1
+        while request.args.get(f'token{i}'):
+            accounts.append({
+                'token': request.args.get(f'token{i}'),
+                'acct': request.args.get(f'acct{i}')
+            })
+            i += 1
+
     if not accounts:
+        logger.error("Nenhum token recebido no OAuth")
         return redirect('/?error=oauth_failed')
+
     for acc in accounts:
-        acct = acc['acct']
-        tok = acc['token']
+        acct = acc.get('acct', '')
+        tok = acc.get('token', '')
         if not tok:
             continue
         if acct.startswith('VR') or acct.startswith('VRTC'):
@@ -734,9 +796,9 @@ def oauth_callback():
         if (at == 'demo' and (acct.startswith('VR') or acct.startswith('VRTC'))) or \
            (at == 'real' and not acct.startswith('VR') and not acct.startswith('VRTC')):
             UserStore.set_active_account(email, at)
-    # Garantir que ambos os tokens estão guardados (same for all accounts received)
+
     user = UserStore.get(email)
-    create_session(session['user_id'], user)
+    create_session(session['user_id'], user, force=True)
     return redirect('/?connected=true')
 
 import urllib.parse
