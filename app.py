@@ -263,6 +263,7 @@ class AuthService:
 # ==================== GESTOR DE SESSÃO WEBSOCKET ====================
 sessions = {}
 sessions_lock = threading.RLock()
+session_requests = {}
 
 def reset_bot_state(bot):
     bot.reset_stats()
@@ -281,15 +282,10 @@ def persist_trade(user_id, trade_data):
         conn.execute('''INSERT OR REPLACE INTO trades
             (user_id, contract_id, symbol, action, amount, buy_price, sell_price, profit, result, timestamp)
             VALUES (?,?,?,?,?,?,?,?,?,?)''',
-            (user_id,
-             trade_data.get('contract_id'),
-             trade_data.get('symbol'),
-             trade_data.get('action'),
-             trade_data.get('amount'),
-             trade_data.get('buy_price', 0),
-             trade_data.get('sell_price', 0),
-             trade_data.get('profit', 0),
-             trade_data.get('result', 'unknown'),
+            (user_id, trade_data.get('contract_id'), trade_data.get('symbol'),
+             trade_data.get('action'), trade_data.get('amount'),
+             trade_data.get('buy_price', 0), trade_data.get('sell_price', 0),
+             trade_data.get('profit', 0), trade_data.get('result', 'unknown'),
              time.time()))
         conn.commit()
     except Exception as e:
@@ -334,7 +330,6 @@ def create_session(user_id, user, force=False):
 
     def tick_callback(tick): bot.on_tick(tick)
 
-    # Tenta criar o cliente com o callback de resultado; se não suportar, cria sem
     client = DerivWebSocketClient(config, on_tick_callback=tick_callback, on_result_callback=on_trade_result)
     client.set_trading_bot(bot)
     client.set_digit_analyzer(analyzer)
@@ -396,12 +391,9 @@ from config import config
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
-    limiter = Limiter(
-        get_remote_address,
-        app=app,
-        default_limits=["200 per day", "50 per hour"],
-        storage_uri="memory://"
-    )
+    limiter = Limiter(get_remote_address, app=app,
+                      default_limits=["200 per day", "50 per hour"],
+                      storage_uri="memory://")
 except ImportError:
     logger.warning("Flask-Limiter não instalado. Rate limiting desativado.")
     limiter = None
@@ -574,7 +566,6 @@ def api_connect():
     token = UserStore.get_active_token(user)
     if not token:
         return jsonify({'error': 'Token não configurado'}), 400
-    # create_session já inicia a conexão; não tentamos iniciar outra
     create_session(session['user_id'], user)
     return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
 
@@ -596,10 +587,8 @@ def auto_connect():
             'balance': sess['client'].balance
         })
     create_session(session['user_id'], user)
-    return jsonify({
-        'status': 'connecting',
-        'account_type': user.get('active_account', 'demo')
-    })
+    return jsonify({'status': 'connecting', 'account_type': user.get('active_account', 'demo')})
+
 @app.route('/api/auth/switch-account', methods=['POST'])
 @require_auth
 def switch_account():
@@ -607,20 +596,48 @@ def switch_account():
     acc_type = d.get('account_type','').strip().lower()
     if acc_type not in ('demo','real'):
         return jsonify({'error': 'Tipo inválido'}), 400
+
     email = session['user_email']
     user = UserStore.get(email)
     if not user.get('tokens', {}).get(acc_type):
         return jsonify({'error': 'Sem token para essa conta'}), 400
 
+    # Atualiza a conta ativa na BD
     UserStore.set_active_account(email, acc_type)
     user = UserStore.get(email)
 
+    # Gera um request_id único
+    req_id = secrets.token_hex(4)
+    session_requests[session['user_id']] = req_id
+
+    # Força recriação da sessão
     sess = create_session(session['user_id'], user, force=True)
+    sess['client'].request_id = req_id
+
     reset_bot_state(sess['trading_bot'])
+
+    # Aguarda até 8 segundos pela autorização da nova sessão
+    client = sess['client']
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        if client.authorized and client.loginid:
+            if validate_account_type(client.loginid, acc_type):
+                return jsonify({
+                    'status': 'ok',
+                    'message': f'Conta {acc_type} ativada.',
+                    'account_type': acc_type,
+                    'request_id': req_id,
+                    'balance': client.balance,
+                    'loginid': client.loginid
+                })
+        time.sleep(0.3)
+
+    # Se não autorizou a tempo, retorna connecting
     return jsonify({
         'status': 'connecting',
-        'message': f'Conta {acc_type} ativada. A aguardar conexão...',
-        'account_type': acc_type
+        'message': f'A aguardar conexão da conta {acc_type}...',
+        'account_type': acc_type,
+        'request_id': req_id
     })
 
 @app.route('/api/status')
@@ -659,7 +676,8 @@ def status():
             'digit_counter': analyzer.get_digit_counter(),
             'ticks_per_digit': analyzer.TICKS_PER_DIGIT
         },
-        'symbols': config.AVAILABLE_SYMBOLS
+        'symbols': config.AVAILABLE_SYMBOLS,
+        'loginid': client.loginid if client else None
     })
 
 @app.route('/api/debug')
@@ -677,6 +695,7 @@ def debug():
         'balance': c.balance,
         'symbol': c.current_symbol,
         'loginid': c.loginid if hasattr(c,'loginid') else None,
+        'request_id': getattr(c, 'request_id', None),
         'ws_thread_alive': c._ws_thread.is_alive() if c._ws_thread else False,
         'pending_trade': c.pending_trade is not None,
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
@@ -723,7 +742,7 @@ def deriv_oauth_url():
     url = f"https://oauth.deriv.com/oauth2/authorize?app_id={config.DERIV_APP_ID}&redirect_uri={redirect_uri}&l=PT"
     return jsonify({'url': url})
 
-# ==================== OPERAÇÕES DE TRADING ====================
+# ==================== ROTAS DE TRADING ====================
 @app.route('/api/trade', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
