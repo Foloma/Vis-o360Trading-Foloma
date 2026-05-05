@@ -1,8 +1,9 @@
-import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging
+import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid
 from datetime import datetime
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, abort
 from werkzeug.security import generate_password_hash, check_password_hash
+import urllib.parse
 
 # ==================== CONFIGURAÇÃO ====================
 SECRET_KEY = os.environ.get('SECRET_KEY')
@@ -263,7 +264,8 @@ class AuthService:
 # ==================== GESTOR DE SESSÃO WEBSOCKET ====================
 sessions = {}
 sessions_lock = threading.RLock()
-session_requests = {}
+oauth_states = {}
+oauth_states_lock = threading.Lock()
 
 def reset_bot_state(bot):
     bot.reset_stats()
@@ -372,7 +374,6 @@ def create_session(user_id, user, force=False):
                 bot.start(client)
                 bot.daily_stats['start_balance'] = bot.balance
             else:
-                # Limpeza automática de token inválido
                 if getattr(client, 'auth_error', {}).get('code') == 'InvalidToken':
                     UserStore.add_token(user['email'], user.get('active_account', 'demo'), '')
                     logger.warning(f"Token expirado para {user['email']} – removido.")
@@ -389,6 +390,8 @@ def get_session(user_id):
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 
 from config import config
 
@@ -429,52 +432,11 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
-import urllib.request
-import urllib.parse
-
-def exchange_code_for_tokens(code):
-    """Troca o authorization_code por tokens junto da API da Deriv."""
-    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
-    token_url = "https://oauth.deriv.com/oauth2/token"
-    data = urllib.parse.urlencode({
-        'code': code,
-        'redirect_uri': redirect_uri,
-        'grant_type': 'authorization_code',
-        'client_id': str(config.DERIV_APP_ID)
-    }).encode()
-
-    try:
-        req = urllib.request.Request(token_url, data=data, method='POST')
-        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read().decode())
-            logger.info(f"Resposta da troca de code: {result}")
-            accounts = []
-            # A resposta pode ter 'accounts' (lista de contas com token)
-            account_list = result.get('accounts', [])
-            if not account_list:
-                # fallback: usar o access_token diretamente
-                accounts.append({
-                    'token': result.get('access_token', ''),
-                    'acct': ''
-                })
-            else:
-                for acc in account_list:
-                    accounts.append({
-                        'token': acc.get('token', ''),
-                        'acct': acc.get('loginid', '')
-                    })
-            return accounts
-    except Exception as e:
-        logger.error(f"Erro ao trocar code por token: {e}")
-        return None
-
-# ==================== ROTA PRINCIPAL ====================
+# ==================== ROTAS ====================
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ==================== ROTAS DE AUTENTICAÇÃO ====================
 @app.route('/api/auth/status')
 def auth_status():
     if 'user_id' in session:
@@ -600,7 +562,7 @@ def reset_password_confirm():
         conn.close()
     return jsonify({'status': 'ok', 'message': 'Senha alterada com sucesso.'})
 
-# ==================== ROTAS DE CONEXÃO / TRADING ====================
+# ==================== CONEXÃO / TRADING ====================
 @app.route('/api/connect', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -646,11 +608,9 @@ def switch_account():
     if not user.get('tokens', {}).get(acc_type):
         return jsonify({'error': 'Sem token para essa conta'}), 400
 
-    # Atualiza a conta ativa na BD
     UserStore.set_active_account(email, acc_type)
     user = UserStore.get(email)
 
-    # Remove a sessão antiga imediatamente
     user_id = session['user_id']
     with sessions_lock:
         if user_id in sessions:
@@ -660,28 +620,11 @@ def switch_account():
                 old_client._ws_thread.join(timeout=5)
             del sessions[user_id]
 
-    # Cria nova sessão
     sess = create_session(user_id, user, force=True)
     reset_bot_state(sess['trading_bot'])
-
-    # Aguarda até 5 segundos pela autorização
-    client = sess['client']
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        if client.authorized and client.loginid:
-            if validate_account_type(client.loginid, acc_type):
-                return jsonify({
-                    'status': 'ok',
-                    'message': f'Conta {acc_type} ativada.',
-                    'account_type': acc_type,
-                    'balance': client.balance,
-                    'loginid': client.loginid
-                })
-        time.sleep(0.3)
-
     return jsonify({
         'status': 'connecting',
-        'message': f'A aguardar conexão da conta {acc_type}...',
+        'message': f'Conta {acc_type} ativada. A aguardar conexão...',
         'account_type': acc_type
     })
 
@@ -740,133 +683,110 @@ def debug():
         'balance': c.balance,
         'symbol': c.current_symbol,
         'loginid': c.loginid if hasattr(c,'loginid') else None,
-        'request_id': getattr(c, 'request_id', None),
         'ws_thread_alive': c._ws_thread.is_alive() if c._ws_thread else False,
         'pending_trade': c.pending_trade is not None,
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
     })
 
-def exchange_code_for_tokens(code):
-    """Troca o authorization_code por tokens junto da API da Deriv."""
-    import urllib.request
-    import urllib.parse
-
-    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
-    token_url = "https://oauth.deriv.com/oauth2/token"
-    data = urllib.parse.urlencode({
-        'code': code,
-        'redirect_uri': redirect_uri,
-        'grant_type': 'authorization_code',
-        'client_id': str(config.DERIV_APP_ID)   # app_id é o client_id
-    }).encode()
-
-    try:
-        req = urllib.request.Request(token_url, data=data, method='POST')
-        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read().decode())
-            logger.info(f"Resposta da troca de code: {result}")
-            # A resposta contém 'access_token' e possivelmente 'account_list'
-            # Vamos extrair os tokens e informações de conta
-            accounts = []
-            # A Deriv pode devolver uma lista de contas dentro do JSON
-            account_list = result.get('accounts', []) or result.get('account_list', [])
-            if not account_list:
-                # Se não houver lista, usamos o próprio token retornado
-                accounts.append({
-                    'token': result.get('access_token', ''),
-                    'acct': ''   # loginid será obtido após autorização
-                })
-            else:
-                for acc in account_list:
-                    accounts.append({
-                        'token': acc.get('token', ''),
-                        'acct': acc.get('loginid', '')
-                    })
-            return accounts
-    except Exception as e:
-        logger.error(f"Erro ao trocar code por token: {e}")
-        return None
-
 @app.route('/oauth/callback')
 def oauth_callback():
     logger.info(f"OAuth callback params: {request.args}")
-    at = session.pop('pending_account_type', 'demo')
+    state_id = request.args.get('state')
+    if not state_id:
+        logger.error("State não enviado pela Deriv")
+        return redirect('/?error=invalid_state')
 
-    if 'user_id' not in session:
-        return redirect('/?error=not_logged_in')
+    with oauth_states_lock:
+        if state_id not in oauth_states:
+            logger.error("State inválido ou expirado")
+            return redirect('/?error=invalid_state')
+        state_data = oauth_states.pop(state_id)
 
-    email = session.get('user_email')
+        # Limpa estados expirados (>10 min)
+        now = time.time()
+        expired = [k for k, v in oauth_states.items() if now - v.get('created_at', 0) > 600]
+        for k in expired:
+            oauth_states.pop(k, None)
+
+    user_id = state_data['user_id']
+    account_type_request = state_data['account_type']
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
+        if not row:
+            return redirect('/?error=user_not_found')
+        email = row[0]
+    finally:
+        conn.close()
+
     accounts = []
-
-    # Verificar se veio um "code" (fluxo Authorization Code)
-    code = request.args.get('code')
-    if code:
-        accounts = exchange_code_for_tokens(code) or []
-    else:
-        # Fluxo antigo: tokens diretos na URL
-        i = 1
-        while request.args.get(f'token{i}'):
-            accounts.append({
-                'token': request.args.get(f'token{i}'),
-                'acct': request.args.get(f'acct{i}')
-            })
-            i += 1
+    i = 1
+    while request.args.get(f'token{i}'):
+        accounts.append({
+            'token': request.args.get(f'token{i}'),
+            'acct': request.args.get(f'acct{i}', '')
+        })
+        i += 1
 
     if not accounts:
         logger.error("Nenhum token recebido no OAuth")
         return redirect('/?error=oauth_failed')
 
     for acc in accounts:
-        acct = acc.get('acct', '')
-        tok = acc.get('token', '')
+        acct = acc['acct']
+        tok = acc['token']
         if not tok:
             continue
-        if acct.startswith('VR') or acct.startswith('VRTC'):
+        if acct.startswith('VR'):
             UserStore.add_token(email, 'demo', tok)
         else:
             UserStore.add_token(email, 'real', tok)
-        if (at == 'demo' and (acct.startswith('VR') or acct.startswith('VRTC'))) or \
-           (at == 'real' and not acct.startswith('VR') and not acct.startswith('VRTC')):
-            UserStore.set_active_account(email, at)
+        if (account_type_request == 'demo' and acct.startswith('VR')) or \
+           (account_type_request == 'real' and not acct.startswith('VR')):
+            UserStore.set_active_account(email, account_type_request)
 
     user = UserStore.get(email)
-    create_session(session['user_id'], user, force=True)
-    return redirect('/?connected=true')
+    session['user_id'] = user_id
+    session['user_email'] = email
+    session['user_name'] = user['name']
+    session['user_role'] = user.get('role', 'user')
+    session.permanent = True
 
-import urllib.parse
+    create_session(user_id, user, force=True)
+    return redirect('/?connected=true')
 
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
 def deriv_oauth_url():
-    # Obtém o app_id da config (que deve vir da variável de ambiente DERIV_APP_ID)
     app_id = config.DERIV_APP_ID
     if not app_id:
         logger.error("DERIV_APP_ID não definido")
         return jsonify({'error': 'Configuração OAuth em falta'}), 500
 
-    # Constrói o redirect_uri
     base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
     redirect_uri = base_url + '/oauth/callback'
-
-    # Codifica o redirect_uri para ser seguro na URL
     encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
 
-    # Guarda o tipo de conta na sessão
-    at = request.args.get('account_type', 'demo')
-    session['pending_account_type'] = at
+    state_id = uuid.uuid4().hex
+    with oauth_states_lock:
+        oauth_states[state_id] = {
+            'user_id': session['user_id'],
+            'account_type': request.args.get('account_type', 'demo'),
+            'created_at': time.time()
+        }
 
-    # Constrói o URL completo de autorização
     url = (
         f"https://oauth.deriv.com/oauth2/authorize"
         f"?app_id={app_id}"
         f"&redirect_uri={encoded_redirect}"
+        f"&state={state_id}"
         f"&l=PT"
     )
     logger.info(f"URL OAuth gerado: {url}")
     return jsonify({'url': url})
 
-# ==================== ROTAS DE TRADING ====================
+# ==================== TRADING ====================
 @app.route('/api/trade', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
@@ -1061,7 +981,7 @@ def report():
         return jsonify({'error': 'Sessão não encontrada'}), 500
     return jsonify(sess['trading_bot'].get_trade_report())
 
-# ==================== AFILIADOS E PAGAMENTOS ====================
+# ==================== AFILIADOS / PAGAMENTOS ====================
 def credit_affiliate_commission(user_email, amount):
     user = UserStore.get(user_email)
     if not user or not user.get('referral_code'):
@@ -1171,6 +1091,10 @@ def toggle_user():
 def admin_clear_tokens():
     d = request.json
     email = d.get('email', '').strip().lower()
+
+    user = UserStore.get(email) if email else None
+    target_uid = user['id'] if user else None
+
     conn = sqlite3.connect(DATABASE_PATH)
     try:
         if email:
@@ -1186,12 +1110,13 @@ def admin_clear_tokens():
             logger.info("Todos os tokens removidos")
     finally:
         conn.close()
-    # Remover sessões ativas desses utilizadores
+
     with sessions_lock:
         for uid, sess in list(sessions.items()):
-            if not email or sess.get('email') == email:
+            if (target_uid and uid == target_uid) or not target_uid:
                 sess['client']._stop_event.set()
                 del sessions[uid]
+                logger.info(f"Sessão de {uid} encerrada")
     return jsonify({'status': 'ok', 'message': 'Tokens removidos. Utilizador terá que refazer OAuth.'})
 
 # ==================== INICIAR ====================
