@@ -6,14 +6,9 @@
   <title>Foloma Trading</title>
   <style>
     :root {
-      --bg: #020617;
-      --card: #0f172a;
-      --border: #1e293b;
-      --accent: #00f0b5;
-      --danger: #ff4d4d;
-      --text: #e2e8f0;
-      --muted: #64748b;
-      --warning: #ffaa00;
+      --bg: #020617; --card: #0f172a; --border: #1e293b;
+      --accent: #00f0b5; --danger: #ff4d4d; --text: #e2e8f0;
+      --muted: #64748b; --warning: #ffaa00;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     body { background: linear-gradient(180deg, #020617, #020617 60%, #020617); color: var(--text); min-height: 100vh; }
@@ -75,8 +70,6 @@
     .mode-sel { display: flex; gap: 8px; margin-bottom: 12px; }
     .mode-btn { flex: 1; padding: 8px; border-radius: 8px; font-weight: 600; cursor: pointer; background: var(--card); color: var(--text); border: 1px solid var(--border); font-size: 12px; }
     .mode-btn.active { background: var(--accent); color: #000; }
-    .sm { border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; text-align: center; font-size: 13px; font-weight: 600; }
-    .sm.active { background: linear-gradient(135deg, #00f0b540, #00f0b510); border: 1px solid var(--accent); color: var(--accent); }
     .ms { background: #020617; border-radius: 8px; padding: 10px; font-size: 12px; margin: 10px 0; }
     .bm { background: #ffaa00; color: #000; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; }
     .bmr { background: var(--card); color: white; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; }
@@ -250,7 +243,6 @@ let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null, _pollInterval=null;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
-// Debounce / locks
 let _trading=false, _loggingIn=false, _registering=false, _resetting=false;
 
 // ══════════════ UTILS ══════════════
@@ -271,6 +263,15 @@ function setConnectingUI(show){
     msg.classList.remove('show');
   }
 }
+function syncAccountUI(accountType){
+  if(accountType === 'demo' || accountType === 'real'){
+    if(selectedAcct !== accountType){
+      selectedAcct = accountType;
+      document.getElementById('btnDemo').classList.toggle('active', accountType==='demo');
+      document.getElementById('btnReal').classList.toggle('active', accountType==='real');
+    }
+  }
+}
 
 // ══════════════ GERIR POLLING ══════════════
 function stopPolling(){
@@ -283,8 +284,8 @@ function startPollingIfNeeded(){
   _updateInterval = setInterval(updateAll, 5000);
 }
 
-// ══════════════ POLLING DE CONEXÃO ══════════════
-function waitForConnection(timeout=4){
+// ══════════════ POLLING DE CONEXÃO (aceita request_id) ══════════════
+function waitForConnection(timeout=4, requestId=null){
   if(_pollInterval) clearInterval(_pollInterval);
   setConnectingUI(true);
   let elapsed = 0;
@@ -294,6 +295,7 @@ function waitForConnection(timeout=4){
       const data = await res.json();
       elapsed++;
       if(data.authorized && data.connected){
+        if(requestId && data.request_id !== requestId) return;
         clearInterval(_pollInterval);
         _pollInterval = null;
         setConnectingUI(false);
@@ -301,6 +303,10 @@ function waitForConnection(timeout=4){
         document.getElementById('sDot').className = 'dot on';
         document.getElementById('connStatus').textContent = 'Conectado';
         document.getElementById('bal').textContent = (data.balance||0).toFixed(2);
+        if(data.loginid){
+          const isDemo = data.loginid.startsWith('VR');
+          syncAccountUI(isDemo ? 'demo' : 'real');
+        }
         toast('✅ Conexão estabelecida!','win',3000);
         startPollingIfNeeded();
         updateAll();
@@ -347,6 +353,10 @@ function updateAll(){
     document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
     document.getElementById('bbS').textContent=bot.analysis?.bollinger?.desc||'---';
     if(data.digits)updateDigits(data.digits);
+    if(data.loginid){
+      const isDemo = data.loginid.startsWith('VR');
+      syncAccountUI(isDemo ? 'demo' : 'real');
+    }
     fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
       const act = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
       const nxt = '$' + (m.next_amount||0.35).toFixed(2);
@@ -400,38 +410,52 @@ async function connectWithDeriv(){
   window.location.href = d.url;
 }
 
-// ══════════════ TROCA DE CONTA ══════════════
+// ══════════════ TROCA DE CONTA (sempre chama o backend) ══════════════
 function selAcct(a){
   const anterior = selectedAcct;
   selectedAcct = a;
   document.getElementById('btnDemo').classList.toggle('active', a==='demo');
   document.getElementById('btnReal').classList.toggle('active', a==='real');
-  if(isConn){
-    fetch('/api/auth/switch-account', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({account_type: a})
-    }).then(r=>r.json()).then(d=>{
-      if(d.error) {
-        if(d.error.includes('Sem token')) {
-          toast(`⚠️ Não tens token para a conta ${a.toUpperCase()} — conecta via OAuth para registar ambas as contas.`, 'loss', 6000);
-        } else {
-          toast('❌ Erro ao trocar conta','loss');
-          selectedAcct = anterior;
-          document.getElementById('btnDemo').classList.toggle('active', anterior==='demo');
-          document.getElementById('btnReal').classList.toggle('active', anterior==='real');
-        }
+
+  fetch('/api/auth/switch-account', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({account_type: a})
+  }).then(r=>r.json()).then(d=>{
+    if(d.error) {
+      if(d.error.includes('Sem token')) {
+        toast(`⚠️ Não tens token para a conta ${a.toUpperCase()} — conecta via OAuth para registar ambas as contas.`, 'loss', 6000);
       } else {
-        toast(`✅ Conta ${a} activada! A aguardar reconexão...`, 'win', 2000);
-        waitForConnection();
+        toast('❌ Erro ao trocar conta','loss');
+        selectedAcct = anterior;
+        document.getElementById('btnDemo').classList.toggle('active', anterior==='demo');
+        document.getElementById('btnReal').classList.toggle('active', anterior==='real');
       }
-    }).catch(e=>{
-      toast('❌ Erro de rede','loss');
-      selectedAcct = anterior;
-      document.getElementById('btnDemo').classList.toggle('active', anterior==='demo');
-      document.getElementById('btnReal').classList.toggle('active', anterior==='real');
-    });
-  }
+      return;
+    }
+    if(d.status === 'ok'){
+      toast(`✅ Conta ${a} activada!`, 'win', 2000);
+      if(d.loginid){
+        const isDemo = d.loginid.startsWith('VR');
+        syncAccountUI(isDemo ? 'demo' : 'real');
+      }
+      if(d.balance !== undefined){
+        document.getElementById('bal').textContent = d.balance.toFixed(2);
+        if(d.request_id && isConn) waitForConnection(2, d.request_id);
+      } else if(d.request_id){
+        toast('⏳ A aguardar reconexão...', 'info', 2000);
+        waitForConnection(4, d.request_id);
+      }
+    } else if(d.status === 'connecting'){
+      toast('⏳ A aguardar reconexão...', 'info', 2000);
+      waitForConnection(4, d.request_id);
+    }
+  }).catch(e=>{
+    toast('❌ Erro de rede','loss');
+    selectedAcct = anterior;
+    document.getElementById('btnDemo').classList.toggle('active', anterior==='demo');
+    document.getElementById('btnReal').classList.toggle('active', anterior==='real');
+  });
 }
 
 // ══════════════ TRADES (com debounce) ══════════════
@@ -479,7 +503,6 @@ function tradeDigit(pred){
   });
 }
 
-// Martingale (sem bloqueio _trading)
 async function mgt(fieldId){
   const amt = document.getElementById(fieldId).value;
   if(!validAmount(amt)){
@@ -646,6 +669,7 @@ function doLogin(){
     initSyms();loadAffiliate();loadHistory();
     if(d.user?.has_deriv_token){
       fetch('/api/auth/auto-connect').then(r=>r.json()).then(autoData=>{
+        if(autoData.account_type) syncAccountUI(autoData.account_type);
         if(autoData.status === 'connecting'){
           toast('🔌 Auto-conectando...','info',2000);
           waitForConnection();
@@ -736,6 +760,7 @@ function setModo(m){
     if(stData.user?.has_deriv_token){
       const auto = await fetch('/api/auth/auto-connect');
       const autoData = await auto.json();
+      if(autoData.account_type) syncAccountUI(autoData.account_type);
       if(autoData.status === 'connecting'){
         toast('🔌 Auto-conectando...','info',2000);
         waitForConnection();
@@ -756,6 +781,9 @@ function setModo(m){
   const p=new URLSearchParams(location.search);
   if(p.get('connected')==='true'){
     toast('✅ Deriv conectada!','win',5000);
+    fetch('/api/auth/auto-connect').then(r=>r.json()).then(autoData=>{
+      if(autoData.account_type) syncAccountUI(autoData.account_type);
+    }).catch(()=>{});
     waitForConnection(4);
     history.replaceState({},'',location.pathname);
   }
