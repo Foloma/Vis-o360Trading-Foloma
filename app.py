@@ -584,13 +584,22 @@ def auto_connect():
     email = session['user_email']
     user = UserStore.get(email)
     if not UserStore.get_active_token(user):
-        return jsonify({'status': 'no_token'})
+        return jsonify({
+            'status': 'no_token',
+            'account_type': user.get('active_account', 'demo')
+        })
     sess = get_session(session['user_id'])
     if sess and sess['client'].connected and sess['client'].authorized:
-        return jsonify({'status': 'already_connected', 'account_type': user.get('active_account')})
+        return jsonify({
+            'status': 'already_connected',
+            'account_type': user.get('active_account', 'demo'),
+            'balance': sess['client'].balance
+        })
     create_session(session['user_id'], user)
-    return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
-
+    return jsonify({
+        'status': 'connecting',
+        'account_type': user.get('active_account', 'demo')
+    })
 @app.route('/api/auth/switch-account', methods=['POST'])
 @require_auth
 def switch_account():
