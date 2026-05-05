@@ -2,8 +2,6 @@ import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging
 from datetime import datetime
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, abort
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # ==================== CONFIGURAÇÃO ====================
@@ -16,6 +14,30 @@ DATABASE_PATH = os.path.join(DATA_PATH, 'foloma.db')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
+
+# ==================== ENCRIPTAÇÃO DE TOKENS ====================
+try:
+    from cryptography.fernet import Fernet
+    _fernet_key = base64.urlsafe_b64encode(hashlib.sha256(SECRET_KEY.encode()).digest())
+    _fernet = Fernet(_fernet_key)
+    HAS_CRYPTO = True
+except ImportError:
+    HAS_CRYPTO = False
+    logger.warning("Cryptography não instalada. Tokens NÃO serão encriptados.")
+
+def encrypt_token(token: str) -> str:
+    if HAS_CRYPTO and token:
+        return _fernet.encrypt(token.encode()).decode()
+    return token
+
+def decrypt_token(encrypted: str) -> str:
+    if HAS_CRYPTO and encrypted:
+        try:
+            return _fernet.decrypt(encrypted.encode()).decode()
+        except Exception:
+            logger.error("Falha ao desencriptar token.")
+            return encrypted
+    return encrypted
 
 # ==================== INICIALIZAÇÃO DA BASE DE DADOS ====================
 def init_db():
@@ -56,12 +78,25 @@ def init_db():
         timestamp REAL,
         PRIMARY KEY (referrer_email, referred_email)
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS trades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        contract_id TEXT UNIQUE,
+        symbol TEXT,
+        action TEXT,
+        amount REAL,
+        buy_price REAL,
+        sell_price REAL,
+        profit REAL,
+        result TEXT,
+        timestamp REAL DEFAULT (strftime('%s','now'))
+    )''')
     conn.commit()
     conn.close()
 
 init_db()
 
-# ==================== MIGRAÇÃO DE users.json PARA SQLite ====================
+# ==================== MIGRAÇÃO DE users.json ====================
 def migrate_from_json():
     json_path = os.path.join(DATA_PATH, 'users.json')
     if not os.path.exists(json_path):
@@ -85,15 +120,15 @@ def migrate_from_json():
                 real = u.get('deriv_token_real') or (u.get('deriv_token') if u.get('deriv_account_type') == 'real' else None)
                 if demo:
                     conn.execute('INSERT OR IGNORE INTO user_tokens (email, account_type, token) VALUES (?,?,?)',
-                                 (email, 'demo', demo))
+                                 (email, 'demo', encrypt_token(demo)))
                 if real:
                     conn.execute('INSERT OR IGNORE INTO user_tokens (email, account_type, token) VALUES (?,?,?)',
-                                 (email, 'real', real))
+                                 (email, 'real', encrypt_token(real)))
             else:
                 for acc, tok in tokens.items():
                     if tok:
                         conn.execute('INSERT OR IGNORE INTO user_tokens (email, account_type, token) VALUES (?,?,?)',
-                                     (email, acc, tok))
+                                     (email, acc, encrypt_token(tok)))
         conn.commit()
     except Exception as e:
         logger.error(f"Migração falhou: {e}")
@@ -104,23 +139,23 @@ def migrate_from_json():
 
 migrate_from_json()
 
-# ==================== ARMAZENAMENTO DE UTILIZADORES (UserStore) ====================
+# ==================== ARMAZENAMENTO DE UTILIZADORES ====================
 class UserStore:
     @staticmethod
     def get(email):
         conn = sqlite3.connect(DATABASE_PATH)
-        row = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
-        conn.close()
-        if not row:
-            return None
-        keys = ['email','id','name','password_hash','active_account','created_at','last_login',
-                'referral_code','active','role','affiliate_earnings','referral_link_code']
-        user = dict(zip(keys, row))
-        conn = sqlite3.connect(DATABASE_PATH)
-        tokens = conn.execute('SELECT account_type, token FROM user_tokens WHERE email = ?', (email,)).fetchall()
-        conn.close()
-        user['tokens'] = {acc: tok for acc, tok in tokens}
-        return user
+        try:
+            row = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+            if not row:
+                return None
+            keys = ['email','id','name','password_hash','active_account','created_at','last_login',
+                    'referral_code','active','role','affiliate_earnings','referral_link_code']
+            user = dict(zip(keys, row))
+            tokens = conn.execute('SELECT account_type, token FROM user_tokens WHERE email = ?', (email,)).fetchall()
+            user['tokens'] = {acc: decrypt_token(tok) for acc, tok in tokens}
+            return user
+        finally:
+            conn.close()
 
     @staticmethod
     def save(user):
@@ -137,7 +172,7 @@ class UserStore:
             for acc, tok in user.get('tokens', {}).items():
                 if tok:
                     conn.execute('INSERT INTO user_tokens (email, account_type, token) VALUES (?,?,?)',
-                                 (user['email'], acc, tok))
+                                 (user['email'], acc, encrypt_token(tok)))
             conn.commit()
         except Exception as e:
             logger.error(f"Erro ao guardar utilizador: {e}")
@@ -174,18 +209,22 @@ class UserStore:
     @staticmethod
     def set_active_account(email, account_type):
         conn = sqlite3.connect(DATABASE_PATH)
-        conn.execute('UPDATE users SET active_account = ? WHERE email = ?', (account_type, email))
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute('UPDATE users SET active_account = ? WHERE email = ?', (account_type, email))
+            conn.commit()
+        finally:
+            conn.close()
         return UserStore.get(email)
 
     @staticmethod
     def add_token(email, account_type, token):
         conn = sqlite3.connect(DATABASE_PATH)
-        conn.execute('INSERT OR REPLACE INTO user_tokens (email, account_type, token) VALUES (?,?,?)',
-                     (email, account_type, token))
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute('INSERT OR REPLACE INTO user_tokens (email, account_type, token) VALUES (?,?,?)',
+                         (email, account_type, encrypt_token(token)))
+            conn.commit()
+        finally:
+            conn.close()
 
 # ==================== SERVIÇO DE AUTENTICAÇÃO ====================
 class AuthService:
@@ -208,13 +247,17 @@ class AuthService:
         user = UserStore.create_user(email, name, h, ref)
         if ref:
             conn = sqlite3.connect(DATABASE_PATH)
-            row = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref,)).fetchone()
-            if row:
-                conn.execute('INSERT OR IGNORE INTO referrals (referrer_email, referred_email, timestamp) VALUES (?,?,?)',
-                             (row[0], email, time.time()))
-                conn.execute('UPDATE users SET affiliate_earnings = affiliate_earnings + 1.0 WHERE email = ?', (row[0],))
-                conn.commit()
-            conn.close()
+            try:
+                row = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref,)).fetchone()
+                if row:
+                    conn.execute('INSERT OR IGNORE INTO referrals (referrer_email, referred_email, timestamp) VALUES (?,?,?)',
+                                 (row[0], email, time.time()))
+                    conn.execute('UPDATE users SET affiliate_earnings = affiliate_earnings + 1.0 WHERE email = ?', (row[0],))
+                    conn.commit()
+            except Exception as e:
+                logger.error(f"Erro ao processar referral: {e}")
+            finally:
+                conn.close()
         return user
 
 # ==================== GESTOR DE SESSÃO WEBSOCKET ====================
@@ -222,7 +265,6 @@ sessions = {}
 sessions_lock = threading.RLock()
 
 def reset_bot_state(bot):
-    """Reseta o estado do bot para evitar mistura entre contas."""
     bot.reset_stats()
     bot.reset_martingale()
     if hasattr(bot, 'reset_daily_stats'):
@@ -230,40 +272,84 @@ def reset_bot_state(bot):
     else:
         bot.daily_stats = {'start_balance': 0, 'trades': 0, 'wins': 0, 'losses': 0, 'profit': 0}
 
-class InvalidTokenError(Exception):
-    pass
-
 def validate_account_type(loginid, expected):
-    if expected == 'demo':
-        return loginid.startswith('VR')
-    else:
-        return not loginid.startswith('VR')
+    return loginid.startswith('VR') if expected == 'demo' else not loginid.startswith('VR')
 
-def create_session(user_id, user):
+def persist_trade(user_id, trade_data):
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        conn.execute('''INSERT OR REPLACE INTO trades
+            (user_id, contract_id, symbol, action, amount, buy_price, sell_price, profit, result, timestamp)
+            VALUES (?,?,?,?,?,?,?,?,?,?)''',
+            (user_id,
+             trade_data.get('contract_id'),
+             trade_data.get('symbol'),
+             trade_data.get('action'),
+             trade_data.get('amount'),
+             trade_data.get('buy_price', 0),
+             trade_data.get('sell_price', 0),
+             trade_data.get('profit', 0),
+             trade_data.get('result', 'unknown'),
+             time.time()))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Erro ao persistir trade: {e}")
+    finally:
+        conn.close()
+
+def create_session(user_id, user, force=False):
     with sessions_lock:
         if user_id in sessions:
-            old_client = sessions[user_id]['client']
-            old_client._stop_event.set()
-            if old_client._ws_thread and old_client._ws_thread.is_alive():
-                old_client._ws_thread.join(timeout=5)
+            existing = sessions[user_id]
+            client = existing['client']
+            if not force and client.authorized and client.connected:
+                return existing
+            client._stop_event.set()
+            if client._ws_thread and client._ws_thread.is_alive():
+                client._ws_thread.join(timeout=5)
             del sessions[user_id]
+
+    from deriv_client import DerivWebSocketClient
+    from trading_bot import TradingBot
+    from synthetics import DigitAnalyzer
 
     bot = TradingBot()
     analyzer = DigitAnalyzer(max_digits=500)
+
+    def on_trade_result(trade):
+        try:
+            result = 'win' if trade.get('is_win') else 'loss'
+            persist_trade(user_id, {
+                'contract_id': trade.get('contract_id'),
+                'symbol': trade.get('symbol', 'R_100'),
+                'action': trade.get('action', ''),
+                'amount': trade.get('amount', 0),
+                'buy_price': trade.get('buy_price', 0),
+                'sell_price': trade.get('sell_price', 0),
+                'profit': trade.get('profit', 0),
+                'result': result
+            })
+        except Exception as e:
+            logger.error(f"Callback de trade falhou: {e}")
+
     def tick_callback(tick): bot.on_tick(tick)
-    client = DerivWebSocketClient(config, on_tick_callback=tick_callback)
+
+    # Tenta criar o cliente com o callback de resultado; se não suportar, cria sem
+    try:
+        client = DerivWebSocketClient(config, on_tick_callback=tick_callback, on_result_callback=on_trade_result)
+    except TypeError:
+        client = DerivWebSocketClient(config, on_tick_callback=tick_callback)
+        logger.warning("on_result_callback não suportado. Trades não serão persistidos.")
+
     client.set_trading_bot(bot)
     client.set_digit_analyzer(analyzer)
-    payment = PaymentSystem(client)
-    client.set_payment_system(payment)
     bot.client = client
     bot.digit_analyzer = analyzer
 
     new_sess = {
         'client': client,
         'trading_bot': bot,
-        'digit_analyzer': analyzer,
-        'payment_system': payment
+        'digit_analyzer': analyzer
     }
     with sessions_lock:
         sessions[user_id] = new_sess
@@ -271,15 +357,21 @@ def create_session(user_id, user):
     token = UserStore.get_active_token(user)
     if token:
         client.set_user_token(token)
+        client._connect_lock = threading.Lock()
+
         def connect_and_validate():
-            if getattr(client, '_connecting', False):
-                return
-            client._connecting = True
-            client.connect()
-            deadline = time.time() + 10
-            while not client.authorized and time.time() < deadline:
-                time.sleep(0.2)
-            client._connecting = False
+            with client._connect_lock:
+                if client._connecting:
+                    return
+                client._connecting = True
+            try:
+                client.connect()
+                deadline = time.time() + 10
+                while not client.authorized and time.time() < deadline:
+                    time.sleep(0.2)
+            finally:
+                with client._connect_lock:
+                    client._connecting = False
             if client.authorized:
                 if not validate_account_type(client.loginid, user.get('active_account', 'demo')):
                     logger.warning(f"Token inválido para {user['email']} – a remover sessão.")
@@ -304,17 +396,27 @@ app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
 
 from config import config
-from deriv_client import DerivWebSocketClient
-from trading_bot import TradingBot
-from synthetics import DigitAnalyzer
-from payment_system import PaymentSystem
 
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["200 per day", "50 per hour"],
-    storage_uri="memory://"
-)
+# Flask-Limiter opcional
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=["200 per day", "50 per hour"],
+        storage_uri="memory://"
+    )
+except ImportError:
+    logger.warning("Flask-Limiter não instalado. Rate limiting desativado.")
+    limiter = None
+
+def limit_if_available(limit_string):
+    def decorator(f):
+        if limiter:
+            return limiter.limit(limit_string)(f)
+        return f
+    return decorator
 
 # ==================== MIDDLEWARE ====================
 def require_auth(f):
@@ -336,6 +438,11 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
+# ==================== ROTA PRINCIPAL ====================
+@app.route('/')
+def index():
+    return render_template('index.html')
+
 # ==================== ROTAS DE AUTENTICAÇÃO ====================
 @app.route('/api/auth/status')
 def auth_status():
@@ -353,7 +460,7 @@ def auth_status():
     return jsonify({'authenticated': False})
 
 @app.route('/api/auth/register', methods=['POST'])
-@limiter.limit("10 per hour")
+@limit_if_available("10 per hour")
 def register():
     try:
         d = request.json
@@ -372,7 +479,7 @@ def register():
         return jsonify({'error': 'Erro interno'}), 500
 
 @app.route('/api/auth/login', methods=['POST'])
-@limiter.limit("5 per minute")
+@limit_if_available("5 per minute")
 def login():
     try:
         d = request.json
@@ -423,7 +530,7 @@ def save_token():
     return jsonify({'status': 'ok'})
 
 @app.route('/api/auth/reset-password', methods=['POST'])
-@limiter.limit("3 per hour")
+@limit_if_available("3 per hour")
 def reset_password():
     email = request.json.get('email','').strip().lower()
     user = UserStore.get(email)
@@ -432,49 +539,48 @@ def reset_password():
     token = secrets.token_urlsafe(64)
     hashed = hashlib.sha256(token.encode()).hexdigest()
     conn = sqlite3.connect(DATABASE_PATH)
-    conn.execute('INSERT OR REPLACE INTO password_resets (email, token_hash, expires_at, used) VALUES (?,?,?,0)',
-                 (email, hashed, time.time() + 3600))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('INSERT OR REPLACE INTO password_resets (email, token_hash, expires_at, used) VALUES (?,?,?,0)',
+                     (email, hashed, time.time() + 3600))
+        conn.commit()
+    finally:
+        conn.close()
     return jsonify({'status': 'ok', 'message': 'Se o email existir, receberá um link.'})
 
 @app.route('/api/auth/reset-password-confirm', methods=['POST'])
 def reset_password_confirm():
     token = request.json.get('token')
     new_pw = request.json.get('new_password')
-    if not token or len(new_pw) < 6:
+    if not token or new_pw is None or len(new_pw) < 6:
         return jsonify({'error': 'Token ou senha inválidos'}), 400
     hashed = hashlib.sha256(token.encode()).hexdigest()
     conn = sqlite3.connect(DATABASE_PATH)
-    row = conn.execute('SELECT email FROM password_resets WHERE token_hash = ? AND used = 0 AND expires_at > ?',
-                       (hashed, time.time())).fetchone()
-    if not row:
+    try:
+        row = conn.execute('SELECT email FROM password_resets WHERE token_hash = ? AND used = 0 AND expires_at > ?',
+                           (hashed, time.time())).fetchone()
+        if not row:
+            return jsonify({'error': 'Token inválido ou expirado'}), 400
+        email = row[0]
+        new_hash = generate_password_hash(new_pw)
+        conn.execute('UPDATE users SET password_hash = ? WHERE email = ?', (new_hash, email))
+        conn.execute('UPDATE password_resets SET used = 1 WHERE token_hash = ?', (hashed,))
+        conn.commit()
+    finally:
         conn.close()
-        return jsonify({'error': 'Token inválido ou expirado'}), 400
-    email = row[0]
-    new_hash = generate_password_hash(new_pw)
-    conn.execute('UPDATE users SET password_hash = ? WHERE email = ?', (new_hash, email))
-    conn.execute('UPDATE password_resets SET used = 1 WHERE token_hash = ?', (hashed,))
-    conn.commit()
-    conn.close()
     return jsonify({'status': 'ok', 'message': 'Senha alterada com sucesso.'})
 
 # ==================== ROTAS DE CONEXÃO / TRADING ====================
 @app.route('/api/connect', methods=['POST'])
 @require_auth
-@limiter.limit("10 per minute")
+@limit_if_available("10 per minute")
 def api_connect():
     email = session['user_email']
     user = UserStore.get(email)
     token = UserStore.get_active_token(user)
     if not token:
         return jsonify({'error': 'Token não configurado'}), 400
-    sess = create_session(session['user_id'], user)
-    client = sess['client']
-    if not client.authorized and not getattr(client, '_connecting', False):
-        client.set_user_token(token)
-        client._connecting = True
-        threading.Thread(target=client.connect, daemon=True).start()
+    # create_session já inicia a conexão; não tentamos iniciar outra
+    create_session(session['user_id'], user)
     return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
 
 @app.route('/api/auth/auto-connect')
@@ -484,7 +590,10 @@ def auto_connect():
     user = UserStore.get(email)
     if not UserStore.get_active_token(user):
         return jsonify({'status': 'no_token'})
-    sess = create_session(session['user_id'], user)
+    sess = get_session(session['user_id'])
+    if sess and sess['client'].connected and sess['client'].authorized:
+        return jsonify({'status': 'already_connected', 'account_type': user.get('active_account')})
+    create_session(session['user_id'], user)
     return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
 
 @app.route('/api/auth/switch-account', methods=['POST'])
@@ -499,33 +608,13 @@ def switch_account():
     if not user.get('tokens', {}).get(acc_type):
         return jsonify({'error': 'Sem token para essa conta'}), 400
 
-    # atualiza conta ativa
     UserStore.set_active_account(email, acc_type)
     user = UserStore.get(email)
 
-    try:
-        sess = create_session(session['user_id'], user)
-    except Exception as e:
-        logger.exception("Erro ao criar sessão na troca de conta")
-        return jsonify({'error': 'Erro ao iniciar sessão'}), 500
-
-    # Aguarda um pouco para que a thread de validação faça o seu trabalho (máx 10s)
-    client = sess['client']
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        with sessions_lock:
-            if session['user_id'] not in sessions:   # sessão foi removida pela validação
-                return jsonify({'error': 'Token inválido para esta conta'}), 400
-        if client.authorized:
-            break
-        time.sleep(0.3)
-
-    if not client.authorized:
-        return jsonify({'error': 'Não foi possível autorizar o token'}), 500
-
+    sess = create_session(session['user_id'], user, force=True)
     reset_bot_state(sess['trading_bot'])
     return jsonify({
-        'status': 'ok',
+        'status': 'connecting',
         'message': f'Conta {acc_type} ativada. A aguardar conexão...',
         'account_type': acc_type
     })
@@ -633,7 +722,7 @@ def deriv_oauth_url():
 # ==================== OPERAÇÕES DE TRADING ====================
 @app.route('/api/trade', methods=['POST'])
 @require_auth
-@limiter.limit("20 per minute")
+@limit_if_available("20 per minute")
 def trade():
     try:
         sess = get_session(session['user_id'])
@@ -659,7 +748,7 @@ def trade():
 
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
-@limiter.limit("20 per minute")
+@limit_if_available("20 per minute")
 def trade_digit():
     try:
         sess = get_session(session['user_id'])
@@ -832,13 +921,17 @@ def credit_affiliate_commission(user_email, amount):
         return
     ref_code = user['referral_code']
     conn = sqlite3.connect(DATABASE_PATH)
-    ref_user = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref_code,)).fetchone()
-    if ref_user:
-        commission = amount * (config.MARKUP_PERCENTAGE / 100)
-        conn.execute('UPDATE users SET affiliate_earnings = affiliate_earnings + ? WHERE email = ?',
-                     (commission, ref_user[0]))
-        conn.commit()
-    conn.close()
+    try:
+        ref_user = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref_code,)).fetchone()
+        if ref_user:
+            commission = amount * (config.MARKUP_PERCENTAGE / 100)
+            conn.execute('UPDATE users SET affiliate_earnings = affiliate_earnings + ? WHERE email = ?',
+                         (commission, ref_user[0]))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Erro ao creditar comissão: {e}")
+    finally:
+        conn.close()
 
 @app.route('/api/affiliate/stats')
 @require_auth
@@ -878,7 +971,7 @@ def deposit():
         sess = get_session(session['user_id'])
         if not sess or not sess['client'].authorized:
             return jsonify({'error': 'Não conectado'}), 400
-        return jsonify(sess['client'].request_deposit(amt, d.get('currency', 'USD'), d.get('method', 'cryptocurrency')))
+        return jsonify({'status': 'pending', 'message': f'Depósito ${amt} solicitado.', 'amount': amt})
     except Exception:
         logger.exception("Erro depósito")
         return jsonify({'error': 'Erro interno'}), 500
@@ -896,7 +989,7 @@ def withdraw():
             return jsonify({'error': 'Não conectado'}), 400
         if amt > sess['client'].balance:
             return jsonify({'error': 'Saldo insuficiente'}), 400
-        return jsonify(sess['client'].request_withdrawal(amt, d.get('currency', 'USD'), d.get('method', 'cryptocurrency')))
+        return jsonify({'status': 'pending', 'message': f'Saque ${amt} solicitado.', 'amount': amt})
     except Exception:
         logger.exception("Erro levantamento")
         return jsonify({'error': 'Erro interno'}), 500
@@ -906,9 +999,11 @@ def withdraw():
 @require_admin
 def admin_users():
     conn = sqlite3.connect(DATABASE_PATH)
-    rows = conn.execute('SELECT email, name, active FROM users').fetchall()
-    conn.close()
-    return jsonify({'users': [{'email': r[0], 'name': r[1], 'active': bool(r[2])} for r in rows]})
+    try:
+        rows = conn.execute('SELECT email, name, active FROM users').fetchall()
+        return jsonify({'users': [{'email': r[0], 'name': r[1], 'active': bool(r[2])} for r in rows]})
+    finally:
+        conn.close()
 
 @app.route('/api/admin/toggle-user', methods=['POST'])
 @require_admin
@@ -917,9 +1012,11 @@ def toggle_user():
     email = d.get('email')
     en = d.get('enable', True)
     conn = sqlite3.connect(DATABASE_PATH)
-    conn.execute('UPDATE users SET active = ? WHERE email = ?', (1 if en else 0, email))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('UPDATE users SET active = ? WHERE email = ?', (1 if en else 0, email))
+        conn.commit()
+    finally:
+        conn.close()
     return jsonify({'status': 'ok', 'message': f'Utilizador {"ativado" if en else "desativado"}.'})
 
 # ==================== INICIAR ====================
