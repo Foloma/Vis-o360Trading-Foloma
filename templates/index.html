@@ -417,6 +417,7 @@ async function connectWithDeriv(){
 
 // ══════════════ TROCA DE CONTA ══════════════
 function selAcct(a){
+  const anterior = selectedAcct; // guarda a conta atual antes de mudar
   selectedAcct = a;
   document.getElementById('btnDemo').classList.toggle('active', a==='demo');
   document.getElementById('btnReal').classList.toggle('active', a==='real');
@@ -426,12 +427,22 @@ function selAcct(a){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({account_type: a})
     }).then(r=>r.json()).then(d=>{
-      if(d.error) toast('❌ Erro ao trocar conta','loss');
-      else {
+      if(d.error) {
+        toast('❌ Erro ao trocar conta','loss');
+        // Reverte para a conta anterior (qualquer que fosse)
+        selectedAcct = anterior;
+        document.getElementById('btnDemo').classList.toggle('active', anterior==='demo');
+        document.getElementById('btnReal').classList.toggle('active', anterior==='real');
+      } else {
         toast(`✅ Conta ${a} activada! A aguardar reconexão...`, 'win', 2000);
         waitForConnection();
       }
-    }).catch(e=>toast('❌ Erro de rede','loss'));
+    }).catch(e=>{
+      toast('❌ Erro de rede','loss');
+      selectedAcct = anterior;
+      document.getElementById('btnDemo').classList.toggle('active', anterior==='demo');
+      document.getElementById('btnReal').classList.toggle('active', anterior==='real');
+    });
   }
 }
 
