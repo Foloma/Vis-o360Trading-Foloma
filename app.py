@@ -335,12 +335,7 @@ def create_session(user_id, user, force=False):
     def tick_callback(tick): bot.on_tick(tick)
 
     # Tenta criar o cliente com o callback de resultado; se não suportar, cria sem
-    try:
-        client = DerivWebSocketClient(config, on_tick_callback=tick_callback, on_result_callback=on_trade_result)
-    except TypeError:
-        client = DerivWebSocketClient(config, on_tick_callback=tick_callback)
-        logger.warning("on_result_callback não suportado. Trades não serão persistidos.")
-
+    client = DerivWebSocketClient(config, on_tick_callback=tick_callback, on_result_callback=on_trade_result)
     client.set_trading_bot(bot)
     client.set_digit_analyzer(analyzer)
     bot.client = client
