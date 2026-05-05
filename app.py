@@ -602,23 +602,27 @@ def switch_account():
     if not user.get('tokens', {}).get(acc_type):
         return jsonify({'error': 'Sem token para essa conta'}), 400
 
-    # Atualiza a conta ativa na BD
+    # Atualiza a conta ativa
     UserStore.set_active_account(email, acc_type)
     user = UserStore.get(email)
 
-    # Gera um request_id único
-    req_id = secrets.token_hex(4)
-    session_requests[session['user_id']] = req_id
+    # Remove a sessão antiga imediatamente
+    user_id = session['user_id']
+    with sessions_lock:
+        if user_id in sessions:
+            old_client = sessions[user_id]['client']
+            old_client._stop_event.set()
+            if old_client._ws_thread and old_client._ws_thread.is_alive():
+                old_client._ws_thread.join(timeout=5)
+            del sessions[user_id]
 
-    # Força recriação da sessão
-    sess = create_session(session['user_id'], user, force=True)
-    sess['client'].request_id = req_id
-
+    # Cria nova sessão
+    sess = create_session(user_id, user, force=True)
     reset_bot_state(sess['trading_bot'])
 
-    # Aguarda até 8 segundos pela autorização da nova sessão
+    # Aguarda até 5 segundos pela autorização
     client = sess['client']
-    deadline = time.time() + 8
+    deadline = time.time() + 5
     while time.time() < deadline:
         if client.authorized and client.loginid:
             if validate_account_type(client.loginid, acc_type):
@@ -626,18 +630,15 @@ def switch_account():
                     'status': 'ok',
                     'message': f'Conta {acc_type} ativada.',
                     'account_type': acc_type,
-                    'request_id': req_id,
                     'balance': client.balance,
                     'loginid': client.loginid
                 })
         time.sleep(0.3)
 
-    # Se não autorizou a tempo, retorna connecting
     return jsonify({
         'status': 'connecting',
         'message': f'A aguardar conexão da conta {acc_type}...',
-        'account_type': acc_type,
-        'request_id': req_id
+        'account_type': acc_type
     })
 
 @app.route('/api/status')
