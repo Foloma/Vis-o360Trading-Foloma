@@ -739,13 +739,22 @@ def oauth_callback():
     create_session(session['user_id'], user)
     return redirect('/?connected=true')
 
+import urllib.parse
+
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
 def deriv_oauth_url():
-    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
+    base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
+    redirect_uri = base_url + '/oauth/callback'
+    encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
     at = request.args.get('account_type', 'demo')
     session['pending_account_type'] = at
-    url = f"https://oauth.deriv.com/oauth2/authorize?app_id={config.DERIV_APP_ID}&redirect_uri={redirect_uri}&l=PT"
+    url = (
+        f"https://oauth.deriv.com/oauth2/authorize"
+        f"?app_id={config.DERIV_APP_ID}"
+        f"&redirect_uri={encoded_redirect}"
+        f"&l=PT"
+    )
     return jsonify({'url': url})
 
 # ==================== ROTAS DE TRADING ====================
