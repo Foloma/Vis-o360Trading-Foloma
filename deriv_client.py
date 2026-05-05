@@ -13,7 +13,7 @@ class DerivWebSocketClient:
     ST_CONNECTED    = 'CONNECTED'
     ST_STREAMING    = 'STREAMING'
 
-    def __init__(self, config, on_tick_callback=None):
+    def __init__(self, config, on_tick_callback=None, on_result_callback=None):
         self.config = config
         self.ws = None
         self.connected = False
@@ -23,6 +23,7 @@ class DerivWebSocketClient:
         self.currency = 'USD'
         self.current_symbol = 'R_100'
         self.on_tick_callback = on_tick_callback
+        self.on_result_callback = on_result_callback      # ✅ novo
         self.trading_bot = None
         self.payment_system = None
         self.markup_percentage = 0
@@ -48,9 +49,8 @@ class DerivWebSocketClient:
         self._watchdog_thread = None
         self._ws_thread = None
 
-        # ✅ Atributos para produção
-        self.loginid = None                # preenchido após autorização
-        self._connecting = False           # evita múltiplas conexões simultâneas
+        self.loginid = None
+        self._connecting = False
 
     # ── Dependências ─────────────────────────────────────────────
     def set_digit_analyzer(self, a): self._digit_analyzer = a
@@ -135,7 +135,6 @@ class DerivWebSocketClient:
                         return False
                     logger.info("✅ Autorizado com sucesso!")
                     self.authorized = True
-                    # ✅ Extrai loginid do objeto authorize
                     self.loginid = data.get('authorize', {}).get('loginid', '')
                     logger.info(f"LoginID: {self.loginid}")
                     return True
@@ -325,7 +324,10 @@ class DerivWebSocketClient:
         with self._trade_lock:
             if not self.streaming:
                 logger.warning("🚫 Sem streaming"); return False
-            if self.balance > 0 and amount > self.balance * 0.02:
+            # ✅ Bloqueia se saldo não foi recebido ainda
+            if self.balance <= 0:
+                logger.warning("🚫 Saldo não carregado"); return False
+            if amount > self.balance * 0.02:
                 logger.warning("🚫 Excede 2%"); return False
             if time.time() - self._last_trade_time < 2:
                 logger.warning("⏱️ Intervalo mínimo 2s"); return False
@@ -412,6 +414,18 @@ class DerivWebSocketClient:
         if self.trading_bot:
             self.trading_bot.on_trade_result({'contract_id': cid, 'buy_price': bp, 'sell_price': sp,
                 'profit': profit, 'amount': amt, 'is_win': profit > 0})
+        # ✅ Chama callback adicional, se existir
+        if self.on_result_callback:
+            self.on_result_callback({
+                'contract_id': cid,
+                'symbol': self.active_trades.get(cid, {}).get('symbol', self.current_symbol),
+                'action': self.active_trades.get(cid, {}).get('action', ''),
+                'amount': amt,
+                'buy_price': bp,
+                'sell_price': sp,
+                'profit': profit,
+                'is_win': profit > 0
+            })
         if cid in self.active_trades:
             del self.active_trades[cid]
 
