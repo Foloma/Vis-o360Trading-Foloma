@@ -121,7 +121,6 @@
         <div class="balance"><span id="bal">0.00</span> <span id="cur">USD</span></div>
       </div>
       <button class="btn-buy" style="width:100%;margin-top:12px" onclick="connectWithDeriv()">🔗 Conectar com Deriv</button>
-      <button class="btn-sell" style="width:100%;margin-top:8px" id="conBtn" onclick="conectar()">🔌 CONECTAR (token manual)</button>
       <div id="conSt" class="connecting-msg"></div>
     </div>
     <div class="card">
@@ -205,7 +204,10 @@
   </div>
   <div id="payment-section" class="hidden"><div class="card"><div class="card-title">💰 DEPÓSITO / SAQUE</div><p style="color:var(--muted)">Disponível em breve.</p></div></div>
   <div id="settings-section" class="hidden">
-    <div class="card"><div class="card-title">🔐 TOKEN DERIV (manual)</div><input type="password" id="tokIn" placeholder="Cole o token aqui"><button class="btn-buy" style="width:100%;margin-top:8px" onclick="saveTok()">💾 SALVAR</button></div>
+    <div class="card">
+      <div class="card-title">⚙️ CONFIGURAÇÕES</div>
+      <p style="color:var(--muted); text-align:center; padding:20px 0;">A autenticação é feita exclusivamente via OAuth da Deriv.<br>Não é necessário introduzir tokens manualmente.</p>
+    </div>
   </div>
   <div id="admin-section" class="hidden">
     <div class="card">
@@ -249,7 +251,7 @@ let _updateInterval=null, _pollInterval=null;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 // Debounce / locks
-let _trading=false, _loggingIn=false, _registering=false, _resetting=false, _savingToken=false;
+let _trading=false, _loggingIn=false, _registering=false, _resetting=false;
 
 // ══════════════ UTILS ══════════════
 function toast(msg,type='info',ms=4000){
@@ -278,11 +280,11 @@ function stopPolling(){
 function startPollingIfNeeded(){
   if(!isConn) return;
   if(_updateInterval) return;
-  _updateInterval = setInterval(updateAll, 5000); // 5s
+  _updateInterval = setInterval(updateAll, 5000);
 }
 
-// ══════════════ POLLING DE CONEXÃO (5s) ══════════════
-function waitForConnection(timeout=20){
+// ══════════════ POLLING DE CONEXÃO ══════════════
+function waitForConnection(timeout=4){
   if(_pollInterval) clearInterval(_pollInterval);
   setConnectingUI(true);
   let elapsed = 0;
@@ -386,25 +388,8 @@ function validAmount(v){
   return !isNaN(n) && n>=0.35 && n<=100;
 }
 
-// ══════════════ CONEXÃO ══════════════
-function conectar(){
-  setConnectingUI(true);
-  fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:selectedAcct,symbol:curSym})})
-  .then(r=>r.json()).then(d=>{
-    if(d.error) {
-      setConnectingUI(false);
-      toast('❌ Erro ao conectar','loss');
-    } else {
-      toast('⏳ A conectar...','info',2000);
-      waitForConnection();
-    }
-  }).catch(e=>{
-    setConnectingUI(false);
-    toast('❌ Erro de rede','loss');
-  });
-}
+// ══════════════ CONEXÃO (apenas OAuth) ══════════════
 async function connectWithDeriv(){
-  // ✅ CONFIRMAÇÃO PARA CONTA REAL
   if(selectedAcct === 'real'){
     if(!confirm('⚠️ Está a conectar com a conta REAL. As operações usarão dinheiro real. Continuar?')){
       return;
@@ -417,7 +402,7 @@ async function connectWithDeriv(){
 
 // ══════════════ TROCA DE CONTA ══════════════
 function selAcct(a){
-  const anterior = selectedAcct; // guarda a conta atual antes de mudar
+  const anterior = selectedAcct;
   selectedAcct = a;
   document.getElementById('btnDemo').classList.toggle('active', a==='demo');
   document.getElementById('btnReal').classList.toggle('active', a==='real');
@@ -428,11 +413,14 @@ function selAcct(a){
       body: JSON.stringify({account_type: a})
     }).then(r=>r.json()).then(d=>{
       if(d.error) {
-        toast('❌ Erro ao trocar conta','loss');
-        // Reverte para a conta anterior (qualquer que fosse)
-        selectedAcct = anterior;
-        document.getElementById('btnDemo').classList.toggle('active', anterior==='demo');
-        document.getElementById('btnReal').classList.toggle('active', anterior==='real');
+        if(d.error.includes('Sem token')) {
+          toast(`⚠️ Não tens token para a conta ${a.toUpperCase()} — conecta via OAuth para registar ambas as contas.`, 'loss', 6000);
+        } else {
+          toast('❌ Erro ao trocar conta','loss');
+          selectedAcct = anterior;
+          document.getElementById('btnDemo').classList.toggle('active', anterior==='demo');
+          document.getElementById('btnReal').classList.toggle('active', anterior==='real');
+        }
       } else {
         toast(`✅ Conta ${a} activada! A aguardar reconexão...`, 'win', 2000);
         waitForConnection();
@@ -462,7 +450,6 @@ function trade(action){
     if(d.error) toast('❌ Erro ao enviar trade','loss');
     else {
       toast('⏳ Trade enviado','info');
-      // ✅ Atraso maior para trades normais (8s)
       setTimeout(loadHistory, 8000);
     }
   }).catch(e=>{
@@ -484,7 +471,6 @@ function tradeDigit(pred){
     if(d.error) toast('❌ Erro na aposta','loss');
     else {
       toast('⏳ Aposta enviada!','info');
-      // ✅ Atraso maior para dígitos (13s)
       setTimeout(loadHistory, 13000);
     }
   }).catch(e=>{
@@ -493,9 +479,8 @@ function tradeDigit(pred){
   });
 }
 
-// Martingale (SEM bloqueio _trading)
+// Martingale (sem bloqueio _trading)
 async function mgt(fieldId){
-  // ✅ Removida a verificação _trading para não bloquear martingale
   const amt = document.getElementById(fieldId).value;
   if(!validAmount(amt)){
     toast('❌ Valor inválido','loss');
@@ -531,6 +516,11 @@ function loadAffiliate(){fetch('/api/affiliate/link').then(r=>r.json()).then(d=>
 // ══════════════ HISTÓRICO ══════════════
 function loadHistory(){
   fetch('/api/report').then(r=>r.json()).then(data=>{
+    if(data.error || !data.resumo) {
+      document.getElementById('histSummary').innerHTML = '<p style="color:var(--muted);text-align:center">Erro ao carregar histórico.</p>';
+      document.getElementById('histList').innerHTML = '';
+      return;
+    }
     const s = data.resumo;
     const sum = document.getElementById('histSummary');
     if(sum) sum.innerHTML = `
@@ -598,6 +588,9 @@ function loadHistory(){
     }
     const list2 = document.getElementById('histList2');
     if(list2) list2.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+  }).catch(e => {
+    document.getElementById('histSummary').innerHTML = '<p style="color:var(--muted);text-align:center">Erro ao carregar histórico.</p>';
+    document.getElementById('histList').innerHTML = '';
   });
 }
 
@@ -605,7 +598,6 @@ function loadHistory(){
 function loadAdminUsers(){
   fetch('/api/admin/users').then(r=>r.json()).then(data=>{
     if(data.error){ toast('❌ Erro ao carregar','loss'); return; }
-    // ✅ O backend já envia {users: [...]}
     const users = data.users || data;
     let html='';
     users.forEach(u=>{
@@ -709,30 +701,16 @@ function doReset(){
   });
 }
 function doLogout(){stopPolling();fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload());}
-async function saveTok(){
-  if(_savingToken) return;
-  const token=document.getElementById('tokIn').value.trim();
-  if(!token){ toast('❌ Cole o token','loss'); return; }
-  _savingToken = true;
-  const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,account_type:selectedAcct})});
-  const d=await r.json();
-  _savingToken = false;
-  if(d.error) toast('❌ Erro ao guardar','loss');
-  else { toast('✅ Token guardado','win'); conectar(); }
-}
 
 // ══════════════ MENU / UI ══════════════
 function toggleMenu(){document.getElementById('sideMenu').classList.toggle('open');document.getElementById('overlay').classList.toggle('show');}
 function showSec(s){
-  // ✅ NÃO para o polling automaticamente (removido stopPolling)
-  // Apenas esconde/mostra secções
   ['dashboard','affiliate','payment','settings','admin','history'].forEach(x=>document.getElementById(x+'-section').classList.add('hidden'));
   document.getElementById(s+'-section').classList.remove('hidden');
   toggleMenu();
   if(s==='affiliate') loadAffiliate();
   if(s==='admin') loadAdminUsers();
   if(s==='history') loadHistory();
-  // Não interfere no polling de status/trading
 }
 function setModo(m){
   modo=m;
@@ -778,7 +756,7 @@ function setModo(m){
   const p=new URLSearchParams(location.search);
   if(p.get('connected')==='true'){
     toast('✅ Deriv conectada!','win',5000);
-    waitForConnection(25);
+    waitForConnection(4);
     history.replaceState({},'',location.pathname);
   }
 })();
