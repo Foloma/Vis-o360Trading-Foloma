@@ -429,6 +429,46 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
+import urllib.request
+import urllib.parse
+
+def exchange_code_for_tokens(code):
+    """Troca o authorization_code por tokens junto da API da Deriv."""
+    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
+    token_url = "https://oauth.deriv.com/oauth2/token"
+    data = urllib.parse.urlencode({
+        'code': code,
+        'redirect_uri': redirect_uri,
+        'grant_type': 'authorization_code',
+        'client_id': str(config.DERIV_APP_ID)
+    }).encode()
+
+    try:
+        req = urllib.request.Request(token_url, data=data, method='POST')
+        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode())
+            logger.info(f"Resposta da troca de code: {result}")
+            accounts = []
+            # A resposta pode ter 'accounts' (lista de contas com token)
+            account_list = result.get('accounts', [])
+            if not account_list:
+                # fallback: usar o access_token diretamente
+                accounts.append({
+                    'token': result.get('access_token', ''),
+                    'acct': ''
+                })
+            else:
+                for acc in account_list:
+                    accounts.append({
+                        'token': acc.get('token', ''),
+                        'acct': acc.get('loginid', '')
+                    })
+            return accounts
+    except Exception as e:
+        logger.error(f"Erro ao trocar code por token: {e}")
+        return None
+
 # ==================== ROTA PRINCIPAL ====================
 @app.route('/')
 def index():
@@ -1139,46 +1179,6 @@ def admin_clear_tokens():
                 sess['client']._stop_event.set()
                 del sessions[uid]
     return jsonify({'status': 'ok', 'message': 'Tokens removidos. Utilizador terá que refazer OAuth.'})
-
-import urllib.request
-import urllib.parse
-
-def exchange_code_for_tokens(code):
-    """Troca o authorization_code por tokens junto da API da Deriv."""
-    redirect_uri = os.environ.get('BASE_URL', request.host_url.rstrip('/')) + '/oauth/callback'
-    token_url = "https://oauth.deriv.com/oauth2/token"
-    data = urllib.parse.urlencode({
-        'code': code,
-        'redirect_uri': redirect_uri,
-        'grant_type': 'authorization_code',
-        'client_id': str(config.DERIV_APP_ID)
-    }).encode()
-
-    try:
-        req = urllib.request.Request(token_url, data=data, method='POST')
-        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read().decode())
-            logger.info(f"Resposta da troca de code: {result}")
-            accounts = []
-            # A resposta pode ter 'accounts' (lista de contas com token)
-            account_list = result.get('accounts', [])
-            if not account_list:
-                # fallback: usar o access_token diretamente
-                accounts.append({
-                    'token': result.get('access_token', ''),
-                    'acct': ''
-                })
-            else:
-                for acc in account_list:
-                    accounts.append({
-                        'token': acc.get('token', ''),
-                        'acct': acc.get('loginid', '')
-                    })
-            return accounts
-    except Exception as e:
-        logger.error(f"Erro ao trocar code por token: {e}")
-        return None
 
 # ==================== INICIAR ====================
 if __name__ == '__main__':
