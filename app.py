@@ -96,7 +96,7 @@ def init_db():
 
 init_db()
 
-# ==================== MIGRAÇÃO DE users.json ====================
+# ==================== MIGRAÇÃO DE users.json (se existir) ====================
 def migrate_from_json():
     json_path = os.path.join(DATA_PATH, 'users.json')
     if not os.path.exists(json_path):
@@ -371,6 +371,11 @@ def create_session(user_id, user, force=False):
                     return
                 bot.start(client)
                 bot.daily_stats['start_balance'] = bot.balance
+            else:
+                # Limpeza automática de token inválido
+                if getattr(client, 'auth_error', {}).get('code') == 'InvalidToken':
+                    UserStore.add_token(user['email'], user.get('active_account', 'demo'), '')
+                    logger.warning(f"Token expirado para {user['email']} – removido.")
 
         threading.Thread(target=connect_and_validate, daemon=True).start()
 
@@ -387,7 +392,6 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 86400
 
 from config import config
 
-# Flask-Limiter opcional
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
@@ -602,7 +606,7 @@ def switch_account():
     if not user.get('tokens', {}).get(acc_type):
         return jsonify({'error': 'Sem token para essa conta'}), 400
 
-    # Atualiza a conta ativa
+    # Atualiza a conta ativa na BD
     UserStore.set_active_account(email, acc_type)
     user = UserStore.get(email)
 
@@ -730,6 +734,7 @@ def oauth_callback():
         if (at == 'demo' and (acct.startswith('VR') or acct.startswith('VRTC'))) or \
            (at == 'real' and not acct.startswith('VR') and not acct.startswith('VRTC')):
             UserStore.set_active_account(email, at)
+    # Garantir que ambos os tokens estão guardados (same for all accounts received)
     user = UserStore.get(email)
     create_session(session['user_id'], user)
     return redirect('/?connected=true')
@@ -1042,6 +1047,34 @@ def toggle_user():
     finally:
         conn.close()
     return jsonify({'status': 'ok', 'message': f'Utilizador {"ativado" if en else "desativado"}.'})
+
+@app.route('/api/admin/clear-tokens', methods=['POST'])
+@require_admin
+def admin_clear_tokens():
+    d = request.json
+    email = d.get('email', '').strip().lower()
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        if email:
+            conn.execute('DELETE FROM user_tokens WHERE email = ?', (email,))
+            conn.commit()
+            logger.info(f"Tokens removidos para {email}")
+            conn.execute('UPDATE users SET active_account = ? WHERE email = ?', ('demo', email))
+            conn.commit()
+        else:
+            conn.execute('DELETE FROM user_tokens')
+            conn.execute('UPDATE users SET active_account = ?', ('demo',))
+            conn.commit()
+            logger.info("Todos os tokens removidos")
+    finally:
+        conn.close()
+    # Remover sessões ativas desses utilizadores
+    with sessions_lock:
+        for uid, sess in list(sessions.items()):
+            if not email or sess.get('email') == email:
+                sess['client']._stop_event.set()
+                del sessions[uid]
+    return jsonify({'status': 'ok', 'message': 'Tokens removidos. Utilizador terá que refazer OAuth.'})
 
 # ==================== INICIAR ====================
 if __name__ == '__main__':
