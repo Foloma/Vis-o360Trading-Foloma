@@ -839,17 +839,31 @@ import urllib.parse
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
 def deriv_oauth_url():
+    # Obtém o app_id da config (que deve vir da variável de ambiente DERIV_APP_ID)
+    app_id = config.DERIV_APP_ID
+    if not app_id:
+        logger.error("DERIV_APP_ID não definido")
+        return jsonify({'error': 'Configuração OAuth em falta'}), 500
+
+    # Constrói o redirect_uri
     base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
     redirect_uri = base_url + '/oauth/callback'
+
+    # Codifica o redirect_uri para ser seguro na URL
     encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
+
+    # Guarda o tipo de conta na sessão
     at = request.args.get('account_type', 'demo')
     session['pending_account_type'] = at
+
+    # Constrói o URL completo de autorização
     url = (
         f"https://oauth.deriv.com/oauth2/authorize"
-        f"?app_id={config.DERIV_APP_ID}"
+        f"?app_id={app_id}"
         f"&redirect_uri={encoded_redirect}"
         f"&l=PT"
     )
+    logger.info(f"URL OAuth gerado: {url}")
     return jsonify({'url': url})
 
 # ==================== ROTAS DE TRADING ====================
