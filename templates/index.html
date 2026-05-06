@@ -84,6 +84,8 @@
     .mbox { background: var(--card); padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
     .token-status { font-size: 12px; color: var(--accent); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
     button:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
+    .hybrid-notify { background: #ffaa00; color: #000; padding: 8px; border-radius: 8px; text-align: center; font-weight: bold; animation: pulse 1s infinite; }
+    @keyframes pulse { 0% { opacity: 0.7; } 50% { opacity: 1; } 100% { opacity: 0.7; } }
   </style>
 </head>
 <body>
@@ -108,6 +110,11 @@
 </div>
 <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
 <div class="toast" id="toast"></div>
+
+<!-- Áudio para notificações híbridas (beep curto) -->
+<audio id="hybridSound" preload="auto">
+  <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
+</audio>
 
 <div class="container" id="mainContent" style="display:none">
   <div id="dashboard-section">
@@ -161,9 +168,10 @@
           <button class="bmr" onclick="rstMgtDigit()">RESET</button>
         </div>
         <div class="dbet" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-          <button class="btn-buy" onclick="tradeDigit('odd')">ÍMPAR</button>
-          <button class="btn-sell" onclick="tradeDigit('even')">PAR</button>
+          <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')">ÍMPAR</button>
+          <button class="btn-sell" id="btnEven" onclick="tradeDigit('even')">PAR</button>
         </div>
+        <div id="digitBlockerMsg" style="color:#ffaa00;font-size:12px;text-align:center;margin-top:6px"></div>
       </div>
     </div>
     <div class="card" id="pTrade">
@@ -180,6 +188,10 @@
       </div>
       <div class="ms"><div>Martingale: <span id="mgtAct">DESATIVADO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
     </div>
+    <div id="hybridAlert" class="card hidden" style="background:#ffaa0010; border-color:#ffaa00">
+      <div class="card-title">🔔 SINAL HÍBRIDO</div>
+      <div id="hybridMsg" style="font-weight:bold; text-align:center">Aguardando convergência...</div>
+    </div>
     <div class="card">
       <div class="card-title">
         📋 HISTÓRICO
@@ -190,7 +202,11 @@
     </div>
   </div>
   <div id="affiliate-section" class="hidden">
-    <div class="card"><div class="card-title">🔗 SEU LINK</div><div class="lc"><input type="text" id="refLink" readonly><button class="bmr" onclick="cpLink()">📋 COPIAR</button></div></div>
+    <div class="card">
+      <div class="card-title">🔗 SEU LINK</div>
+      <div class="lc"><input type="text" id="refLink" readonly><button class="bmr" onclick="cpLink()">📋 COPIAR</button></div>
+      <div id="affiliateEarnings"></div>
+    </div>
   </div>
   <div id="history-section" class="hidden">
     <div class="card">
@@ -259,12 +275,21 @@ let selectedAcct='demo', paused=false, curSym='R_100', modo='ativos';
 let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
 let isConnecting = false;
+let lastHybridState = null;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 // ══════════════ UTILS ══════════════
 function toast(msg,type='info',ms=4000){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
   clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',ms);
+}
+
+function playBeep() {
+  const audio = document.getElementById('hybridSound');
+  if(audio) {
+    audio.currentTime = 0;
+    audio.play().catch(e => console.log("Som não disponível", e));
+  }
 }
 
 // ══════════════ FUNÇÕES DE INICIALIZAÇÃO ══════════════
@@ -282,6 +307,35 @@ function chgSym(s, el){
 function startPolling(){
   if(_updateInterval) return;
   _updateInterval = setInterval(updateAll, 5000);
+}
+
+// ══════════════ VERIFICAÇÃO HÍBRIDA ══════════════
+function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
+    if (modo !== 'hybrid') return;
+    const alertDiv = document.getElementById('hybridAlert');
+    const msgDiv = document.getElementById('hybridMsg');
+    if (!signalBot || !digitRecommendation) {
+        alertDiv.classList.add('hidden');
+        return;
+    }
+    const botAction = signalBot;
+    const digitAction = digitRecommendation;
+    const convergente = (botAction === digitAction);
+    if (convergente) {
+        alertDiv.classList.remove('hidden');
+        const actionText = botAction === 'BUY' ? 'COMPRA 🔼' : 'VENDA 🔽';
+        const conf = confidenceCombined || 0;
+        msgDiv.innerHTML = `✅ CONVERGENTE: ${actionText} com ${conf.toFixed(1)}% confiança combinada`;
+        msgDiv.style.color = 'var(--accent)';
+        if (lastHybridState !== true) {
+            playBeep();
+            toast(`🔊 SINAL HÍBRIDO! ${actionText} com ${conf.toFixed(0)}%`, 'win', 5000);
+        }
+        lastHybridState = true;
+    } else {
+        if (lastHybridState !== false) lastHybridState = false;
+        alertDiv.classList.add('hidden');
+    }
 }
 
 // ══════════════ UPDATE / UI ══════════════
@@ -308,12 +362,27 @@ function updateAll(){
     document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
     const sig=bot.signal||'NEUTRAL';
     document.getElementById('sigBadge').textContent=sig;
-    document.getElementById('sigBadge').className='signal '+(sig==='BUY'?'buy':'sell');
+    document.getElementById('sigBadge').className='signal '+(sig==='BUY'?'buy':(sig==='SELL'?'sell':''));
     document.getElementById('rsS').textContent=(bot.analysis?.rsi?.score||0).toFixed(1);
     document.getElementById('mcS').textContent=bot.analysis?.macd?.desc||'---';
     document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
     document.getElementById('bbS').textContent=bot.analysis?.bollinger?.desc||'---';
-    if(data.digits)updateDigits(data.digits);
+    if(data.digits) {
+        updateDigits(data.digits);
+        const ticksRemaining = data.digits.ticks_remaining;
+        const btnOdd = document.getElementById('btnOdd');
+        const btnEven = document.getElementById('btnEven');
+        const blockerMsg = document.getElementById('digitBlockerMsg');
+        if (ticksRemaining !== undefined && ticksRemaining < 3) {
+            btnOdd.disabled = true;
+            btnEven.disabled = true;
+            blockerMsg.textContent = `⏳ Aguarde ${ticksRemaining} tick(s) para próximo dígito...`;
+        } else {
+            btnOdd.disabled = false;
+            btnEven.disabled = false;
+            blockerMsg.textContent = '';
+        }
+    }
     fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
       const act = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
       const nxt = '$' + (m.next_amount||0.35).toFixed(2);
@@ -328,6 +397,18 @@ function updateAll(){
         if(ad) ad.value = (m.next_amount||0.35).toFixed(2);
       }
     }).catch(console.error);
+    
+    if (modo === 'hybrid' && data.digits && bot.signal) {
+        const digitAnalysis = data.digits.analysis;
+        if (digitAnalysis && digitAnalysis.recommended_action) {
+            const combinedConf = (bot.confidence || 0 + (digitAnalysis.confidence || 0)) / 2;
+            checkHybridAlert(bot.signal, digitAnalysis.recommended_action, combinedConf);
+        } else {
+            checkHybridAlert(null, null, 0);
+        }
+    } else {
+        document.getElementById('hybridAlert')?.classList.add('hidden');
+    }
   }).catch(console.error);
 }
 function updateDigits(digits){
@@ -349,7 +430,7 @@ function updateDigits(digits){
   }
 }
 
-// ══════════════ CONEXÃO (com protecção anti-spam) ══════════════
+// ══════════════ CONEXÃO ══════════════
 async function conectar(){
   if(isConnecting){
     toast('⏳ A ligar já em curso...', 'info');
@@ -398,8 +479,9 @@ async function connectWithDeriv(){
   window.location.href = d.url;
 }
 
+// CORREÇÃO: disconnect apenas do WebSocket, não logout
 async function disconnectWebSocket(){
-  const r = await fetch('/api/auth/logout', {method:'POST'});
+  const r = await fetch('/api/disconnect', {method:'POST'});
   if(r.ok){
     toast('🔌 WebSocket desconectado', 'info');
     setTimeout(updateAll, 500);
@@ -408,16 +490,13 @@ async function disconnectWebSocket(){
   }
 }
 
-// ══════════════ TROCA DE CONTA (CORRIGIDA) ══════════════
+// ══════════════ TROCA DE CONTA ══════════════
 async function selAcct(a) {
     if (a === selectedAcct) return;
-    // Actualiza visual imediatamente
     const oldAcct = selectedAcct;
     selectedAcct = a;
     document.getElementById('btnDemo').classList.toggle('active', a === 'demo');
     document.getElementById('btnReal').classList.toggle('active', a === 'real');
-    
-    // Notifica o backend para trocar a conta activa e reconectar
     try {
         const response = await fetch('/api/auth/switch-account', {
             method: 'POST',
@@ -427,17 +506,14 @@ async function selAcct(a) {
         const data = await response.json();
         if (data.error) {
             toast('❌ ' + data.error, 'loss');
-            // Reverte visual
             selectedAcct = oldAcct;
             document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
             document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
         } else {
             toast(`🔄 Conta ${a.toUpperCase()} activada. A reconectar...`, 'info');
-            // O polling actualizará o saldo dentro de alguns segundos
         }
     } catch (err) {
         toast('❌ Erro ao trocar conta', 'loss');
-        // Reverte visual
         selectedAcct = oldAcct;
         document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
         document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
@@ -492,9 +568,42 @@ async function rstMgtDigit(){
   toast('🔄 Martingale resetado','info');
 }
 
-// ══════════════ AFILIADO ══════════════
+// ══════════════ AFILIADO (com ganhos) ══════════════
+function loadAffiliate() {
+  fetch('/api/affiliate/link')
+    .then(r => r.json())
+    .then(d => {
+      if(d.link) document.getElementById('refLink').value = d.link;
+    })
+    .catch(() => toast('Erro ao carregar link', 'loss'));
+  
+  fetch('/api/affiliate/earnings')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.error) {
+        const earningsDiv = document.getElementById('affiliateEarnings');
+        if (earningsDiv) {
+          earningsDiv.innerHTML = `
+            <div style="margin-top:12px; background:#020617; border-radius:8px; padding:12px;">
+              <div style="font-size:12px; color:var(--muted);">💰 GANHOS ACUMULADOS</div>
+              <div style="font-size:28px; font-weight:bold; color:var(--accent);">
+                $ ${data.earnings?.toFixed(2) || '0.00'}
+              </div>
+              <div style="font-size:11px; margin-top:5px;">
+                Código de indicação: <strong>${data.referral_link || '---'}</strong>
+              </div>
+              <div style="font-size:11px; margin-top:5px;">
+                Cliques convertidos: ${data.referred_count || 0}
+              </div>
+            </div>
+          `;
+        }
+      }
+    })
+    .catch(() => toast('Erro ao carregar ganhos', 'loss'));
+}
+
 function cpLink(){const l=document.getElementById('refLink');l.select();document.execCommand('copy');toast('✅ Link copiado!','win');}
-function loadAffiliate(){fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{if(d.link)document.getElementById('refLink').value=d.link;});}
 
 // ══════════════ HISTÓRICO ══════════════
 function loadHistory(){
@@ -611,7 +720,6 @@ function doLogin(){
   fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
   .then(r=>r.json()).then(d=>{
     if(d.error){document.getElementById('authErr').textContent=d.error;return;}
-    // Sincroniza a conta activa do backend
     if(d.user?.active_account) selectedAcct = d.user.active_account;
     document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
     document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
@@ -692,6 +800,11 @@ function setModo(m){
   document.getElementById('pTrade').classList.toggle('hidden',m==='digitos');
   document.getElementById('btnHybrid').classList.toggle('hidden', m!=='hybrid');
   document.querySelector('.trade-actions').classList.toggle('hidden', m==='hybrid');
+  if (m === 'hybrid') {
+    setTimeout(updateAll, 200);
+  } else {
+    document.getElementById('hybridAlert')?.classList.add('hidden');
+  }
 }
 
 // ══════════════ INICIALIZAÇÃO ══════════════
