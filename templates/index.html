@@ -201,11 +201,9 @@
     </div>
   </div>
   <div id="payment-section" class="hidden"><div class="card"><div class="card-title">💰 DEPÓSITO / SAQUE</div><p style="color:var(--muted)">Disponível em breve.</p></div></div>
-  <!-- Configurações com link e status persistente -->
   <div id="settings-section" class="hidden">
     <div class="card">
       <div class="card-title">🔐 TOKEN DERIV</div>
-      <!-- NOVO: link directo para criar token -->
       <a href="https://app.deriv.com/account/api-token" target="_blank" style="color:var(--accent);font-size:12px;display:block;margin-bottom:8px">
         👉 Clica aqui para criar o token na Deriv
       </a>
@@ -217,7 +215,6 @@
         <button class="bmr" style="flex:1" onclick="saveTokAcct('demo')">💾 GUARDAR DEMO</button>
         <button class="bmr" style="flex:1" onclick="saveTokAcct('real')">💾 GUARDAR REAL</button>
       </div>
-      <!-- NOVO: status persistente do token guardado -->
       <div id="tokenStatusDemo" class="token-status" style="display:none">✅ Token Demo guardado</div>
       <div id="tokenStatusReal" class="token-status" style="display:none">✅ Token Real guardado</div>
     </div>
@@ -261,7 +258,7 @@
 let selectedAcct='demo', paused=false, curSym='R_100', modo='ativos';
 let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
-let isConnecting = false;  // NOVO: controlo para evitar múltiplos cliques em conectar()
+let isConnecting = false;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 // ══════════════ UTILS ══════════════
@@ -293,7 +290,6 @@ function updateAll(){
     if(data.error)return;
     const bot=data.bot;if(!bot)return;
     const conn=bot.connected&&bot.authorized;
-    // actualiza estado dos botões de conexão
     const connectOAuthBtn = document.getElementById('connectOAuthBtn');
     const connectTokenBtn = document.getElementById('connectTokenBtn');
     if(conn){
@@ -379,7 +375,6 @@ async function conectar(){
     } else {
       toast('✅ Pedido de conexão enviado','win');
       document.getElementById('conSt').textContent = '🔄 A aguardar...';
-      // A UI será actualizada pelo polling
     }
   } catch(e) {
     toast('❌ Erro de rede','loss');
@@ -388,7 +383,6 @@ async function conectar(){
     btn.disabled = false;
     btn.textContent = originalText;
     isConnecting = false;
-    // re-actualiza estado após tentativa
     setTimeout(updateAll, 2000);
   }
 }
@@ -404,16 +398,50 @@ async function connectWithDeriv(){
   window.location.href = d.url;
 }
 
-// NOVO: desconectar WebSocket sem fazer logout
 async function disconnectWebSocket(){
   const r = await fetch('/api/auth/logout', {method:'POST'});
   if(r.ok){
     toast('🔌 WebSocket desconectado', 'info');
-    // Força actualização do estado
     setTimeout(updateAll, 500);
   } else {
     toast('❌ Erro ao desconectar', 'loss');
   }
+}
+
+// ══════════════ TROCA DE CONTA (CORRIGIDA) ══════════════
+async function selAcct(a) {
+    if (a === selectedAcct) return;
+    // Actualiza visual imediatamente
+    const oldAcct = selectedAcct;
+    selectedAcct = a;
+    document.getElementById('btnDemo').classList.toggle('active', a === 'demo');
+    document.getElementById('btnReal').classList.toggle('active', a === 'real');
+    
+    // Notifica o backend para trocar a conta activa e reconectar
+    try {
+        const response = await fetch('/api/auth/switch-account', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ account_type: a })
+        });
+        const data = await response.json();
+        if (data.error) {
+            toast('❌ ' + data.error, 'loss');
+            // Reverte visual
+            selectedAcct = oldAcct;
+            document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
+            document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
+        } else {
+            toast(`🔄 Conta ${a.toUpperCase()} activada. A reconectar...`, 'info');
+            // O polling actualizará o saldo dentro de alguns segundos
+        }
+    } catch (err) {
+        toast('❌ Erro ao trocar conta', 'loss');
+        // Reverte visual
+        selectedAcct = oldAcct;
+        document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
+        document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
+    }
 }
 
 // ══════════════ TRADES / MARTINGALE ══════════════
@@ -583,11 +611,14 @@ function doLogin(){
   fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
   .then(r=>r.json()).then(d=>{
     if(d.error){document.getElementById('authErr').textContent=d.error;return;}
+    // Sincroniza a conta activa do backend
+    if(d.user?.active_account) selectedAcct = d.user.active_account;
+    document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
+    document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
     document.getElementById('authModal').style.display='none';
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();startPolling();loadHistory();
-    // CORRECÇÃO: auto-conectar se já tiver token
     if(d.user?.has_deriv_token){
       setTimeout(() => conectar(), 1000);
     }
@@ -611,7 +642,7 @@ function doReset(){
 }
 function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload());}
 
-// ══════════════ GUARDAR TOKEN (sem dupla conexão) ══════════════
+// ══════════════ GUARDAR TOKEN ══════════════
 async function saveTokAcct(acctType){
   if(isConnecting){
     toast('Aguardar fim da conexão actual', 'info');
@@ -624,11 +655,9 @@ async function saveTokAcct(acctType){
   if(d.error){
     toast('❌ '+d.error,'loss');
   } else {
-    // CORRECÇÃO: não chamar selAcct; actualizar manualmente os botões
     selectedAcct = acctType;
     document.getElementById('btnDemo').classList.toggle('active', acctType === 'demo');
     document.getElementById('btnReal').classList.toggle('active', acctType === 'real');
-    // Mostrar status persistente
     const demoStatus = document.getElementById('tokenStatusDemo');
     const realStatus = document.getElementById('tokenStatusReal');
     if(acctType === 'demo'){
@@ -639,7 +668,6 @@ async function saveTokAcct(acctType){
       demoStatus.style.display = 'none';
     }
     toast('✅ Token guardado para conta ' + (acctType === 'demo' ? 'Demo' : 'Real'), 'win');
-    // Chamar conexão apenas uma vez
     conectar();
   }
 }
@@ -653,21 +681,6 @@ function showSec(s){
   if(s==='affiliate') loadAffiliate();
   if(s==='admin') loadAdminUsers();
   if(s==='history') loadHistory();
-}
-function selAcct(a){
-  selectedAcct=a;
-  document.getElementById('btnDemo').classList.toggle('active',a==='demo');
-  document.getElementById('btnReal').classList.toggle('active',a==='real');
-  // Se já estiver conectado, reconectar com a nova conta (apenas se o utilizador quiser)
-  // Em vez de chamar conectar() automaticamente, deixamos o utilizador clicar no botão.
-  // Mas para melhor UX, podemos perguntar:
-  fetch('/api/status').then(r=>r.json()).then(data=>{
-    if(data.bot?.connected && data.bot?.authorized){
-      if(confirm(`Mudar para conta ${a.toUpperCase()}? Irá desconectar e reconectar.`)){
-        conectar();
-      }
-    }
-  }).catch(()=>{});
 }
 function setModo(m){
   modo=m;
@@ -701,11 +714,13 @@ function setModo(m){
 })();
 fetch('/api/auth/status').then(r=>r.json()).then(d=>{
   if(d.authenticated){
+    if(d.user?.active_account) selectedAcct = d.user.active_account;
+    document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
+    document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
     document.getElementById('authModal').style.display='none';
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();startPolling();loadHistory();
-    // CORRECÇÃO: se já tiver token, tenta conectar automaticamente
     if(d.user?.has_deriv_token){
       setTimeout(() => conectar(), 1500);
     }
