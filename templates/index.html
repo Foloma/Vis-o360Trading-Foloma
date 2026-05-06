@@ -82,6 +82,8 @@
     @keyframes su { from { transform: translateX(-50%) translateY(16px); opacity: 0 } to { transform: translateX(-50%) translateY(0); opacity: 1 } }
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 1100; display: flex; align-items: center; justify-content: center; }
     .mbox { background: var(--card); padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
+    .token-status { font-size: 12px; color: var(--accent); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
   </style>
 </head>
 <body>
@@ -102,6 +104,7 @@
   <div class="menu-item" onclick="showSec('settings')">⚙️ Configurações</div>
   <div class="menu-item" id="adminMI" style="display:none" onclick="showSec('admin')">👑 Administração</div>
   <div class="menu-item" onclick="doLogout()">🚪 Sair</div>
+  <div class="menu-item" id="disconnectMI" style="border-top:1px solid var(--border);margin-top:10px;color:var(--danger)" onclick="disconnectWebSocket()">🔌 Desconectar WebSocket</div>
 </div>
 <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
 <div class="toast" id="toast"></div>
@@ -114,8 +117,8 @@
         <div><span class="dot" id="sDot"></span> <span id="connStatus">Desconectado</span></div>
         <div class="balance"><span id="bal">0.00</span> <span id="cur">USD</span></div>
       </div>
-      <button class="btn-buy" style="width:100%;margin-top:12px" onclick="connectWithDeriv()">🔗 Conectar com Deriv</button>
-      <button class="btn-sell" style="width:100%;margin-top:8px" id="conBtn" onclick="conectar()">🔌 CONECTAR (token manual)</button>
+      <button class="btn-buy" style="width:100%;margin-top:12px" id="connectOAuthBtn" onclick="connectWithDeriv()">🔗 Conectar com Deriv</button>
+      <button class="btn-sell" style="width:100%;margin-top:8px" id="connectTokenBtn" onclick="conectar()">🔌 CONECTAR (token manual)</button>
       <div id="conSt" style="text-align:center;font-size:11px;color:#ffaa00;margin-top:6px"></div>
     </div>
     <div class="card">
@@ -198,19 +201,25 @@
     </div>
   </div>
   <div id="payment-section" class="hidden"><div class="card"><div class="card-title">💰 DEPÓSITO / SAQUE</div><p style="color:var(--muted)">Disponível em breve.</p></div></div>
-  <!-- ✅ Configurações — Token manual com botões DEMO/REAL -->
+  <!-- Configurações com link e status persistente -->
   <div id="settings-section" class="hidden">
     <div class="card">
       <div class="card-title">🔐 TOKEN DERIV</div>
+      <!-- NOVO: link directo para criar token -->
+      <a href="https://app.deriv.com/account/api-token" target="_blank" style="color:var(--accent);font-size:12px;display:block;margin-bottom:8px">
+        👉 Clica aqui para criar o token na Deriv
+      </a>
       <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
-        Vai a app.deriv.com/account/api-token, cria um token com permissões 
-        Read + Trade + Trading Information e cola aqui.
+        Cria um token com permissões <strong>Read + Trade + Trading Information</strong> e cola abaixo.
       </p>
       <input type="password" id="tokIn" placeholder="Cole o token aqui">
       <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="bmr" style="flex:1" onclick="saveTokAcct('demo')">💾 DEMO</button>
-        <button class="bmr" style="flex:1" onclick="saveTokAcct('real')">💾 REAL</button>
+        <button class="bmr" style="flex:1" onclick="saveTokAcct('demo')">💾 GUARDAR DEMO</button>
+        <button class="bmr" style="flex:1" onclick="saveTokAcct('real')">💾 GUARDAR REAL</button>
       </div>
+      <!-- NOVO: status persistente do token guardado -->
+      <div id="tokenStatusDemo" class="token-status" style="display:none">✅ Token Demo guardado</div>
+      <div id="tokenStatusReal" class="token-status" style="display:none">✅ Token Real guardado</div>
     </div>
   </div>
   <div id="admin-section" class="hidden">
@@ -249,9 +258,10 @@
 
 <script>
 // ══════════════ ESTADO GLOBAL ══════════════
-let selectedAcct='demo', paused=false, isConn=false, curSym='R_100', modo='ativos';
+let selectedAcct='demo', paused=false, curSym='R_100', modo='ativos';
 let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
+let isConnecting = false;  // NOVO: controlo para evitar múltiplos cliques em conectar()
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 // ══════════════ UTILS ══════════════
@@ -274,7 +284,7 @@ function chgSym(s, el){
 }
 function startPolling(){
   if(_updateInterval) return;
-  _updateInterval = setInterval(updateAll, 5000);   // ✅ polling a cada 5s
+  _updateInterval = setInterval(updateAll, 5000);
 }
 
 // ══════════════ UPDATE / UI ══════════════
@@ -283,7 +293,18 @@ function updateAll(){
     if(data.error)return;
     const bot=data.bot;if(!bot)return;
     const conn=bot.connected&&bot.authorized;
-    if(conn && !isConn) isConn = true;
+    // actualiza estado dos botões de conexão
+    const connectOAuthBtn = document.getElementById('connectOAuthBtn');
+    const connectTokenBtn = document.getElementById('connectTokenBtn');
+    if(conn){
+      connectOAuthBtn.disabled = true;
+      connectTokenBtn.disabled = true;
+      document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
+    } else {
+      connectOAuthBtn.disabled = false;
+      connectTokenBtn.disabled = false;
+      document.getElementById('conSt').innerHTML = '';
+    }
     document.getElementById('sDot').className='dot'+(conn?' on':'');
     document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
     document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
@@ -332,24 +353,67 @@ function updateDigits(digits){
   }
 }
 
-// ══════════════ CONEXÃO ══════════════
-function conectar(){
-  document.getElementById('conSt').textContent='⏳ A conectar...';
-  fetch('/api/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:selectedAcct,symbol:curSym})})
-  .then(r=>r.json()).then(d=>{
-    document.getElementById('conSt').textContent='';
-    if(d.error) toast('❌ '+d.error,'loss');
-    else { toast('✅ Conectado!','win'); isConn=true; }
-  });
-}
-async function connectWithDeriv(){
-    const confirmMsg = selectedAcct === 'real' 
-        ? '⚠️ Vai conectar a CONTA REAL. Confirma?' 
-        : 'Vai conectar a conta Demo.';
-    if(selectedAcct === 'real' && !confirm(confirmMsg)) return;
-    const r = await fetch(`/api/auth/deriv_oauth_url?account_type=${selectedAcct}`);
+// ══════════════ CONEXÃO (com protecção anti-spam) ══════════════
+async function conectar(){
+  if(isConnecting){
+    toast('⏳ A ligar já em curso...', 'info');
+    return;
+  }
+  isConnecting = true;
+  const btn = document.getElementById('connectTokenBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ A conectar...';
+  document.getElementById('conSt').textContent = '⏳ A conectar...';
+  
+  try {
+    const r = await fetch('/api/connect', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({account_type:selectedAcct, symbol:curSym})
+    });
     const d = await r.json();
-    window.location.href = d.url;
+    if(d.error) {
+      toast('❌ '+d.error,'loss');
+      document.getElementById('conSt').textContent = '❌ Falha';
+    } else {
+      toast('✅ Pedido de conexão enviado','win');
+      document.getElementById('conSt').textContent = '🔄 A aguardar...';
+      // A UI será actualizada pelo polling
+    }
+  } catch(e) {
+    toast('❌ Erro de rede','loss');
+    document.getElementById('conSt').textContent = '❌ Erro';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+    isConnecting = false;
+    // re-actualiza estado após tentativa
+    setTimeout(updateAll, 2000);
+  }
+}
+
+async function connectWithDeriv(){
+  if(isConnecting) return;
+  const confirmMsg = selectedAcct === 'real' 
+      ? '⚠️ Vai conectar a CONTA REAL. Confirma?' 
+      : 'Vai conectar a conta Demo.';
+  if(selectedAcct === 'real' && !confirm(confirmMsg)) return;
+  const r = await fetch(`/api/auth/deriv_oauth_url?account_type=${selectedAcct}`);
+  const d = await r.json();
+  window.location.href = d.url;
+}
+
+// NOVO: desconectar WebSocket sem fazer logout
+async function disconnectWebSocket(){
+  const r = await fetch('/api/auth/logout', {method:'POST'});
+  if(r.ok){
+    toast('🔌 WebSocket desconectado', 'info');
+    // Força actualização do estado
+    setTimeout(updateAll, 500);
+  } else {
+    toast('❌ Erro ao desconectar', 'loss');
+  }
 }
 
 // ══════════════ TRADES / MARTINGALE ══════════════
@@ -363,7 +427,7 @@ function trade(action){
       toast('⏳ Trade enviado','info');
       setTimeout(loadHistory, 8000);
     }
-  });
+  }).catch(()=>toast('❌ Erro de rede','loss'));
 }
 function tradeDigit(pred){
   const amt = parseFloat(document.getElementById('amtDigit').value) || 0.35;
@@ -374,7 +438,7 @@ function tradeDigit(pred){
       toast('⏳ Aposta enviada!','info');
       setTimeout(loadHistory, 13000);
     }
-  });
+  }).catch(()=>toast('❌ Erro de rede','loss'));
 }
 async function mgt(fieldId){
   const amt = parseFloat(document.getElementById(fieldId).value);
@@ -407,7 +471,6 @@ function loadAffiliate(){fetch('/api/affiliate/link').then(r=>r.json()).then(d=>
 // ══════════════ HISTÓRICO ══════════════
 function loadHistory(){
   fetch('/api/report').then(r=>r.json()).then(data=>{
-    // ✅ null check: verificar se os dados existem
     if (!data || !data.resumo) return;
     const s = data.resumo;
     const sum = document.getElementById('histSummary');
@@ -477,7 +540,7 @@ function loadHistory(){
     }
     const list2 = document.getElementById('histList2');
     if(list2) list2.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
-  });
+  }).catch(()=>toast('❌ Erro ao carregar histórico','loss'));
 }
 
 // ══════════════ ADMIN ══════════════
@@ -524,7 +587,7 @@ function doLogin(){
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();startPolling();loadHistory();
-    // ✅ auto-connect se já tiver token guardado
+    // CORRECÇÃO: auto-conectar se já tiver token
     if(d.user?.has_deriv_token){
       setTimeout(() => conectar(), 1000);
     }
@@ -548,18 +611,36 @@ function doReset(){
 }
 function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload());}
 
-// ✅ Guardar token manualmente por tipo de conta (sem conectar automaticamente)
+// ══════════════ GUARDAR TOKEN (sem dupla conexão) ══════════════
 async function saveTokAcct(acctType){
+  if(isConnecting){
+    toast('Aguardar fim da conexão actual', 'info');
+    return;
+  }
   const token=document.getElementById('tokIn').value.trim();
-  if(!token)return toast('❌ Cole o token','loss');
+  if(!token) return toast('❌ Cole o token','loss');
   const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token, account_type: acctType})});
   const d=await r.json();
-  if(d.error)toast('❌ '+d.error,'loss');
-  else {
+  if(d.error){
+    toast('❌ '+d.error,'loss');
+  } else {
+    // CORRECÇÃO: não chamar selAcct; actualizar manualmente os botões
     selectedAcct = acctType;
-    selAcct(acctType);
-    toast('✅ Token guardado para conta '+(acctType==='demo'?'Demo':'Real'),'win');
-    // ✅ removida a chamada duplicada a conectar()
+    document.getElementById('btnDemo').classList.toggle('active', acctType === 'demo');
+    document.getElementById('btnReal').classList.toggle('active', acctType === 'real');
+    // Mostrar status persistente
+    const demoStatus = document.getElementById('tokenStatusDemo');
+    const realStatus = document.getElementById('tokenStatusReal');
+    if(acctType === 'demo'){
+      demoStatus.style.display = 'flex';
+      realStatus.style.display = 'none';
+    } else {
+      realStatus.style.display = 'flex';
+      demoStatus.style.display = 'none';
+    }
+    toast('✅ Token guardado para conta ' + (acctType === 'demo' ? 'Demo' : 'Real'), 'win');
+    // Chamar conexão apenas uma vez
+    conectar();
   }
 }
 
@@ -577,7 +658,16 @@ function selAcct(a){
   selectedAcct=a;
   document.getElementById('btnDemo').classList.toggle('active',a==='demo');
   document.getElementById('btnReal').classList.toggle('active',a==='real');
-  if(isConn) conectar();
+  // Se já estiver conectado, reconectar com a nova conta (apenas se o utilizador quiser)
+  // Em vez de chamar conectar() automaticamente, deixamos o utilizador clicar no botão.
+  // Mas para melhor UX, podemos perguntar:
+  fetch('/api/status').then(r=>r.json()).then(data=>{
+    if(data.bot?.connected && data.bot?.authorized){
+      if(confirm(`Mudar para conta ${a.toUpperCase()}? Irá desconectar e reconectar.`)){
+        conectar();
+      }
+    }
+  }).catch(()=>{});
 }
 function setModo(m){
   modo=m;
@@ -591,16 +681,15 @@ function setModo(m){
   document.querySelector('.trade-actions').classList.toggle('hidden', m==='hybrid');
 }
 
-// ══════════════ CALLBACKS / INICIALIZAÇÃO ══════════════
+// ══════════════ INICIALIZAÇÃO ══════════════
 (function(){
   const p=new URLSearchParams(location.search);
   if(p.get('connected')==='true'){
     toast('✅ Deriv conectada!','win',5000);
-    setTimeout(async ()=>{
-      const r=await fetch('/api/status');
-      const d=await r.json();
-      if(d.bot?.authorized){toast('🟢 Bot activo!','win');}
-      else{conectar();}
+    setTimeout(()=>{
+      fetch('/api/status').then(r=>r.json()).then(data=>{
+        if(!data.bot?.authorized) conectar();
+      }).catch(()=>conectar());
     },2000);
     history.replaceState({},'',location.pathname);
   }
@@ -616,6 +705,10 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();startPolling();loadHistory();
+    // CORRECÇÃO: se já tiver token, tenta conectar automaticamente
+    if(d.user?.has_deriv_token){
+      setTimeout(() => conectar(), 1500);
+    }
   }
 });
 </script>
