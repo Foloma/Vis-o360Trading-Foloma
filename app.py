@@ -447,7 +447,8 @@ def auth_status():
                 'user': {
                     'id': user['id'], 'name': user['name'], 'email': user['email'],
                     'role': user.get('role'),
-                    'has_deriv_token': bool(UserStore.get_active_token(user))
+                    'has_deriv_token': bool(UserStore.get_active_token(user)),
+                    'active_account': user.get('active_account')
                 }
             })
     return jsonify({'authenticated': False})
@@ -489,7 +490,8 @@ def login():
         logger.info(f"Login: {email}")
         return jsonify({'status': 'ok', 'user': {
             'id': user['id'], 'name': user['name'], 'email': user['email'],
-            'role': session['user_role'], 'has_deriv_token': bool(UserStore.get_active_token(user))
+            'role': session['user_role'], 'has_deriv_token': bool(UserStore.get_active_token(user)),
+            'active_account': user.get('active_account')
         }})
     except Exception:
         logger.exception("Erro no login")
@@ -1010,8 +1012,9 @@ def affiliate_stats():
 def affiliate_link():
     user = UserStore.get(session['user_email'])
     if user and user.get('referral_link_code'):
-        return jsonify({'link': f"https://foloma.com/?ref={user['referral_link_code']}",
-                        'code': user['referral_link_code']})
+        base_url = os.environ.get('BASE_URL', 'https://visao360-jf.onrender.com')
+        link = f"{base_url}/?ref={user['referral_link_code']}"
+        return jsonify({'link': link, 'code': user['referral_link_code']})
     return jsonify({'error': 'Utilizador não encontrado'}), 404
 
 @app.route('/api/affiliate/earnings')
@@ -1020,12 +1023,34 @@ def affiliate_earnings():
     user = UserStore.get(session['user_email'])
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
+    # Contar quantos referrals directos
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        referred_count = conn.execute('SELECT COUNT(*) FROM referrals WHERE referrer_email = ?', (user['email'],)).fetchone()[0]
+    finally:
+        conn.close()
     return jsonify({
         'earnings': user.get('affiliate_earnings', 0.0),
         'referral_link': user.get('referral_link_code', ''),
-        'referred_count': 0,
-        'referred_list': []
+        'referred_count': referred_count,
+        'referred_list': []  # pode ser expandido se necessário
     })
+
+# ==================== NOVO ENDPOINT: DESCONECTAR WEBSOCKET (sem logout) ====================
+@app.route('/api/disconnect', methods=['POST'])
+@require_auth
+def disconnect_websocket():
+    user_id = session.get('user_id')
+    if user_id:
+        with sessions_lock:
+            sess = sessions.pop(user_id, None)
+        if sess:
+            sess['client']._stop_event.set()
+            if sess['client']._ws_thread and sess['client']._ws_thread.is_alive():
+                sess['client']._ws_thread.join(timeout=2)
+            logger.info(f"WebSocket desconectado para user {user_id}")
+            return jsonify({'status': 'ok', 'message': 'Desconectado'})
+    return jsonify({'error': 'Nenhuma sessão activa'}), 404
 
 @app.route('/api/payment/deposit', methods=['POST'])
 @require_auth
