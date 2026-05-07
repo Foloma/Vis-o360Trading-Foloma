@@ -97,7 +97,7 @@ def init_db():
 
 init_db()
 
-# ==================== MIGRAÇÃO DE users.json (se existir) ====================
+# ==================== MIGRAÇÃO DE users.json ====================
 def migrate_from_json():
     json_path = os.path.join(DATA_PATH, 'users.json')
     if not os.path.exists(json_path):
@@ -349,7 +349,6 @@ def create_session(user_id, user, force=False):
     token = UserStore.get_active_token(user)
     if token:
         client.set_user_token(token)
-        client._connect_lock = threading.Lock()
 
         def connect_and_validate():
             with client._connect_lock:
@@ -374,7 +373,9 @@ def create_session(user_id, user, force=False):
                 bot.start(client)
                 bot.daily_stats['start_balance'] = bot.balance
             else:
-                if getattr(client, 'auth_error', {}).get('code') == 'InvalidToken':
+                # ✅ CORREÇÃO: verifica se auth_error existe e é um dicionário
+                auth_err = getattr(client, 'auth_error', None)
+                if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
                     UserStore.add_token(user['email'], user.get('active_account', 'demo'), '')
                     logger.warning(f"Token expirado para {user['email']} – removido.")
 
@@ -641,7 +642,11 @@ def status():
         if user and UserStore.get_active_token(user):
             sess = create_session(user_id, user)
         else:
-            return jsonify({'bot': {}, 'digits': {}, 'symbols': config.AVAILABLE_SYMBOLS})
+            return jsonify({
+                'bot': {'connected': False, 'authorized': False},
+                'digits': {},
+                'symbols': config.AVAILABLE_SYMBOLS
+            })
     client = sess['client']
     bot = sess['trading_bot']
     analyzer = sess['digit_analyzer']
@@ -704,7 +709,6 @@ def oauth_callback():
             return redirect('/?error=invalid_state')
         state_data = oauth_states.pop(state_id)
 
-        # Limpa estados expirados (>10 min)
         now = time.time()
         expired = [k for k, v in oauth_states.items() if now - v.get('created_at', 0) > 600]
         for k in expired:
