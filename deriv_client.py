@@ -33,7 +33,8 @@ class DerivWebSocketClient:
         self.pending_trade = None
         self.pending_trade_time = 0
         self._trade_lock = threading.Lock()
-        self._pending_lock = threading.Lock()          # ✅ lock para pending_trade
+        self._pending_lock = threading.Lock()
+        self._req_lock = threading.Lock()               # ✅ NOVO: lock para next_req
         self._digit_analyzer = None
         self._balance_subscribed = False
         self._stop_event = threading.Event()
@@ -52,7 +53,8 @@ class DerivWebSocketClient:
 
         self.loginid = None
         self._connecting = False
-        self._connect_lock = threading.Lock()          # ✅ lock para conexão
+        self._connect_lock = threading.Lock()
+        self.auth_error = None                           # ✅ NOVO: guardar último erro auth
 
     def set_digit_analyzer(self, a): self._digit_analyzer = a
     def set_trading_bot(self, b):
@@ -63,10 +65,12 @@ class DerivWebSocketClient:
         self.user_token = t
         logger.info("🔑 Token configurado")
 
+    # ✅ Correcção 1: connect() com ordem correcta
     def connect(self):
-        self._stop_event.clear()
+        self._stop_event.set()           # primeiro sinaliza paragem
         if self._ws_thread and self._ws_thread.is_alive():
             self._ws_thread.join(timeout=2)
+        self._stop_event.clear()         # depois limpa para nova conexão
         self._close_connection()
         self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
         self._ws_thread.start()
@@ -115,6 +119,7 @@ class DerivWebSocketClient:
         self._last_tick_time = None
         self.state = self.ST_DISCONNECTED
         self.loginid = None
+        self.auth_error = None
 
     def _authorize_and_wait(self, timeout=10):
         if not self.user_token:
@@ -130,6 +135,7 @@ class DerivWebSocketClient:
                 if data.get('msg_type') == 'authorize':
                     if data.get('error'):
                         logger.error(f"❌ Auth erro: {data['error']}")
+                        self.auth_error = data['error']
                         return False
                     logger.info("✅ Autorizado com sucesso!")
                     self.authorized = True
@@ -306,11 +312,18 @@ class DerivWebSocketClient:
                 'timestamp': tick.get('epoch', time.time())
             })
 
+    # ✅ Correcção 3: _next_req protegido por lock
     def _next_req(self):
-        self._req_counter += 1
-        return self._req_counter
+        with self._req_lock:
+            self._req_counter += 1
+            return self._req_counter
 
+    # ✅ Correcção 2: time.sleep movido para fora do _trade_lock
     def place_trade(self, contract_type, amount, is_digit=False):
+        # Pequeno atraso para dígitos ANTES de qualquer lock
+        if is_digit:
+            time.sleep(0.5)
+
         with self._trade_lock:
             if not self.streaming:
                 logger.warning("🚫 Sem streaming"); return False
@@ -333,8 +346,6 @@ class DerivWebSocketClient:
             self._last_trade_time = time.time()
 
             if is_digit:
-                # ✅ Pequeno atraso para evitar usar o dígito actual
-                time.sleep(0.5)
                 duration = self.config.DIGIT_CONTRACT_DURATION
                 duration_unit = 't'
                 contract_type_full = 'DIGITODD' if contract_type == 'CALL' else 'DIGITEVEN'
@@ -383,7 +394,6 @@ class DerivWebSocketClient:
                 logger.warning("BUY já enviado")
                 return
             self.pending_trade['proposal_id'] = pid
-        # Envia fora do lock
         self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
 
     def _on_buy_response(self, data):
@@ -443,8 +453,10 @@ class DerivWebSocketClient:
         if cid in self.active_trades:
             del self.active_trades[cid]
 
+    # ✅ Correcção 4: guardar self.auth_error
     def _on_api_error(self, data):
         err = data.get('error', {})
+        self.auth_error = err
         logger.error(f"API Error: {err.get('message', 'desconhecido')} (código: {err.get('code', 'N/A')})")
 
     def request_deposit(self, amount, currency, method):
