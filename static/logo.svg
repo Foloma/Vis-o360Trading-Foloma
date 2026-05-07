@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" width="120" height="40">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00f0b5;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#00c896;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Ícone gráfico de velas (candlestick) -->
+  <!-- Vela 1 -->
+  <rect x="4" y="22" width="5" height="12" fill="url(#g)" rx="1"/>
+  <rect x="5.5" y="18" width="2" height="4" fill="url(#g)"/>
+  <rect x="5.5" y="34" width="2" height="3" fill="url(#g)"/>
+
+  <!-- Vela 2 (alta) -->
+  <rect x="12" y="10" width="5" height="18" fill="url(#g)" rx="1"/>
+  <rect x="13.5" y="6" width="2" height="4" fill="url(#g)"/>
+  <rect x="13.5" y="28" width="2" height="4" fill="url(#g)"/>
+
+  <!-- Vela 3 -->
+  <rect x="20" y="16" width="5" height="14" fill="url(#g)" rx="1"/>
+  <rect x="21.5" y="12" width="2" height="4" fill="url(#g)"/>
+  <rect x="21.5" y="30" width="2" height="3" fill="url(#g)"/>
+
+  <!-- Linha de tendência ascendente -->
+  <polyline points="6,33 14,20 22,26" stroke="#00f0b5" stroke-width="1" fill="none" stroke-opacity="0.4" stroke-dasharray="2,2"/>
+
+  <!-- Texto FOLOMA -->
+  <text x="32" y="27" font-family="'Segoe UI', Arial, sans-serif" font-weight="800" font-size="16" fill="url(#g)" letter-spacing="2">FOLOMA</text>
+</svg>
