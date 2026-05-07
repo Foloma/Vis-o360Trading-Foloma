@@ -299,10 +299,9 @@ let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
 let isConnecting = false;
 let lastHybridState = null;
-let disconnectCount = 0;   // para reconexão automática
+let disconnectCount = 0;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
-// ══════════════ UTILS ══════════════
 function toast(msg,type='info',ms=4000){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
   clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',ms);
@@ -316,7 +315,6 @@ function playBeep() {
   }
 }
 
-// ══════════════ FUNÇÕES DE INICIALIZAÇÃO ══════════════
 function initSyms(){
   let h='';
   for(const[k,v]of Object.entries(syms))h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}', this)">${v}</button>`;
@@ -333,7 +331,6 @@ function startPolling(){
   _updateInterval = setInterval(updateAll, 5000);
 }
 
-// ══════════════ VERIFICAÇÃO HÍBRIDA ══════════════
 function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
     if (modo !== 'hybrid') return;
     const alertDiv = document.getElementById('hybridAlert');
@@ -362,7 +359,6 @@ function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
     }
 }
 
-// ══════════════ UPDATE / UI (com reconexão automática) ══════════════
 function updateAll(){
   fetch('/api/status').then(r=>r.json()).then(data=>{
     if(data.error)return;
@@ -374,12 +370,11 @@ function updateAll(){
       connectOAuthBtn.disabled = true;
       connectTokenBtn.disabled = true;
       document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
-      disconnectCount = 0;  // reset contador
+      disconnectCount = 0;
     } else {
       connectOAuthBtn.disabled = false;
       connectTokenBtn.disabled = false;
       document.getElementById('conSt').innerHTML = '';
-      // Lógica de reconexão automática
       disconnectCount++;
       if (disconnectCount >= 3 && !isConnecting) {
         disconnectCount = 0;
@@ -462,7 +457,6 @@ function updateDigits(digits){
   }
 }
 
-// ══════════════ CONEXÃO ══════════════
 async function conectar(){
   if(isConnecting){
     toast('⏳ A ligar já em curso...', 'info');
@@ -522,7 +516,6 @@ async function disconnectWebSocket(){
   }
 }
 
-// ══════════════ TROCA DE CONTA ══════════════
 async function selAcct(a) {
     if (a === selectedAcct) return;
     const oldAcct = selectedAcct;
@@ -543,7 +536,7 @@ async function selAcct(a) {
             document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
         } else {
             toast(`🔄 Conta ${a.toUpperCase()} activada. A reconectar...`, 'info');
-            conectar(); // força reconexão com a nova conta
+            conectar();
         }
     } catch (err) {
         toast('❌ Erro ao trocar conta', 'loss');
@@ -553,7 +546,6 @@ async function selAcct(a) {
     }
 }
 
-// ══════════════ TRADES / MARTINGALE ══════════════
 function trade(action){
   const amt=parseFloat(document.getElementById('amt').value);
   const endpoint = modo==='hybrid' ? '/api/trade/hybrid' : '/api/trade';
@@ -601,7 +593,6 @@ async function rstMgtDigit(){
   toast('🔄 Martingale resetado','info');
 }
 
-// ══════════════ AFILIADO (com ganhos) ══════════════
 function loadAffiliate() {
   fetch('/api/affiliate/link')
     .then(r => r.json())
@@ -638,7 +629,6 @@ function loadAffiliate() {
 
 function cpLink(){const l=document.getElementById('refLink');l.select();document.execCommand('copy');toast('✅ Link copiado!','win');}
 
-// ══════════════ HISTÓRICO ══════════════
 function loadHistory(){
   fetch('/api/report').then(r=>r.json()).then(data=>{
     if (!data || !data.resumo) return;
@@ -695,7 +685,6 @@ function loadHistory(){
   }).catch(()=>toast('❌ Erro ao carregar histórico','loss'));
 }
 
-// ══════════════ ADMIN ══════════════
 function loadAdminUsers(){
   fetch('/api/admin/users').then(r=>r.json()).then(data=>{
     if(data.error){ toast('❌ '+data.error,'loss'); return; }
@@ -724,7 +713,6 @@ function toggleUser(email, enable){
   });
 }
 
-// ══════════════ AUTENTICAÇÃO ══════════════
 function showTab(t){
   document.getElementById('loginForm').style.display=t==='login'?'block':'none';
   document.getElementById('registerForm').style.display=t==='register'?'block':'none';
@@ -765,7 +753,6 @@ function doReset(){
 }
 function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload());}
 
-// ══════════════ GUARDAR TOKEN ══════════════
 async function saveTokAcct(acctType){
   if(isConnecting){
     toast('Aguardar fim da conexão actual', 'info');
@@ -795,7 +782,6 @@ async function saveTokAcct(acctType){
   }
 }
 
-// ══════════════ MENU / UI ══════════════
 function toggleMenu(){document.getElementById('sideMenu').classList.toggle('open');document.getElementById('overlay').classList.toggle('show');}
 function showSec(s){
   ['dashboard','affiliate','payment','settings','admin','history'].forEach(x=>document.getElementById(x+'-section').classList.add('hidden'));
@@ -822,7 +808,6 @@ function setModo(m){
   }
 }
 
-// ══════════════ INICIALIZAÇÃO ══════════════
 (function(){
   const p=new URLSearchParams(location.search);
   if(p.get('connected')==='true'){
