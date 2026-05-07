@@ -363,10 +363,15 @@ function updateAll(){
   fetch('/api/status')
     .then(r => r.json())
     .then(data => {
+        console.log("📡 Status recebido:", data);
         if(data.error) return;
         const bot = data.bot;
-        if (!bot) return;
+        if (!bot) {
+            console.warn("Sem dados do bot");
+            return;
+        }
         const conn = bot.connected && bot.authorized;
+        console.log("🔌 Estado de conexão:", conn);
         const connectOAuthBtn = document.getElementById('connectOAuthBtn');
         const connectTokenBtn = document.getElementById('connectTokenBtn');
         if(conn){
