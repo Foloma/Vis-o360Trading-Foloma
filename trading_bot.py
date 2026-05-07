@@ -45,7 +45,7 @@ class TradingBot:
 
         self._client_connected = False
         self._client_authorized = False
-        self._state_lock = threading.Lock()   # ✅ lock para proteger stats e martingale
+        self._state_lock = threading.Lock()
 
     def start(self, client):
         self.client = client
@@ -208,7 +208,6 @@ class TradingBot:
                     self.consecutive_losses += 1
                     self.consecutive_wins = 0
                     logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
-                    # Aplica martingale automaticamente (se configurado)
                     self.apply_martingale_after_loss(loss)
 
             self.update_stats()
@@ -247,31 +246,32 @@ class TradingBot:
     def get_status(self):
         self.check_pending_trades()
         signal, confidence = self.calculate_signal()
-        connected = self._client_connected
-        authorized = self._client_authorized
-        if not connected and self.client:
-            connected = self.client.connected
-        if not authorized and self.client:
-            authorized = self.client.authorized
 
-        with self._state_lock:
-            return {
-                'connected': connected,
-                'authorized': authorized,
-                'price': self.current_price,
-                'symbol': self.current_symbol,
-                'balance': self.balance,
-                'currency': self.currency,
-                'signal': signal,
-                'confidence': round(confidence, 1),
-                'analysis': self.last_analysis,
-                'stats': self.stats,
-                'paused': self.paused,
-                'martingale': self.get_martingale_status(),
-                'daily_stats': self.daily_stats,
-                'consecutive_wins': self.consecutive_wins,
-                'consecutive_losses': self.consecutive_losses
-            }
+        # ✅ Lê directamente do cliente se existir, caso contrário usa os valores locais
+        if self.client:
+            connected = self.client.connected
+            authorized = self.client.authorized
+        else:
+            connected = self._client_connected
+            authorized = self._client_authorized
+
+        return {
+            'connected': connected,
+            'authorized': authorized,
+            'price': self.current_price,
+            'symbol': self.current_symbol,
+            'balance': self.balance,
+            'currency': self.currency,
+            'signal': signal,
+            'confidence': round(confidence, 1),
+            'analysis': self.last_analysis,
+            'stats': self.stats,
+            'paused': self.paused,
+            'martingale': self.get_martingale_status(),
+            'daily_stats': self.daily_stats,
+            'consecutive_wins': self.consecutive_wins,
+            'consecutive_losses': self.consecutive_losses
+        }
 
     def get_martingale_status(self):
         with self._state_lock:
