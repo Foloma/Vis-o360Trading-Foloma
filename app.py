@@ -1012,7 +1012,7 @@ def affiliate_stats():
 def affiliate_link():
     user = UserStore.get(session['user_email'])
     if user and user.get('referral_link_code'):
-        base_url = os.environ.get('BASE_URL', 'https://visao360-jf.onrender.com')
+        base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
         link = f"{base_url}/?ref={user['referral_link_code']}"
         return jsonify({'link': link, 'code': user['referral_link_code']})
     return jsonify({'error': 'Utilizador não encontrado'}), 404
@@ -1023,7 +1023,6 @@ def affiliate_earnings():
     user = UserStore.get(session['user_email'])
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
-    # Contar quantos referrals directos
     conn = sqlite3.connect(DATABASE_PATH)
     try:
         referred_count = conn.execute('SELECT COUNT(*) FROM referrals WHERE referrer_email = ?', (user['email'],)).fetchone()[0]
@@ -1033,10 +1032,9 @@ def affiliate_earnings():
         'earnings': user.get('affiliate_earnings', 0.0),
         'referral_link': user.get('referral_link_code', ''),
         'referred_count': referred_count,
-        'referred_list': []  # pode ser expandido se necessário
+        'referred_list': []
     })
 
-# ==================== NOVO ENDPOINT: DESCONECTAR WEBSOCKET (sem logout) ====================
 @app.route('/api/disconnect', methods=['POST'])
 @require_auth
 def disconnect_websocket():
