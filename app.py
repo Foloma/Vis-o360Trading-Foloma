@@ -349,7 +349,7 @@ def create_session(user_id, user, force=False):
     token = UserStore.get_active_token(user)
     if token:
         client.set_user_token(token)
-        client._connect_lock = threading.Lock()
+        # ❌ REMOVIDO: client._connect_lock = threading.Lock()  # já existe no __init__ do cliente
 
         def connect_and_validate():
             with client._connect_lock:
