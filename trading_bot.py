@@ -4,7 +4,7 @@ import threading
 from collections import deque
 from datetime import datetime
 from indicators import TechnicalIndicators
-from synthetics import digit_analyzer
+from synthetics import digit_analyzer   # fallback global (apenas se não injectado)
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -19,8 +19,9 @@ class TradingBot:
         self.currency = 'USD'
         self.paused = False
         self.last_analysis = {}
-        self.digit_analyzer = None
+        self.digit_analyzer = None   # será preenchido pelo app.py
 
+        # Estatísticas
         self.stats = {
             'total': 0, 'wins': 0, 'losses': 0,
             'win_rate': 0, 'profit_loss': 0,
@@ -44,7 +45,7 @@ class TradingBot:
 
         self._client_connected = False
         self._client_authorized = False
-        self._state_lock = threading.Lock()
+        self._state_lock = threading.Lock()   # ✅ lock para proteger stats e martingale
 
     def start(self, client):
         self.client = client
@@ -207,6 +208,7 @@ class TradingBot:
                     self.consecutive_losses += 1
                     self.consecutive_wins = 0
                     logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
+                    # Aplica martingale automaticamente (se configurado)
                     self.apply_martingale_after_loss(loss)
 
             self.update_stats()
@@ -245,31 +247,31 @@ class TradingBot:
     def get_status(self):
         self.check_pending_trades()
         signal, confidence = self.calculate_signal()
-        
-        # ✅ Força leitura directa do cliente para evitar desactualização
-        client_conn = self._client_connected
-        client_auth = self._client_authorized
-        if self.client:
-            client_conn = self.client.connected
-            client_auth = self.client.authorized
+        connected = self._client_connected
+        authorized = self._client_authorized
+        if not connected and self.client:
+            connected = self.client.connected
+        if not authorized and self.client:
+            authorized = self.client.authorized
 
-        return {
-            'connected': client_conn,
-            'authorized': client_auth,
-            'price': self.current_price,
-            'symbol': self.current_symbol,
-            'balance': self.balance,
-            'currency': self.currency,
-            'signal': signal,
-            'confidence': round(confidence, 1),
-            'analysis': self.last_analysis,
-            'stats': self.stats,
-            'paused': self.paused,
-            'martingale': self.get_martingale_status(),
-            'daily_stats': self.daily_stats,
-            'consecutive_wins': self.consecutive_wins,
-            'consecutive_losses': self.consecutive_losses
-        }
+        with self._state_lock:
+            return {
+                'connected': connected,
+                'authorized': authorized,
+                'price': self.current_price,
+                'symbol': self.current_symbol,
+                'balance': self.balance,
+                'currency': self.currency,
+                'signal': signal,
+                'confidence': round(confidence, 1),
+                'analysis': self.last_analysis,
+                'stats': self.stats,
+                'paused': self.paused,
+                'martingale': self.get_martingale_status(),
+                'daily_stats': self.daily_stats,
+                'consecutive_wins': self.consecutive_wins,
+                'consecutive_losses': self.consecutive_losses
+            }
 
     def get_martingale_status(self):
         with self._state_lock:
@@ -326,4 +328,5 @@ class TradingBot:
             self.consecutive_wins = 0
         logger.info("📊 Estatísticas e histórico resetados")
 
+# Instância global (não usada directamente, pois o app cria a sua própria)
 trading_bot = TradingBot()
