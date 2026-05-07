@@ -360,83 +360,86 @@ function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
 }
 
 function updateAll(){
-  fetch('/api/status').then(r=>r.json()).then(data=>{
-    if(data.error)return;
-    const bot=data.bot;if(!bot)return;
-    const conn=bot.connected&&bot.authorized;
-    const connectOAuthBtn = document.getElementById('connectOAuthBtn');
-    const connectTokenBtn = document.getElementById('connectTokenBtn');
-    if(conn){
-      connectOAuthBtn.disabled = true;
-      connectTokenBtn.disabled = true;
-      document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
-      disconnectCount = 0;
-    } else {
-      connectOAuthBtn.disabled = false;
-      connectTokenBtn.disabled = false;
-      document.getElementById('conSt').innerHTML = '';
-      disconnectCount++;
-      if (disconnectCount >= 3 && !isConnecting) {
-        disconnectCount = 0;
-        console.log("Tentativa automática de reconexão...");
-        conectar();
-      }
-    }
-    document.getElementById('sDot').className='dot'+(conn?' on':'');
-    document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
-    document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
-    document.getElementById('cur').textContent=bot.currency||'USD';
-    document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
-    const sig=bot.signal||'NEUTRAL';
-    document.getElementById('sigBadge').textContent=sig;
-    document.getElementById('sigBadge').className='signal '+(sig==='BUY'?'buy':(sig==='SELL'?'sell':''));
-    document.getElementById('rsS').textContent=(bot.analysis?.rsi?.score||0).toFixed(1);
-    document.getElementById('mcS').textContent=bot.analysis?.macd?.desc||'---';
-    document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
-    document.getElementById('bbS').textContent=bot.analysis?.bollinger?.desc||'---';
-    if(data.digits) {
-        updateDigits(data.digits);
-        const ticksRemaining = data.digits.ticks_remaining;
-        const btnOdd = document.getElementById('btnOdd');
-        const btnEven = document.getElementById('btnEven');
-        const blockerMsg = document.getElementById('digitBlockerMsg');
-        if (ticksRemaining !== undefined && ticksRemaining < 3) {
-            btnOdd.disabled = true;
-            btnEven.disabled = true;
-            blockerMsg.textContent = `⏳ Aguarde ${ticksRemaining} tick(s) para próximo dígito...`;
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(data => {
+        if(data.error) return;
+        const bot = data.bot;
+        if (!bot) return;
+        const conn = bot.connected && bot.authorized;
+        const connectOAuthBtn = document.getElementById('connectOAuthBtn');
+        const connectTokenBtn = document.getElementById('connectTokenBtn');
+        if(conn){
+          connectOAuthBtn.disabled = true;
+          connectTokenBtn.disabled = true;
+          document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
+          disconnectCount = 0;
         } else {
-            btnOdd.disabled = false;
-            btnEven.disabled = false;
-            blockerMsg.textContent = '';
+          connectOAuthBtn.disabled = false;
+          connectTokenBtn.disabled = false;
+          document.getElementById('conSt').innerHTML = '';
+          disconnectCount++;
+          if (disconnectCount >= 3 && !isConnecting) {
+            disconnectCount = 0;
+            console.log("Tentativa automática de reconexão...");
+            conectar();
+          }
         }
-    }
-    fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
-      const act = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
-      const nxt = '$' + (m.next_amount||0.35).toFixed(2);
-      document.getElementById('mgtAct').textContent = act;
-      document.getElementById('mgtNxt').textContent = nxt;
-      const dAct = document.getElementById('mgtActDig');
-      const dNxt = document.getElementById('mgtNxtDig');
-      if(dAct) dAct.textContent = act;
-      if(dNxt) dNxt.textContent = nxt;
-      if(m.active){
-        const ad = document.getElementById('amtDigit');
-        if(ad) ad.value = (m.next_amount||0.35).toFixed(2);
-      }
-    }).catch(console.error);
-    
-    if (modo === 'hybrid' && data.digits && bot.signal) {
-        const digitAnalysis = data.digits.analysis;
-        if (digitAnalysis && digitAnalysis.recommended_action) {
-            const combinedConf = ((bot.confidence || 0) + (digitAnalysis.confidence || 0)) / 2;
-            checkHybridAlert(bot.signal, digitAnalysis.recommended_action, combinedConf);
+        document.getElementById('sDot').className='dot'+(conn?' on':'');
+        document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
+        document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
+        document.getElementById('cur').textContent=bot.currency||'USD';
+        document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
+        const sig=bot.signal||'NEUTRAL';
+        document.getElementById('sigBadge').textContent=sig;
+        document.getElementById('sigBadge').className='signal '+(sig==='BUY'?'buy':(sig==='SELL'?'sell':''));
+        document.getElementById('rsS').textContent=(bot.analysis?.rsi?.score||0).toFixed(1);
+        document.getElementById('mcS').textContent=bot.analysis?.macd?.desc||'---';
+        document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
+        document.getElementById('bbS').textContent=bot.analysis?.bollinger?.desc||'---';
+        if(data.digits) {
+            updateDigits(data.digits);
+            const ticksRemaining = data.digits.ticks_remaining;
+            const btnOdd = document.getElementById('btnOdd');
+            const btnEven = document.getElementById('btnEven');
+            const blockerMsg = document.getElementById('digitBlockerMsg');
+            if (ticksRemaining !== undefined && ticksRemaining < 3) {
+                btnOdd.disabled = true;
+                btnEven.disabled = true;
+                blockerMsg.textContent = `⏳ Aguarde ${ticksRemaining} tick(s) para próximo dígito...`;
+            } else {
+                btnOdd.disabled = false;
+                btnEven.disabled = false;
+                blockerMsg.textContent = '';
+            }
+        }
+        fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
+          const act = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
+          const nxt = '$' + (m.next_amount||0.35).toFixed(2);
+          document.getElementById('mgtAct').textContent = act;
+          document.getElementById('mgtNxt').textContent = nxt;
+          const dAct = document.getElementById('mgtActDig');
+          const dNxt = document.getElementById('mgtNxtDig');
+          if(dAct) dAct.textContent = act;
+          if(dNxt) dNxt.textContent = nxt;
+          if(m.active){
+            const ad = document.getElementById('amtDigit');
+            if(ad) ad.value = (m.next_amount||0.35).toFixed(2);
+          }
+        }).catch(console.error);
+        
+        if (modo === 'hybrid' && data.digits && bot.signal) {
+            const digitAnalysis = data.digits.analysis;
+            if (digitAnalysis && digitAnalysis.recommended_action) {
+                const combinedConf = ((bot.confidence || 0) + (digitAnalysis.confidence || 0)) / 2;
+                checkHybridAlert(bot.signal, digitAnalysis.recommended_action, combinedConf);
+            } else {
+                checkHybridAlert(null, null, 0);
+            }
         } else {
-            checkHybridAlert(null, null, 0);
+            document.getElementById('hybridAlert')?.classList.add('hidden');
         }
-    } else {
-        document.getElementById('hybridAlert')?.classList.add('hidden');
-    }
-  }).catch(console.error);
+    }).catch(err => console.error("Erro no fetch status:", err));
 }
 function updateDigits(digits){
   if(!digits)return;
