@@ -54,7 +54,7 @@ class DerivWebSocketClient:
         self.loginid = None
         self._connecting = False
         self._connect_lock = threading.Lock()
-        self.auth_error = None   # ✅ inicializado como None
+        self.auth_error = None
 
     def set_digit_analyzer(self, a): self._digit_analyzer = a
     def set_trading_bot(self, b):
@@ -65,13 +65,15 @@ class DerivWebSocketClient:
         self.user_token = t
         logger.info("🔑 Token configurado")
 
+    # ✅ Correcção obrigatória: ordem correcta no connect()
     def connect(self):
-        self._stop_event.clear()
+        self._stop_event.set()                 # 1. sinaliza paragem
         if self._ws_thread and self._ws_thread.is_alive():
-            self._ws_thread.join(timeout=2)
-        self._close_connection()
+            self._ws_thread.join(timeout=2)    # 2. aguarda thread anterior
+        self._close_connection()               # 3. fecha ligação existente
+        self._stop_event.clear()               # 4. limpa sinal para nova conexão
         self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
-        self._ws_thread.start()
+        self._ws_thread.start()                # 5. inicia nova thread
         logger.info("🔌 Thread de ligação iniciada")
 
     def _run_forever(self):
@@ -117,7 +119,7 @@ class DerivWebSocketClient:
         self._last_tick_time = None
         self.state = self.ST_DISCONNECTED
         self.loginid = None
-        self.auth_error = None   # ✅ reset
+        self.auth_error = None
 
     def _authorize_and_wait(self, timeout=10):
         if not self.user_token:
@@ -133,7 +135,7 @@ class DerivWebSocketClient:
                 if data.get('msg_type') == 'authorize':
                     if data.get('error'):
                         logger.error(f"❌ Auth erro: {data['error']}")
-                        self.auth_error = data['error']   # ✅ guarda erro
+                        self.auth_error = data['error']
                         return False
                     logger.info("✅ Autorizado com sucesso!")
                     self.authorized = True
@@ -317,7 +319,7 @@ class DerivWebSocketClient:
 
     def place_trade(self, contract_type, amount, is_digit=False):
         if is_digit:
-            time.sleep(0.5)
+            time.sleep(0.5)   # atraso para dígitos, fora do lock
 
         with self._trade_lock:
             if not self.streaming:
@@ -450,7 +452,7 @@ class DerivWebSocketClient:
 
     def _on_api_error(self, data):
         err = data.get('error', {})
-        self.auth_error = err   # ✅ guarda como dicionário
+        self.auth_error = err
         logger.error(f"API Error: {err.get('message', 'desconhecido')} (código: {err.get('code', 'N/A')})")
 
     def request_deposit(self, amount, currency, method):
