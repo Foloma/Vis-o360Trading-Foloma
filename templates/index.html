@@ -114,7 +114,6 @@
 <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
 <div class="toast" id="toast"></div>
 
-<!-- Áudio para notificações híbridas (beep curto) -->
 <audio id="hybridSound" preload="auto">
   <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
 </audio>
@@ -219,7 +218,6 @@
       <div id="histList2"></div>
     </div>
   </div>
-  <!-- CORREÇÃO 3: Secção de pagamentos actualizada -->
   <div id="payment-section" class="hidden">
     <div class="card">
       <div class="card-title">💰 DEPÓSITO</div>
@@ -301,6 +299,7 @@ let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
 let isConnecting = false;
 let lastHybridState = null;
+let disconnectCount = 0;   // para reconexão automática
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 // ══════════════ UTILS ══════════════
@@ -358,12 +357,12 @@ function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
         }
         lastHybridState = true;
     } else {
-        if (lastHybridState !== false) lastHybridState = false;
+        lastHybridState = false;
         alertDiv.classList.add('hidden');
     }
 }
 
-// ══════════════ UPDATE / UI ══════════════
+// ══════════════ UPDATE / UI (com reconexão automática) ══════════════
 function updateAll(){
   fetch('/api/status').then(r=>r.json()).then(data=>{
     if(data.error)return;
@@ -375,10 +374,18 @@ function updateAll(){
       connectOAuthBtn.disabled = true;
       connectTokenBtn.disabled = true;
       document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
+      disconnectCount = 0;  // reset contador
     } else {
       connectOAuthBtn.disabled = false;
       connectTokenBtn.disabled = false;
       document.getElementById('conSt').innerHTML = '';
+      // Lógica de reconexão automática
+      disconnectCount++;
+      if (disconnectCount >= 3 && !isConnecting) {
+        disconnectCount = 0;
+        console.log("Tentativa automática de reconexão...");
+        conectar();
+      }
     }
     document.getElementById('sDot').className='dot'+(conn?' on':'');
     document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
@@ -426,7 +433,6 @@ function updateAll(){
     if (modo === 'hybrid' && data.digits && bot.signal) {
         const digitAnalysis = data.digits.analysis;
         if (digitAnalysis && digitAnalysis.recommended_action) {
-            // CORREÇÃO 1: Parênteses na soma das confianças
             const combinedConf = ((bot.confidence || 0) + (digitAnalysis.confidence || 0)) / 2;
             checkHybridAlert(bot.signal, digitAnalysis.recommended_action, combinedConf);
         } else {
@@ -449,7 +455,7 @@ function updateDigits(digits){
     const bd=document.getElementById('bigD'), bp=document.getElementById('bigP');
     bd.textContent=newest;bd.className='big-d '+(isOdd?'odd':'even');
     bp.textContent=isOdd?'ÍMPAR':'PAR';bp.className='big-p '+(isOdd?'odd':'even');
-    let html='';recent.forEach((d,i)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
+    let html='';recent.forEach((d)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
     document.getElementById('histRow').innerHTML=html;
     const scroll = document.getElementById('histScroll');
     scroll.scrollLeft = scroll.scrollWidth;
@@ -502,10 +508,10 @@ async function connectWithDeriv(){
   if(selectedAcct === 'real' && !confirm(confirmMsg)) return;
   const r = await fetch(`/api/auth/deriv_oauth_url?account_type=${selectedAcct}`);
   const d = await r.json();
-  window.location.href = d.url;
+  if(d.url) window.location.href = d.url;
+  else toast('❌ Erro ao obter URL OAuth', 'loss');
 }
 
-// CORREÇÃO 2: disconnect apenas do WebSocket (endpoint /api/disconnect)
 async function disconnectWebSocket(){
   const r = await fetch('/api/disconnect', {method:'POST'});
   if(r.ok){
@@ -537,6 +543,7 @@ async function selAcct(a) {
             document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
         } else {
             toast(`🔄 Conta ${a.toUpperCase()} activada. A reconectar...`, 'info');
+            conectar(); // força reconexão com a nova conta
         }
     } catch (err) {
         toast('❌ Erro ao trocar conta', 'loss');
@@ -594,7 +601,7 @@ async function rstMgtDigit(){
   toast('🔄 Martingale resetado','info');
 }
 
-// ══════════════ AFILIADO ══════════════
+// ══════════════ AFILIADO (com ganhos) ══════════════
 function loadAffiliate() {
   fetch('/api/affiliate/link')
     .then(r => r.json())
@@ -681,25 +688,7 @@ function loadHistory(){
     if(list) list.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
     const sum2 = document.getElementById('histSummary2');
     if(sum2) {
-      sum2.innerHTML = sum ? sum.innerHTML : `
-        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-          <div style="font-size:10px;color:var(--muted)">TOTAL TRADES</div>
-          <div style="font-size:20px;font-weight:bold">${s.total_trades}</div>
-        </div>
-        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-          <div style="font-size:10px;color:var(--muted)">WIN RATE</div>
-          <div style="font-size:20px;font-weight:bold;color:var(--accent)">${s.win_rate}%</div>
-        </div>
-        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-          <div style="font-size:10px;color:var(--muted)">LUCRO/PERDA</div>
-          <div style="font-size:20px;font-weight:bold;color:${s.profit_loss>=0?'var(--accent)':'var(--danger)'}">
-            ${s.profit_loss>=0?'+':''}$${s.profit_loss.toFixed(2)}
-          </div>
-        </div>
-        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-          <div style="font-size:10px;color:var(--muted)">HOJE</div>
-          <div style="font-size:20px;font-weight:bold">${s.trades_hoje}</div>
-        </div>`;
+      sum2.innerHTML = sum.innerHTML;
     }
     const list2 = document.getElementById('histList2');
     if(list2) list2.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
