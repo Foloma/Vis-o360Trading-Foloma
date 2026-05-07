@@ -349,7 +349,7 @@ def create_session(user_id, user, force=False):
     token = UserStore.get_active_token(user)
     if token:
         client.set_user_token(token)
-        # ❌ REMOVIDO: client._connect_lock = threading.Lock()  # já existe no __init__ do cliente
+        # ✅ NÃO criar _connect_lock aqui (já existe no cliente)
 
         def connect_and_validate():
             with client._connect_lock:
@@ -641,7 +641,12 @@ def status():
         if user and UserStore.get_active_token(user):
             sess = create_session(user_id, user)
         else:
-            return jsonify({'bot': {}, 'digits': {}, 'symbols': config.AVAILABLE_SYMBOLS})
+            # ✅ Garante que mesmo sem sessão, o frontend recebe connected=False
+            return jsonify({
+                'bot': {'connected': False, 'authorized': False},
+                'digits': {},
+                'symbols': config.AVAILABLE_SYMBOLS
+            })
     client = sess['client']
     bot = sess['trading_bot']
     analyzer = sess['digit_analyzer']
@@ -704,7 +709,6 @@ def oauth_callback():
             return redirect('/?error=invalid_state')
         state_data = oauth_states.pop(state_id)
 
-        # Limpa estados expirados (>10 min)
         now = time.time()
         expired = [k for k, v in oauth_states.items() if now - v.get('created_at', 0) > 600]
         for k in expired:
