@@ -1,9 +1,10 @@
 import logging
 import time
+import threading
 from collections import deque
 from datetime import datetime
 from indicators import TechnicalIndicators
-from synthetics import digit_analyzer   # fallback global
+from synthetics import digit_analyzer   # fallback global (apenas se não injectado)
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ class TradingBot:
         self.last_analysis = {}
         self.digit_analyzer = None   # será preenchido pelo app.py
 
+        # Estatísticas
         self.stats = {
             'total': 0, 'wins': 0, 'losses': 0,
             'win_rate': 0, 'profit_loss': 0,
@@ -43,6 +45,7 @@ class TradingBot:
 
         self._client_connected = False
         self._client_authorized = False
+        self._state_lock = threading.Lock()   # ✅ lock para proteger stats e martingale
 
     def start(self, client):
         self.client = client
@@ -62,7 +65,6 @@ class TradingBot:
         self.current_symbol = tick['symbol']
         self.indicators.add_price(self.current_price, self.current_symbol)
 
-        # Alimentar o analisador de dígitos da sessão (ou o global como fallback)
         if 'R_' in self.current_symbol:
             analyzer = self.digit_analyzer if self.digit_analyzer else digit_analyzer
             analyzer.add_tick(self.current_price)
@@ -130,25 +132,27 @@ class TradingBot:
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
         self.trades.append(trade_data)
-        self.stats['total'] += 1
-        self.stats['total_invested'] += trade_data['amount']
-        self.daily_stats['trades'] += 1
+        with self._state_lock:
+            self.stats['total'] += 1
+            self.stats['total_invested'] += trade_data['amount']
+            self.daily_stats['trades'] += 1
         self.update_stats()
 
     def update_stats(self):
-        wins = losses = profit_loss = 0
-        for trade in self.trades:
-            if trade.get('result') == 'win':
-                wins += 1
-                profit_loss += trade.get('profit', 0)
-            elif trade.get('result') == 'loss':
-                losses += 1
-                profit_loss -= trade.get('amount', 0)
-        self.stats['wins'] = wins
-        self.stats['losses'] = losses
-        self.stats['win_rate'] = (wins / self.stats['total']) * 100 if self.stats['total'] > 0 else 0
-        self.stats['profit_loss'] = profit_loss
-        self.stats['total_return'] = (profit_loss / self.stats['total_invested']) * 100 if self.stats['total_invested'] > 0 else 0
+        with self._state_lock:
+            wins = losses = profit_loss = 0
+            for trade in self.trades:
+                if trade.get('result') == 'win':
+                    wins += 1
+                    profit_loss += trade.get('profit', 0)
+                elif trade.get('result') == 'loss':
+                    losses += 1
+                    profit_loss -= trade.get('amount', 0)
+            self.stats['wins'] = wins
+            self.stats['losses'] = losses
+            self.stats['win_rate'] = (wins / self.stats['total']) * 100 if self.stats['total'] > 0 else 0
+            self.stats['profit_loss'] = profit_loss
+            self.stats['total_return'] = (profit_loss / self.stats['total_invested']) * 100 if self.stats['total_invested'] > 0 else 0
 
     def check_pending_trades(self):
         now = datetime.now()
@@ -166,56 +170,46 @@ class TradingBot:
 
     def on_trade_result(self, result):
         try:
-            logger.info(f"📊 [BOT] Processando resultado: {result}")
             contract_id = result.get('contract_id')
             profit = result.get('profit', 0)
             is_win = profit > 0
 
             target_trade = None
             if contract_id:
-                for trade in reversed(list(self.trades)):
+                for trade in self.trades:
                     if trade.get('contract_id') == contract_id:
                         target_trade = trade
                         break
 
-            if target_trade is None:
-                for trade in reversed(list(self.trades)):
-                    if trade.get('result') == 'pending':
-                        target_trade = trade
-                        break
-
-            if target_trade is None:
-                logger.warning("⚠️ Nenhum trade pendente encontrado para este resultado")
+            if not target_trade:
+                logger.warning(f"⚠️ Nenhum trade pendente com contract_id {contract_id}. Ignorando.")
                 return
 
             if target_trade.get('result') != 'pending':
                 logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
                 return
 
-            if is_win:
-                target_trade['result'] = 'win'
-                target_trade['profit'] = profit
-                self.daily_stats['wins'] += 1
-                self.daily_stats['profit_loss'] += profit
-                self.consecutive_wins += 1
-                self.consecutive_losses = 0
-                logger.info(f"✅ GANHO! +${profit:.2f} | Vitórias consecutivas: {self.consecutive_wins}")
-                self.reset_martingale()                 # ✅ reset após ganho
-            else:
-                loss = target_trade.get('amount', 0)
-                target_trade['result'] = 'loss'
-                target_trade['profit'] = 0
-                self.daily_stats['losses'] += 1
-                self.daily_stats['profit_loss'] -= loss
-                self.consecutive_losses += 1
-                self.consecutive_wins = 0
-                logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
-                # ✅ aplicar martingale após perda
-                can_martingale, mg_result = self.apply_martingale_after_loss(loss)
-                if can_martingale:
-                    logger.info(mg_result['message'])
+            with self._state_lock:
+                if is_win:
+                    target_trade['result'] = 'win'
+                    target_trade['profit'] = profit
+                    self.daily_stats['wins'] += 1
+                    self.daily_stats['profit_loss'] += profit
+                    self.consecutive_wins += 1
+                    self.consecutive_losses = 0
+                    logger.info(f"✅ GANHO! +${profit:.2f} | Vitórias consecutivas: {self.consecutive_wins}")
+                    self.reset_martingale()
                 else:
-                    logger.warning(f"⛔ Martingale parado: {mg_result}")
+                    loss = target_trade.get('amount', 0)
+                    target_trade['result'] = 'loss'
+                    target_trade['profit'] = 0
+                    self.daily_stats['losses'] += 1
+                    self.daily_stats['profit_loss'] -= loss
+                    self.consecutive_losses += 1
+                    self.consecutive_wins = 0
+                    logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
+                    # Aplica martingale automaticamente (se configurado)
+                    self.apply_martingale_after_loss(loss)
 
             self.update_stats()
             if self.client:
@@ -228,26 +222,27 @@ class TradingBot:
         self.check_pending_trades()
         hoje = datetime.now().date()
         trades_hoje = [t for t in self.trades if t['timestamp'].date() == hoje]
-        return {
-            'resumo': {
-                'total_trades': self.stats['total'],
-                'trades_hoje': len(trades_hoje),
-                'wins': self.stats['wins'],
-                'losses': self.stats['losses'],
-                'win_rate': round(self.stats['win_rate'], 2),
-                'profit_loss': round(self.stats['profit_loss'], 2),
-                'total_invested': round(self.stats['total_invested'], 2),
-                'total_return': round(self.stats['total_return'], 2)
-            },
-            'historico': [{
-                'time': t['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
-                'symbol': t.get('symbol', ''),
-                'action': t.get('action', ''),
-                'amount': t.get('amount', 0),
-                'result': t.get('result', 'pending'),
-                'profit': t.get('profit', 0)
-            } for t in list(self.trades)[-50:]]
-        }
+        with self._state_lock:
+            return {
+                'resumo': {
+                    'total_trades': self.stats['total'],
+                    'trades_hoje': len(trades_hoje),
+                    'wins': self.stats['wins'],
+                    'losses': self.stats['losses'],
+                    'win_rate': round(self.stats['win_rate'], 2),
+                    'profit_loss': round(self.stats['profit_loss'], 2),
+                    'total_invested': round(self.stats['total_invested'], 2),
+                    'total_return': round(self.stats['total_return'], 2)
+                },
+                'historico': [{
+                    'time': t['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'symbol': t.get('symbol', ''),
+                    'action': t.get('action', ''),
+                    'amount': t.get('amount', 0),
+                    'result': t.get('result', 'pending'),
+                    'profit': t.get('profit', 0)
+                } for t in list(self.trades)[-50:]]
+            }
 
     def get_status(self):
         self.check_pending_trades()
@@ -259,73 +254,79 @@ class TradingBot:
         if not authorized and self.client:
             authorized = self.client.authorized
 
-        return {
-            'connected': connected,
-            'authorized': authorized,
-            'price': self.current_price,
-            'symbol': self.current_symbol,
-            'balance': self.balance,
-            'currency': self.currency,
-            'signal': signal,
-            'confidence': round(confidence, 1),
-            'analysis': self.last_analysis,
-            'stats': self.stats,
-            'paused': self.paused,
-            'martingale': self.get_martingale_status(),
-            'daily_stats': self.daily_stats,
-            'consecutive_wins': self.consecutive_wins,
-            'consecutive_losses': self.consecutive_losses
-        }
+        with self._state_lock:
+            return {
+                'connected': connected,
+                'authorized': authorized,
+                'price': self.current_price,
+                'symbol': self.current_symbol,
+                'balance': self.balance,
+                'currency': self.currency,
+                'signal': signal,
+                'confidence': round(confidence, 1),
+                'analysis': self.last_analysis,
+                'stats': self.stats,
+                'paused': self.paused,
+                'martingale': self.get_martingale_status(),
+                'daily_stats': self.daily_stats,
+                'consecutive_wins': self.consecutive_wins,
+                'consecutive_losses': self.consecutive_losses
+            }
 
     def get_martingale_status(self):
-        return {
-            'active': self.martingale['active'],
-            'step': self.martingale['step'],
-            'original_amount': self.martingale['original_amount'],
-            'next_amount': self.get_martingale_amount(config.DEFAULT_STAKE),
-            'max_steps': config.MARTINGALE_CONFIG.get('max_steps', 2),
-            'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
-            'enabled': config.MARTINGALE_CONFIG.get('enabled', True)
-        }
+        with self._state_lock:
+            return {
+                'active': self.martingale['active'],
+                'step': self.martingale['step'],
+                'original_amount': self.martingale['original_amount'],
+                'next_amount': self.get_martingale_amount(config.DEFAULT_STAKE),
+                'max_steps': config.MARTINGALE_CONFIG.get('max_steps', 2),
+                'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
+                'enabled': config.MARTINGALE_CONFIG.get('enabled', True)
+            }
 
     def get_martingale_amount(self, base_amount):
-        if not self.martingale['active'] or self.martingale['step'] == 0:
-            return base_amount
-        multiplier = config.MARTINGALE_CONFIG.get('multiplier', 2.0)
-        return base_amount * (multiplier ** self.martingale['step'])
+        with self._state_lock:
+            if not self.martingale['active'] or self.martingale['step'] == 0:
+                return base_amount
+            multiplier = config.MARTINGALE_CONFIG.get('multiplier', 2.0)
+            return base_amount * (multiplier ** self.martingale['step'])
 
     def apply_martingale_after_loss(self, last_trade_amount):
-        if not config.MARTINGALE_CONFIG.get('enabled', True):
-            return False, "Martingale desativado"
-        max_steps = config.MARTINGALE_CONFIG.get('max_steps', 2)
-        if self.martingale['step'] >= max_steps:
-            return False, f"Máximo de {max_steps} perdas consecutivas atingido"
-        self.martingale['step'] += 1
-        self.martingale['active'] = True
-        self.martingale['original_amount'] = last_trade_amount
-        nxt = self.get_martingale_amount(last_trade_amount)
-        return True, {
-            'step': self.martingale['step'],
-            'next_amount': nxt,
-            'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
-            'message': f"📈 Martingale ativo - Passo {self.martingale['step']}/{max_steps} | Próximo: ${nxt:.2f}"
-        }
+        with self._state_lock:
+            if not config.MARTINGALE_CONFIG.get('enabled', True):
+                return False, "Martingale desativado"
+            max_steps = config.MARTINGALE_CONFIG.get('max_steps', 2)
+            if self.martingale['step'] >= max_steps:
+                return False, f"Máximo de {max_steps} perdas consecutivas atingido"
+            self.martingale['step'] += 1
+            self.martingale['active'] = True
+            self.martingale['original_amount'] = last_trade_amount
+            nxt = self.get_martingale_amount(last_trade_amount)
+            return True, {
+                'step': self.martingale['step'],
+                'next_amount': nxt,
+                'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
+                'message': f"📈 Martingale ativo - Passo {self.martingale['step']}/{max_steps} | Próximo: ${nxt:.2f}"
+            }
 
     def reset_martingale(self):
-        self.martingale = {'active': False, 'step': 0, 'original_amount': 0, 'last_result': None}
-        self.consecutive_losses = 0
-        self.consecutive_wins = 0
+        with self._state_lock:
+            self.martingale = {'active': False, 'step': 0, 'original_amount': 0, 'last_result': None}
+            self.consecutive_losses = 0
+            self.consecutive_wins = 0
 
     def reset_stats(self):
-        self.stats = {
-            'total': 0, 'wins': 0, 'losses': 0,
-            'win_rate': 0, 'profit_loss': 0,
-            'total_invested': 0, 'total_return': 0
-        }
-        self.trades.clear()
-        self.consecutive_losses = 0
-        self.consecutive_wins = 0
+        with self._state_lock:
+            self.stats = {
+                'total': 0, 'wins': 0, 'losses': 0,
+                'win_rate': 0, 'profit_loss': 0,
+                'total_invested': 0, 'total_return': 0
+            }
+            self.trades.clear()
+            self.consecutive_losses = 0
+            self.consecutive_wins = 0
         logger.info("📊 Estatísticas e histórico resetados")
 
-
+# Instância global (não usada directamente, pois o app cria a sua própria)
 trading_bot = TradingBot()
