@@ -310,7 +310,7 @@ function playBeep() {
   const audio = document.getElementById('hybridSound');
   if(audio) {
     audio.currentTime = 0;
-    audio.play().catch(e => console.log("Som não disponível", e));
+    audio.play().catch(() => {});
   }
 }
 
@@ -328,6 +328,12 @@ function chgSym(s, el){
 function startPolling(){
   if(_updateInterval) return;
   _updateInterval = setInterval(updateAll, 5000);
+}
+function stopPolling(){
+  if(_updateInterval){
+    clearInterval(_updateInterval);
+    _updateInterval = null;
+  }
 }
 
 function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
@@ -358,20 +364,14 @@ function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
     }
 }
 
-// ✅ updateAll sem disconnectCount e sem reconexão automática
 function updateAll(){
   fetch('/api/status')
     .then(r => r.json())
     .then(data => {
-        console.log("📡 Status recebido:", data);
         if(data.error) return;
         const bot = data.bot;
-        if (!bot) {
-            console.warn("Sem dados do bot");
-            return;
-        }
+        if (!bot) return;
         const conn = bot.connected && bot.authorized;
-        console.log("🔌 Estado de conexão:", conn);
         const connectOAuthBtn = document.getElementById('connectOAuthBtn');
         const connectTokenBtn = document.getElementById('connectTokenBtn');
         if(conn){
@@ -424,7 +424,7 @@ function updateAll(){
             const ad = document.getElementById('amtDigit');
             if(ad) ad.value = (m.next_amount||0.35).toFixed(2);
           }
-        }).catch(console.error);
+        }).catch(()=>{});
         
         if (modo === 'hybrid' && data.digits && bot.signal) {
             const digitAnalysis = data.digits.analysis;
@@ -437,7 +437,7 @@ function updateAll(){
         } else {
             document.getElementById('hybridAlert')?.classList.add('hidden');
         }
-    }).catch(err => console.error("Erro no fetch status:", err));
+    }).catch(()=>{});
 }
 function updateDigits(digits){
   if(!digits)return;
@@ -483,6 +483,8 @@ async function conectar(){
     } else {
       toast('✅ Pedido de conexão enviado','win');
       document.getElementById('conSt').textContent = '🔄 A aguardar...';
+      // ✅ Inicia polling apenas após conectar (se já não estiver activo)
+      startPolling();
     }
   } catch(e) {
     toast('❌ Erro de rede','loss');
@@ -517,7 +519,6 @@ async function disconnectWebSocket(){
   }
 }
 
-// ✅ selAcct sem chamar conectar() no sucesso
 async function selAcct(a) {
     if (a === selectedAcct) return;
     const oldAcct = selectedAcct;
@@ -538,7 +539,6 @@ async function selAcct(a) {
             document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
         } else {
             toast(`🔄 Conta ${a.toUpperCase()} activada.`, 'info');
-            // ✅ Não chama conectar() automaticamente
         }
     } catch (err) {
         toast('❌ Erro ao trocar conta', 'loss');
@@ -680,7 +680,26 @@ function loadHistory(){
     if(list) list.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
     const sum2 = document.getElementById('histSummary2');
     if(sum2) {
-      sum2.innerHTML = sum.innerHTML;
+      // ✅ não depende de sum, simplesmente preenche
+      sum2.innerHTML = `
+        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+          <div style="font-size:10px;color:var(--muted)">TOTAL TRADES</div>
+          <div style="font-size:20px;font-weight:bold">${s.total_trades}</div>
+        </div>
+        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+          <div style="font-size:10px;color:var(--muted)">WIN RATE</div>
+          <div style="font-size:20px;font-weight:bold;color:var(--accent)">${s.win_rate}%</div>
+        </div>
+        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+          <div style="font-size:10px;color:var(--muted)">LUCRO/PERDA</div>
+          <div style="font-size:20px;font-weight:bold;color:${s.profit_loss>=0?'var(--accent)':'var(--danger)'}">
+            ${s.profit_loss>=0?'+':''}$${s.profit_loss.toFixed(2)}
+          </div>
+        </div>
+        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+          <div style="font-size:10px;color:var(--muted)">HOJE</div>
+          <div style="font-size:20px;font-weight:bold">${s.trades_hoje}</div>
+        </div>`;
     }
     const list2 = document.getElementById('histList2');
     if(list2) list2.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
@@ -731,9 +750,11 @@ function doLogin(){
     document.getElementById('authModal').style.display='none';
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
-    initSyms();loadAffiliate();startPolling();loadHistory();
+    initSyms();loadAffiliate();loadHistory();
     if(d.user?.has_deriv_token){
       setTimeout(() => conectar(), 1000);
+    } else {
+      // se não tem token, não inicia polling (só quando conectar)
     }
   });
 }
@@ -817,6 +838,7 @@ function setModo(m){
     setTimeout(()=>{
       fetch('/api/status').then(r=>r.json()).then(data=>{
         if(!data.bot?.authorized) conectar();
+        else startPolling();
       }).catch(()=>conectar());
     },2000);
     history.replaceState({},'',location.pathname);
@@ -835,7 +857,7 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     document.getElementById('authModal').style.display='none';
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';
-    initSyms();loadAffiliate();startPolling();loadHistory();
+    initSyms();loadAffiliate();loadHistory();
     if(d.user?.has_deriv_token){
       setTimeout(() => conectar(), 1500);
     }
