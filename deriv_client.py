@@ -16,10 +16,9 @@ class DerivWebSocketClient:
     def __init__(self, config, on_tick_callback=None, on_result_callback=None):
         self.config = config
         self.ws = None
-        self._connected = False
-        self._authorized = False
-        self._streaming = False
-        self._state_lock = threading.Lock()   # Protege flags connected/authorized/streaming
+        self.connected = False
+        self.authorized = False
+        self.streaming = False
         self.balance = 0
         self.currency = 'USD'
         self.current_symbol = 'R_100'
@@ -33,9 +32,8 @@ class DerivWebSocketClient:
         self.active_trades = {}
         self.pending_trade = None
         self.pending_trade_time = 0
-        self._trade_lock = threading.Lock()          # Para sequência de trade (proposta → compra)
-        self._pending_lock = threading.Lock()        # Para pending_trade
-        self._req_lock = threading.Lock()            # Para next_req
+        self._trade_lock = threading.Lock()
+        self._pending_lock = threading.Lock()          # ✅ lock para pending_trade
         self._digit_analyzer = None
         self._balance_subscribed = False
         self._stop_event = threading.Event()
@@ -54,11 +52,7 @@ class DerivWebSocketClient:
 
         self.loginid = None
         self._connecting = False
-        self._connect_lock = threading.Lock()
-        self.auth_error = None
-
-        # Controlo de subscrição de símbolos
-        self._current_symbol_lock = threading.Lock()
+        self._connect_lock = threading.Lock()          # ✅ lock para conexão
 
     def set_digit_analyzer(self, a): self._digit_analyzer = a
     def set_trading_bot(self, b):
@@ -69,40 +63,10 @@ class DerivWebSocketClient:
         self.user_token = t
         logger.info("🔑 Token configurado")
 
-    # ── Propriedades sincronizadas ─────────────────────────────────────────
-    @property
-    def connected(self):
-        with self._state_lock:
-            return self._connected
-    @connected.setter
-    def connected(self, value):
-        with self._state_lock:
-            self._connected = value
-
-    @property
-    def authorized(self):
-        with self._state_lock:
-            return self._authorized
-    @authorized.setter
-    def authorized(self, value):
-        with self._state_lock:
-            self._authorized = value
-
-    @property
-    def streaming(self):
-        with self._state_lock:
-            return self._streaming
-    @streaming.setter
-    def streaming(self, value):
-        with self._state_lock:
-            self._streaming = value
-
-    # ── Conexão ───────────────────────────────────────────────────────────
     def connect(self):
-        self._stop_event.set()
+        self._stop_event.clear()
         if self._ws_thread and self._ws_thread.is_alive():
             self._ws_thread.join(timeout=2)
-        self._stop_event.clear()
         self._close_connection()
         self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
         self._ws_thread.start()
@@ -151,7 +115,6 @@ class DerivWebSocketClient:
         self._last_tick_time = None
         self.state = self.ST_DISCONNECTED
         self.loginid = None
-        self.auth_error = None
 
     def _authorize_and_wait(self, timeout=10):
         if not self.user_token:
@@ -167,7 +130,6 @@ class DerivWebSocketClient:
                 if data.get('msg_type') == 'authorize':
                     if data.get('error'):
                         logger.error(f"❌ Auth erro: {data['error']}")
-                        self.auth_error = data['error']
                         return False
                     logger.info("✅ Autorizado com sucesso!")
                     self.authorized = True
@@ -189,12 +151,6 @@ class DerivWebSocketClient:
     def _close_connection(self):
         if self.ws:
             try:
-                # Envia forget para todos os ticks subscritos
-                for sym in list(self.subscribed_symbols):
-                    try:
-                        self.ws.send(json.dumps({"forget": sym, "req_id": self._next_req()}))
-                    except:
-                        pass
                 self.ws.send(json.dumps({"forget_all": "ticks", "req_id": self._next_req()}))
             except Exception:
                 pass
@@ -242,19 +198,14 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
-    # ── Keep‑alive (corrigido) ───────────────────────────────────────────
     def _start_keep_alive(self):
-        """Inicia a thread de keep-alive se não estiver já em execução."""
-        if self._keep_alive_thread is not None and self._keep_alive_thread.is_alive():
-            return
         self._keep_alive_stop.clear()
+        self._stop_keep_alive()
         self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
         self._keep_alive_thread.start()
 
     def _stop_keep_alive(self):
         self._keep_alive_stop.set()
-        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
-            self._keep_alive_thread.join(timeout=1)
 
     def _keep_alive_loop(self):
         while not self._stop_event.is_set() and not self._keep_alive_stop.is_set():
@@ -268,53 +219,39 @@ class DerivWebSocketClient:
             else:
                 break
 
-    # ── Watchdog (corrigido) ─────────────────────────────────────────────
     def _start_watchdog(self):
-        if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
-            return
         self._watchdog_stop.clear()
+        self._stop_watchdog()
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
     def _stop_watchdog(self):
         self._watchdog_stop.set()
-        if self._watchdog_thread and self._watchdog_thread.is_alive():
-            self._watchdog_thread.join(timeout=1)
 
     def _watchdog_loop(self):
         while not self._stop_event.is_set() and not self._watchdog_stop.is_set():
             if self._watchdog_stop.wait(timeout=10):
                 break
             if not self.ws or not self.connected:
-                continue
+                break
             if self.streaming and self._last_tick_time is not None:
                 if time.time() - self._last_tick_time > 45:
                     logger.warning("🛑 Watchdog: >45s sem ticks. Forçando reconexão.")
-                    # Não chama _close_connection directamente; usa o evento para reiniciar o loop
-                    self._stop_event.set()  # força reinício do _run_forever
+                    self._close_connection()
                     break
             elif not self.streaming:
                 if self._auth_time and time.time() - self._auth_time > 90:
                     logger.warning("🛑 Watchdog: 90s ligado sem stream. Forçando reconexão.")
-                    self._stop_event.set()
+                    self._close_connection()
                     break
 
-    # ── Mudança de símbolo (com forget) ───────────────────────────────────
     def change_symbol(self, symbol):
-        with self._current_symbol_lock:
-            old_sym = self.current_symbol
-            if old_sym and old_sym != symbol and old_sym in self.subscribed_symbols:
-                try:
-                    if self.ws and self.connected:
-                        self.ws.send(json.dumps({"forget": old_sym, "req_id": self._next_req()}))
-                        self.subscribed_symbols.discard(old_sym)
-                except Exception as e:
-                    logger.warning(f"Não foi possível esquecer tick {old_sym}: {e}")
-            self.current_symbol = symbol
-            if self.authorized:
-                self._subscribe_ticks(symbol)
+        if symbol in self.subscribed_symbols:
+            self.subscribed_symbols.discard(symbol)
+        self.current_symbol = symbol
+        if self.authorized:
+            self._subscribe_ticks(symbol)
 
-    # ── Saldo ────────────────────────────────────────────────────────────
     def _subscribe_balance(self):
         try:
             self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
@@ -340,7 +277,6 @@ class DerivWebSocketClient:
             except Exception as e:
                 logger.error(f"Erro ao pedir saldo: {e}")
 
-    # ── Ticks ────────────────────────────────────────────────────────────
     def _subscribe_ticks(self, symbol):
         if not self.authorized:
             return
@@ -349,6 +285,7 @@ class DerivWebSocketClient:
         try:
             self.ws.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": self._next_req()}))
             self.subscribed_symbols.add(symbol)
+            self.current_symbol = symbol
             logger.info(f"📊 Subscrição de ticks para {symbol} enviada")
         except Exception as e:
             logger.error(f"Erro subs. ticks: {e}")
@@ -369,13 +306,10 @@ class DerivWebSocketClient:
                 'timestamp': tick.get('epoch', time.time())
             })
 
-    # ── Requisições ──────────────────────────────────────────────────────
     def _next_req(self):
-        with self._req_lock:
-            self._req_counter += 1
-            return self._req_counter
+        self._req_counter += 1
+        return self._req_counter
 
-    # ── Trade ────────────────────────────────────────────────────────────
     def place_trade(self, contract_type, amount, is_digit=False):
         with self._trade_lock:
             if not self.streaming:
@@ -396,17 +330,17 @@ class DerivWebSocketClient:
                     else:
                         logger.warning("Trade pendente"); return False
 
-            # Pequeno atraso para dígitos (fora do lock não resolve concorrência, mas é melhor que nada)
-            if is_digit:
-                time.sleep(0.5)
-
             self._last_trade_time = time.time()
 
-            duration = self.config.DIGIT_CONTRACT_DURATION if is_digit else self.config.CONTRACT_DURATION
-            duration_unit = 't' if is_digit else self.config.CONTRACT_DURATION_UNIT
             if is_digit:
+                # ✅ Pequeno atraso para evitar usar o dígito actual
+                time.sleep(0.5)
+                duration = self.config.DIGIT_CONTRACT_DURATION
+                duration_unit = 't'
                 contract_type_full = 'DIGITODD' if contract_type == 'CALL' else 'DIGITEVEN'
             else:
+                duration = self.config.CONTRACT_DURATION
+                duration_unit = self.config.CONTRACT_DURATION_UNIT
                 contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
 
             req_id = self._next_req()
@@ -432,7 +366,6 @@ class DerivWebSocketClient:
                 return False
 
     def _on_proposal(self, data):
-        # Guarda os dados necessários e liberta o lock antes de enviar buy
         with self._pending_lock:
             if self.pending_trade is None:
                 return
@@ -450,21 +383,8 @@ class DerivWebSocketClient:
                 logger.warning("BUY já enviado")
                 return
             self.pending_trade['proposal_id'] = pid
-            # Guarda cópia para usar fora do lock
-            _pid = pid
-            _ask = ask
-        # Envia BUY fora do lock para evitar bloqueio longo
-        try:
-            if self.ws and self.connected:
-                self.ws.send(json.dumps({"buy": _pid, "price": _ask, "req_id": self._next_req()}))
-            else:
-                logger.error("WebSocket não disponível para enviar BUY")
-                with self._pending_lock:
-                    self.pending_trade = None
-        except Exception as e:
-            logger.error(f"Erro ao enviar BUY: {e}")
-            with self._pending_lock:
-                self.pending_trade = None
+        # Envia fora do lock
+        self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
 
     def _on_buy_response(self, data):
         with self._pending_lock:
@@ -488,10 +408,7 @@ class DerivWebSocketClient:
 
     def _subscribe_contract(self, cid):
         try:
-            if self.ws and self.connected:
-                self.ws.send(json.dumps({"proposal_open_contract": 1, "contract_id": cid, "subscribe": 1, "req_id": self._next_req()}))
-            else:
-                logger.warning(f"Não foi possível subscrever contrato {cid}: WebSocket fechado")
+            self.ws.send(json.dumps({"proposal_open_contract": 1, "contract_id": cid, "subscribe": 1, "req_id": self._next_req()}))
         except Exception as e:
             logger.error(f"Erro subs. contrato {cid}: {e}")
 
@@ -528,10 +445,8 @@ class DerivWebSocketClient:
 
     def _on_api_error(self, data):
         err = data.get('error', {})
-        self.auth_error = err
         logger.error(f"API Error: {err.get('message', 'desconhecido')} (código: {err.get('code', 'N/A')})")
 
-    # ── Pagamentos (mock) ─────────────────────────────────────────────────
     def request_deposit(self, amount, currency, method):
         return {'status': 'pending', 'message': f'Depósito ${amount} solicitado.', 'amount': amount, 'method': method}
 
