@@ -299,7 +299,6 @@ let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
 let isConnecting = false;
 let lastHybridState = null;
-let disconnectCount = 0;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 function toast(msg,type='info',ms=4000){
@@ -359,6 +358,7 @@ function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
     }
 }
 
+// ✅ updateAll sem disconnectCount e sem reconexão automática
 function updateAll(){
   fetch('/api/status')
     .then(r => r.json())
@@ -378,17 +378,10 @@ function updateAll(){
           connectOAuthBtn.disabled = true;
           connectTokenBtn.disabled = true;
           document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
-          disconnectCount = 0;
         } else {
           connectOAuthBtn.disabled = false;
           connectTokenBtn.disabled = false;
           document.getElementById('conSt').innerHTML = '';
-          disconnectCount++;
-          if (disconnectCount >= 3 && !isConnecting) {
-            disconnectCount = 0;
-            console.log("Tentativa automática de reconexão...");
-            conectar();
-          }
         }
         document.getElementById('sDot').className='dot'+(conn?' on':'');
         document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
@@ -524,6 +517,7 @@ async function disconnectWebSocket(){
   }
 }
 
+// ✅ selAcct sem chamar conectar() no sucesso
 async function selAcct(a) {
     if (a === selectedAcct) return;
     const oldAcct = selectedAcct;
@@ -543,8 +537,8 @@ async function selAcct(a) {
             document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
             document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
         } else {
-            toast(`🔄 Conta ${a.toUpperCase()} activada. A reconectar...`, 'info');
-            conectar();
+            toast(`🔄 Conta ${a.toUpperCase()} activada.`, 'info');
+            // ✅ Não chama conectar() automaticamente
         }
     } catch (err) {
         toast('❌ Erro ao trocar conta', 'loss');
