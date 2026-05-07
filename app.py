@@ -97,7 +97,7 @@ def init_db():
 
 init_db()
 
-# ==================== MIGRAÇÃO DE users.json ====================
+# ==================== MIGRAÇÃO DE users.json (se existir) ====================
 def migrate_from_json():
     json_path = os.path.join(DATA_PATH, 'users.json')
     if not os.path.exists(json_path):
@@ -373,7 +373,6 @@ def create_session(user_id, user, force=False):
                 bot.start(client)
                 bot.daily_stats['start_balance'] = bot.balance
             else:
-                # ✅ CORREÇÃO: verifica se auth_error existe e é um dicionário
                 auth_err = getattr(client, 'auth_error', None)
                 if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
                     UserStore.add_token(user['email'], user.get('active_account', 'demo'), '')
