@@ -97,7 +97,7 @@ def init_db():
 
 init_db()
 
-# ==================== MIGRAÇÃO DE users.json (se existir) ====================
+# ==================== MIGRAÇÃO DE users.json ====================
 def migrate_from_json():
     json_path = os.path.join(DATA_PATH, 'users.json')
     if not os.path.exists(json_path):
@@ -657,6 +657,10 @@ def status():
     bot_status = bot.get_status()
     bot_status['streaming'] = client.streaming if client else False
     analysis = analyzer.get_analysis()
+    
+    # 🔍 Log para debug
+    logger.info(f"📊 STATUS: connected={bot_status.get('connected')}, authorized={bot_status.get('authorized')}, balance={bot_status.get('balance')}")
+    
     return jsonify({
         'bot': bot_status,
         'digits': {
