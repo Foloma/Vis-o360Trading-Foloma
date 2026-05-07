@@ -16,14 +16,6 @@ DATABASE_PATH = os.path.join(DATA_PATH, 'foloma.db')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# ==================== AJUDA PARA SQLITE COM WAL ====================
-def get_db():
-    """Retorna uma conexão SQLite com WAL activado."""
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
-
 # ==================== ENCRIPTAÇÃO DE TOKENS ====================
 try:
     from cryptography.fernet import Fernet
@@ -51,7 +43,7 @@ def decrypt_token(encrypted: str) -> str:
 # ==================== INICIALIZAÇÃO DA BASE DE DADOS ====================
 def init_db():
     os.makedirs(DATA_PATH, exist_ok=True)
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         email TEXT PRIMARY KEY,
@@ -112,7 +104,7 @@ def migrate_from_json():
         return
     with open(json_path, 'r') as f:
         old = json.load(f)
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         for email, u in old.items():
             conn.execute('''INSERT OR IGNORE INTO users (email, id, name, password_hash, active_account,
@@ -152,7 +144,7 @@ migrate_from_json()
 class UserStore:
     @staticmethod
     def get(email):
-        conn = get_db()
+        conn = sqlite3.connect(DATABASE_PATH)
         try:
             row = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
             if not row:
@@ -168,7 +160,7 @@ class UserStore:
 
     @staticmethod
     def save(user):
-        conn = get_db()
+        conn = sqlite3.connect(DATABASE_PATH)
         try:
             conn.execute('''INSERT OR REPLACE INTO users (email, id, name, password_hash, active_account,
                             created_at, last_login, referral_code, active, role, affiliate_earnings, referral_link_code)
@@ -217,7 +209,7 @@ class UserStore:
 
     @staticmethod
     def set_active_account(email, account_type):
-        conn = get_db()
+        conn = sqlite3.connect(DATABASE_PATH)
         try:
             conn.execute('UPDATE users SET active_account = ? WHERE email = ?', (account_type, email))
             conn.commit()
@@ -227,7 +219,7 @@ class UserStore:
 
     @staticmethod
     def add_token(email, account_type, token):
-        conn = get_db()
+        conn = sqlite3.connect(DATABASE_PATH)
         try:
             conn.execute('INSERT OR REPLACE INTO user_tokens (email, account_type, token) VALUES (?,?,?)',
                          (email, account_type, encrypt_token(token)))
@@ -255,7 +247,7 @@ class AuthService:
         h = generate_password_hash(password)
         user = UserStore.create_user(email, name, h, ref)
         if ref:
-            conn = get_db()
+            conn = sqlite3.connect(DATABASE_PATH)
             try:
                 row = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref,)).fetchone()
                 if row:
@@ -287,7 +279,7 @@ def validate_account_type(loginid, expected):
     return loginid.startswith('VR') if expected == 'demo' else not loginid.startswith('VR')
 
 def persist_trade(user_id, trade_data):
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         conn.execute('''INSERT OR REPLACE INTO trades
             (user_id, contract_id, symbol, action, amount, buy_price, sell_price, profit, result, timestamp)
@@ -305,13 +297,11 @@ def persist_trade(user_id, trade_data):
 
 def create_session(user_id, user, force=False):
     with sessions_lock:
-        # Double-check dentro do lock
         if user_id in sessions:
             existing = sessions[user_id]
             client = existing['client']
             if not force and client.authorized and client.connected:
                 return existing
-            # Fechar sessão antiga
             client._stop_event.set()
             if client._ws_thread and client._ws_thread.is_alive():
                 client._ws_thread.join(timeout=5)
@@ -359,6 +349,7 @@ def create_session(user_id, user, force=False):
     token = UserStore.get_active_token(user)
     if token:
         client.set_user_token(token)
+        client._connect_lock = threading.Lock()
 
         def connect_and_validate():
             with client._connect_lock:
@@ -399,14 +390,8 @@ def get_session(user_id):
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
-
-# ✅ Correção 1: SameSite condicional a HTTPS
-is_secure = os.environ.get('SESSION_COOKIE_SECURE', 'False').lower() == 'true'
-app.config['SESSION_COOKIE_SECURE'] = is_secure
-if is_secure:
-    app.config['SESSION_COOKIE_SAMESITE'] = 'None'
-else:
-    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 
 from config import config
 
@@ -548,7 +533,7 @@ def reset_password():
         return jsonify({'error': 'Email não encontrado'}), 404
     token = secrets.token_urlsafe(64)
     hashed = hashlib.sha256(token.encode()).hexdigest()
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         conn.execute('INSERT OR REPLACE INTO password_resets (email, token_hash, expires_at, used) VALUES (?,?,?,0)',
                      (email, hashed, time.time() + 3600))
@@ -564,7 +549,7 @@ def reset_password_confirm():
     if not token or new_pw is None or len(new_pw) < 6:
         return jsonify({'error': 'Token ou senha inválidos'}), 400
     hashed = hashlib.sha256(token.encode()).hexdigest()
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         row = conn.execute('SELECT email FROM password_resets WHERE token_hash = ? AND used = 0 AND expires_at > ?',
                            (hashed, time.time())).fetchone()
@@ -650,30 +635,13 @@ def switch_account():
 def status():
     user_id = session['user_id']
     sess = get_session(user_id)
-    # ✅ Adicionar estado da conexão
     if not sess:
         email = session.get('user_email')
         user = UserStore.get(email)
         if user and UserStore.get_active_token(user):
             sess = create_session(user_id, user)
-            connection_state = 'connecting'
         else:
-            return jsonify({
-                'bot': {'connected': False, 'authorized': False, 'state': 'disconnected'},
-                'digits': {},
-                'symbols': config.AVAILABLE_SYMBOLS,
-                'connection_state': 'disconnected'
-            })
-    else:
-        # Determinar estado real
-        client = sess['client']
-        if client.connected and client.authorized:
-            connection_state = 'connected'
-        elif client.connected and not client.authorized:
-            connection_state = 'authenticating'
-        else:
-            connection_state = 'connecting'
-
+            return jsonify({'bot': {}, 'digits': {}, 'symbols': config.AVAILABLE_SYMBOLS})
     client = sess['client']
     bot = sess['trading_bot']
     analyzer = sess['digit_analyzer']
@@ -684,7 +652,6 @@ def status():
         bot._client_authorized = client.authorized
     bot_status = bot.get_status()
     bot_status['streaming'] = client.streaming if client else False
-    bot_status['state'] = connection_state
     analysis = analyzer.get_analysis()
     return jsonify({
         'bot': bot_status,
@@ -700,8 +667,7 @@ def status():
             'ticks_per_digit': analyzer.TICKS_PER_DIGIT
         },
         'symbols': config.AVAILABLE_SYMBOLS,
-        'loginid': client.loginid if client else None,
-        'connection_state': connection_state
+        'loginid': client.loginid if client else None
     })
 
 @app.route('/api/debug')
@@ -747,7 +713,7 @@ def oauth_callback():
     user_id = state_data['user_id']
     account_type_request = state_data['account_type']
 
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
         if not row:
@@ -788,7 +754,6 @@ def oauth_callback():
     session['user_name'] = user['name']
     session['user_role'] = user.get('role', 'user')
     session.permanent = True
-    session.modified = True   # ✅ Força gravação do cookie
 
     create_session(user_id, user, force=True)
     return redirect('/?connected=true')
@@ -1024,7 +989,7 @@ def credit_affiliate_commission(user_email, amount):
     if not user or not user.get('referral_code'):
         return
     ref_code = user['referral_code']
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         ref_user = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref_code,)).fetchone()
         if ref_user:
@@ -1058,7 +1023,7 @@ def affiliate_earnings():
     user = UserStore.get(session['user_email'])
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         referred_count = conn.execute('SELECT COUNT(*) FROM referrals WHERE referrer_email = ?', (user['email'],)).fetchone()[0]
     finally:
@@ -1123,7 +1088,7 @@ def withdraw():
 @app.route('/api/admin/users')
 @require_admin
 def admin_users():
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         rows = conn.execute('SELECT email, name, active FROM users').fetchall()
         return jsonify({'users': [{'email': r[0], 'name': r[1], 'active': bool(r[2])} for r in rows]})
@@ -1136,7 +1101,7 @@ def toggle_user():
     d = request.json
     email = d.get('email')
     en = d.get('enable', True)
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         conn.execute('UPDATE users SET active = ? WHERE email = ?', (1 if en else 0, email))
         conn.commit()
@@ -1153,7 +1118,7 @@ def admin_clear_tokens():
     user = UserStore.get(email) if email else None
     target_uid = user['id'] if user else None
 
-    conn = get_db()
+    conn = sqlite3.connect(DATABASE_PATH)
     try:
         if email:
             conn.execute('DELETE FROM user_tokens WHERE email = ?', (email,))
@@ -1180,5 +1145,4 @@ def admin_clear_tokens():
 # ==================== INICIAR ====================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    # Apenas debug=False em produção
     app.run(host='0.0.0.0', port=port, debug=False)
