@@ -91,7 +91,10 @@
 <body>
 <div class="top-bar">
   <button class="menu-btn" onclick="toggleMenu()">☰</button>
-  <div class="logo">FOLOMA</div>
+  <div class="logo">
+    <img src="/static/logo.svg" height="28" alt="Foloma">
+    FOLOMA
+  </div>
   <div class="account-switch" id="accountSwitch">
     <button id="btnDemo" class="active" onclick="selAcct('demo')">DEMO</button>
     <button id="btnReal" onclick="selAcct('real')">REAL</button>
@@ -216,7 +219,29 @@
       <div id="histList2"></div>
     </div>
   </div>
-  <div id="payment-section" class="hidden"><div class="card"><div class="card-title">💰 DEPÓSITO / SAQUE</div><p style="color:var(--muted)">Disponível em breve.</p></div></div>
+  <!-- CORREÇÃO 3: Secção de pagamentos actualizada -->
+  <div id="payment-section" class="hidden">
+    <div class="card">
+      <div class="card-title">💰 DEPÓSITO</div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
+        Deposita fundos via AirTM e transfere para a tua conta Deriv.
+      </p>
+      <a href="https://www.airtm.com" target="_blank" class="btn-buy"
+         style="display:block;width:100%;text-align:center;padding:14px;border-radius:12px;text-decoration:none;font-weight:700;color:#000">
+        💳 Depositar via AirTM
+      </a>
+    </div>
+    <div class="card">
+      <div class="card-title">🏦 SAQUE</div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
+        Levanta os teus fundos directamente na plataforma Deriv.
+      </p>
+      <a href="https://app.deriv.com/cashier/withdrawal" target="_blank" class="btn-sell"
+         style="display:block;width:100%;text-align:center;padding:14px;border-radius:12px;text-decoration:none;font-weight:700;color:#fff">
+        🏧 Sacar via Deriv
+      </a>
+    </div>
+  </div>
   <div id="settings-section" class="hidden">
     <div class="card">
       <div class="card-title">🔐 TOKEN DERIV</div>
@@ -401,7 +426,8 @@ function updateAll(){
     if (modo === 'hybrid' && data.digits && bot.signal) {
         const digitAnalysis = data.digits.analysis;
         if (digitAnalysis && digitAnalysis.recommended_action) {
-            const combinedConf = (bot.confidence || 0 + (digitAnalysis.confidence || 0)) / 2;
+            // CORREÇÃO 1: Parênteses na soma das confianças
+            const combinedConf = ((bot.confidence || 0) + (digitAnalysis.confidence || 0)) / 2;
             checkHybridAlert(bot.signal, digitAnalysis.recommended_action, combinedConf);
         } else {
             checkHybridAlert(null, null, 0);
@@ -479,7 +505,7 @@ async function connectWithDeriv(){
   window.location.href = d.url;
 }
 
-// CORREÇÃO: disconnect apenas do WebSocket, não logout
+// CORREÇÃO 2: disconnect apenas do WebSocket (endpoint /api/disconnect)
 async function disconnectWebSocket(){
   const r = await fetch('/api/disconnect', {method:'POST'});
   if(r.ok){
@@ -568,7 +594,7 @@ async function rstMgtDigit(){
   toast('🔄 Martingale resetado','info');
 }
 
-// ══════════════ AFILIADO (com ganhos) ══════════════
+// ══════════════ AFILIADO ══════════════
 function loadAffiliate() {
   fetch('/api/affiliate/link')
     .then(r => r.json())
