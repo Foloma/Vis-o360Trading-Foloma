@@ -266,6 +266,9 @@ sessions = {}
 sessions_lock = threading.RLock()
 oauth_states = {}
 oauth_states_lock = threading.Lock()
+# Lock para evitar múltiplas conexões simultâneas por utilizador
+connecting_lock = threading.Lock()
+connecting_users = set()
 
 def reset_bot_state(bot):
     bot.reset_stats()
@@ -276,7 +279,9 @@ def reset_bot_state(bot):
         bot.daily_stats = {'start_balance': 0, 'trades': 0, 'wins': 0, 'losses': 0, 'profit': 0}
 
 def validate_account_type(loginid, expected):
-    return loginid.startswith('VR') if expected == 'demo' else not loginid.startswith('VR')
+    is_demo = loginid.startswith('VR')
+    logger.info(f"🔍 Validando conta: loginid={loginid}, esperado={expected}, is_demo={is_demo}")
+    return is_demo if expected == 'demo' else not is_demo
 
 def persist_trade(user_id, trade_data):
     conn = sqlite3.connect(DATABASE_PATH)
@@ -569,13 +574,24 @@ def reset_password_confirm():
 @require_auth
 @limit_if_available("10 per minute")
 def api_connect():
-    email = session['user_email']
-    user = UserStore.get(email)
-    token = UserStore.get_active_token(user)
-    if not token:
-        return jsonify({'error': 'Token não configurado'}), 400
-    create_session(session['user_id'], user)
-    return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
+    user_id = session['user_id']
+    # ✅ Protecção contra múltiplas conexões simultâneas
+    with connecting_lock:
+        if user_id in connecting_users:
+            logger.info(f"Conectando já em curso para {user_id}, ignorando pedido duplicado")
+            return jsonify({'status': 'connecting_already', 'message': 'Conexão já em andamento'})
+        connecting_users.add(user_id)
+    try:
+        email = session['user_email']
+        user = UserStore.get(email)
+        token = UserStore.get_active_token(user)
+        if not token:
+            return jsonify({'error': 'Token não configurado'}), 400
+        create_session(user_id, user)
+        return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
+    finally:
+        with connecting_lock:
+            connecting_users.discard(user_id)
 
 @app.route('/api/auth/auto-connect')
 @require_auth
@@ -635,17 +651,13 @@ def switch_account():
 def status():
     user_id = session['user_id']
     sess = get_session(user_id)
+    # ✅ Já não cria sessão automaticamente – retorna desconectado se não existir
     if not sess:
-        email = session.get('user_email')
-        user = UserStore.get(email)
-        if user and UserStore.get_active_token(user):
-            sess = create_session(user_id, user)
-        else:
-            return jsonify({
-                'bot': {'connected': False, 'authorized': False},
-                'digits': {},
-                'symbols': config.AVAILABLE_SYMBOLS
-            })
+        return jsonify({
+            'bot': {'connected': False, 'authorized': False},
+            'digits': {},
+            'symbols': config.AVAILABLE_SYMBOLS
+        })
     client = sess['client']
     bot = sess['trading_bot']
     analyzer = sess['digit_analyzer']
