@@ -4,7 +4,7 @@ import threading
 from collections import deque
 from datetime import datetime
 from indicators import TechnicalIndicators
-from synthetics import digit_analyzer   # fallback global
+from synthetics import digit_analyzer
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,6 @@ class TradingBot:
         self.last_analysis = {}
         self.digit_analyzer = None
 
-        # Estatísticas
         self.stats = {
             'total': 0, 'wins': 0, 'losses': 0,
             'win_rate': 0, 'profit_loss': 0,
@@ -45,7 +44,7 @@ class TradingBot:
 
         self._client_connected = False
         self._client_authorized = False
-        self._state_lock = threading.RLock()   # ✅ RLock para evitar deadlock
+        self._state_lock = threading.Lock()
 
     def start(self, client):
         self.client = client
@@ -157,15 +156,16 @@ class TradingBot:
     def check_pending_trades(self):
         now = datetime.now()
         updated = False
-        with self._state_lock:
-            for trade in self.trades:
-                if trade.get('result') == 'pending':
-                    elapsed = (now - trade['timestamp']).total_seconds()
-                    if elapsed > 60:
-                        trade['result'] = 'loss'
-                        trade['profit'] = 0
-                        updated = True
-                        logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')}")
+        for trade in self.trades:
+            if trade.get('result') == 'pending':
+                elapsed = (now - trade['timestamp']).total_seconds()
+                is_digit = trade.get('is_digit', False)
+                timeout = 120 if is_digit else 90
+                if elapsed > timeout:
+                    trade['result'] = 'loss'
+                    trade['profit'] = 0
+                    updated = True
+                    logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')} (digit={is_digit})")
         if updated:
             self.update_stats()
 
@@ -248,8 +248,7 @@ class TradingBot:
         self.check_pending_trades()
         signal, confidence = self.calculate_signal()
 
-        # ✅ Lê directamente do cliente se existir
-        if self.client is not None:
+        if self.client:
             conn = self.client.connected
             auth = self.client.authorized
         else:
