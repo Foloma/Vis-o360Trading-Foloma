@@ -1029,45 +1029,81 @@ def affiliate_stats():
 @app.route('/api/affiliate/link')
 @require_auth
 def affiliate_link():
-    user = UserStore.get(session['user_email'])
-    if user and user.get('referral_link_code'):
-        base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
-        link = f"{base_url}/?ref={user['referral_link_code']}"
-        return jsonify({'link': link, 'code': user['referral_link_code']})
-    return jsonify({'error': 'Utilizador não encontrado'}), 404
+    # 1. Tentar obter user pelo email na sessão
+    email = session.get('user_email')
+    user = UserStore.get(email) if email else None
+
+    # 2. Fallback: buscar pelo user_id (sempre presente)
+    if not user:
+        user_id = session.get('user_id')
+        if user_id:
+            conn = sqlite3.connect(DATABASE_PATH)
+            try:
+                row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
+                if row:
+                    email = row[0]
+                    user = UserStore.get(email)
+                    # CORRIGE a sessão para futuros pedidos
+                    session['user_email'] = email
+            finally:
+                conn.close()
+
+    if not user:
+        return jsonify({'error': 'Utilizador não encontrado'}), 404
+
+    # Garantir que existe referral_link_code (para utilizadores antigos)
+    if not user.get('referral_link_code'):
+        ref_link = base64.b64encode(hashlib.md5(user['id'].encode()).digest()).hex()[:8]
+        conn = sqlite3.connect(DATABASE_PATH)
+        try:
+            conn.execute('UPDATE users SET referral_link_code = ? WHERE email = ?',
+                         (ref_link, user['email']))
+            conn.commit()
+        finally:
+            conn.close()
+        user['referral_link_code'] = ref_link
+
+    base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
+    link = f"{base_url}/?ref={user['referral_link_code']}"
+    return jsonify({'link': link, 'code': user['referral_link_code']})
+
 
 @app.route('/api/affiliate/earnings')
 @require_auth
 def affiliate_earnings():
-    user = UserStore.get(session['user_email'])
+    # Mesma lógica de fallback
+    email = session.get('user_email')
+    user = UserStore.get(email) if email else None
+
+    if not user:
+        user_id = session.get('user_id')
+        if user_id:
+            conn = sqlite3.connect(DATABASE_PATH)
+            try:
+                row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
+                if row:
+                    email = row[0]
+                    user = UserStore.get(email)
+                    session['user_email'] = email
+            finally:
+                conn.close()
+
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
+
     conn = sqlite3.connect(DATABASE_PATH)
     try:
-        referred_count = conn.execute('SELECT COUNT(*) FROM referrals WHERE referrer_email = ?', (user['email'],)).fetchone()[0]
+        referred_count = conn.execute('SELECT COUNT(*) FROM referrals WHERE referrer_email = ?',
+                                       (user['email'],)).fetchone()[0]
     finally:
         conn.close()
+
     return jsonify({
         'earnings': user.get('affiliate_earnings', 0.0),
         'referral_link': user.get('referral_link_code', ''),
         'referred_count': referred_count,
         'referred_list': []
     })
-
-@app.route('/api/disconnect', methods=['POST'])
-@require_auth
-def disconnect_websocket():
-    user_id = session.get('user_id')
-    if user_id:
-        with sessions_lock:
-            sess = sessions.pop(user_id, None)
-        if sess:
-            sess['client']._stop_event.set()
-            if sess['client']._ws_thread and sess['client']._ws_thread.is_alive():
-                sess['client']._ws_thread.join(timeout=2)
-            logger.info(f"WebSocket desconectado para user {user_id}")
-            return jsonify({'status': 'ok', 'message': 'Desconectado'})
-    return jsonify({'error': 'Nenhuma sessão activa'}), 404
 
 @app.route('/api/payment/deposit', methods=['POST'])
 @require_auth
