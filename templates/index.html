@@ -596,37 +596,44 @@ async function rstMgtDigit(){
 }
 
 function loadAffiliate() {
+  const refInput = document.getElementById('refLink');
+  const earningsDiv = document.getElementById('affiliateEarnings');
+  
+  if(refInput) refInput.value = '⏳ A carregar...';
+
   fetch('/api/affiliate/link')
     .then(r => r.json())
     .then(d => {
-      if(d.link) document.getElementById('refLink').value = d.link;
-    })
-    .catch(() => toast('Erro ao carregar link', 'loss'));
-  
-  fetch('/api/affiliate/earnings')
-    .then(r => r.json())
-    .then(data => {
-      if (!data.error) {
-        const earningsDiv = document.getElementById('affiliateEarnings');
-        if (earningsDiv) {
-          earningsDiv.innerHTML = `
-            <div style="margin-top:12px; background:#020617; border-radius:8px; padding:12px;">
-              <div style="font-size:12px; color:var(--muted);">💰 GANHOS ACUMULADOS</div>
-              <div style="font-size:28px; font-weight:bold; color:var(--accent);">
-                $ ${data.earnings?.toFixed(2) || '0.00'}
-              </div>
-              <div style="font-size:11px; margin-top:5px;">
-                Código de indicação: <strong>${data.referral_link || '---'}</strong>
-              </div>
-              <div style="font-size:11px; margin-top:5px;">
-                Cliques convertidos: ${data.referred_count || 0}
-              </div>
-            </div>
-          `;
-        }
+      if(d.link) {
+        if(refInput) refInput.value = d.link;
+      } else {
+        if(refInput) refInput.value = '❌ Erro: ' + (d.error || 'sem link');
+        toast('❌ Erro no link de afiliado: ' + (d.error || 'desconhecido'), 'loss', 6000);
       }
     })
-    .catch(() => toast('Erro ao carregar ganhos', 'loss'));
+    .catch(e => {
+      if(refInput) refInput.value = '❌ Erro de rede';
+      toast('❌ Erro ao carregar link', 'loss');
+    });
+
+  if(earningsDiv) {
+    fetch('/api/affiliate/earnings')
+      .then(r => r.json())
+      .then(data => {
+        if(data.error){ earningsDiv.innerHTML = ''; return; }
+        earningsDiv.innerHTML = `
+          <div style="margin-top:12px;background:#020617;border-radius:8px;padding:12px;">
+            <div style="font-size:12px;color:var(--muted)">💰 GANHOS ACUMULADOS</div>
+            <div style="font-size:28px;font-weight:bold;color:var(--accent)">
+              $${(data.earnings||0).toFixed(2)}
+            </div>
+            <div style="font-size:11px;margin-top:5px">
+              Utilizadores referenciados: <strong>${data.referred_count||0}</strong>
+            </div>
+          </div>`;
+      })
+      .catch(() => {});
+  }
 }
 
 function cpLink(){const l=document.getElementById('refLink');l.select();document.execCommand('copy');toast('✅ Link copiado!','win');}
