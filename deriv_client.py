@@ -65,15 +65,14 @@ class DerivWebSocketClient:
         self.user_token = t
         logger.info("🔑 Token configurado")
 
-    # ✅ Correcção obrigatória: ordem correcta no connect()
     def connect(self):
-        self._stop_event.set()                 # 1. sinaliza paragem
+        self._stop_event.set()
         if self._ws_thread and self._ws_thread.is_alive():
-            self._ws_thread.join(timeout=2)    # 2. aguarda thread anterior
-        self._close_connection()               # 3. fecha ligação existente
-        self._stop_event.clear()               # 4. limpa sinal para nova conexão
+            self._ws_thread.join(timeout=2)
+        self._close_connection()
+        self._stop_event.clear()
         self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
-        self._ws_thread.start()                # 5. inicia nova thread
+        self._ws_thread.start()
         logger.info("🔌 Thread de ligação iniciada")
 
     def _run_forever(self):
@@ -319,7 +318,7 @@ class DerivWebSocketClient:
 
     def place_trade(self, contract_type, amount, is_digit=False):
         if is_digit:
-            time.sleep(0.5)   # atraso para dígitos, fora do lock
+            time.sleep(0.5)
 
         with self._trade_lock:
             if not self.streaming:
@@ -405,11 +404,27 @@ class DerivWebSocketClient:
                 return
             if self.pending_trade:
                 amt, action = self.pending_trade.get('amount', 0), self.pending_trade.get('contract_type', '')
+                is_digit = self.pending_trade.get('is_digit', False)
                 if self.trading_bot:
-                    self.trading_bot.register_trade({'contract_id': cid, 'symbol': self.current_symbol,
-                        'action': action, 'amount': amt, 'price': bp, 'result': 'pending', 'confidence': 70})
-                self.active_trades[cid] = {'contract_id': cid, 'amount': amt, 'buy_price': bp,
-                                           'timestamp': time.time(), 'action': action}
+                    self.trading_bot.register_trade({
+                        'contract_id': cid,
+                        'symbol': self.current_symbol,
+                        'action': action,
+                        'amount': amt,
+                        'price': bp,
+                        'result': 'pending',
+                        'confidence': 70,
+                        'is_digit': is_digit
+                    })
+                self.active_trades[cid] = {
+                    'contract_id': cid,
+                    'amount': amt,
+                    'buy_price': bp,
+                    'timestamp': time.time(),
+                    'action': action,
+                    'is_digit': is_digit,
+                    'symbol': self.current_symbol          # ✅ adicionado
+                }
                 self._subscribe_contract(cid)
                 self.pending_trade = None
 
