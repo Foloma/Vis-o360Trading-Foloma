@@ -461,13 +461,15 @@ def auth_status():
 @app.route('/api/auth/register', methods=['POST'])
 @limit_if_available("10 per hour")
 def register():
+    # ✅ Limpa qualquer sessão existente antes de registar
+    session.clear()
     try:
         d = request.json
-        email = d.get('email','').strip().lower()
-        name = d.get('name','').strip()
-        password = d.get('password','')
-        ref = d.get('referral_code','')
-        if not (name and email and len(password)>=6):
+        email = d.get('email', '').strip().lower()
+        name = d.get('name', '').strip()
+        password = d.get('password', '')
+        ref = d.get('referral_code', '')
+        if not (name and email and len(password) >= 6):
             return jsonify({'error': 'Campos obrigatórios inválidos'}), 400
         user = AuthService.register(name, email, password, ref)
         if not user:
