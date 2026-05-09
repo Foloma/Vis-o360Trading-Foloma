@@ -44,7 +44,7 @@ class TradingBot:
 
         self._client_connected = False
         self._client_authorized = False
-        self._state_lock = threading.RLock()          # ✅ CORREÇÃO: RLock permite aquisição aninhada
+        self._state_lock = threading.RLock()
 
     def start(self, client):
         self.client = client
@@ -130,8 +130,8 @@ class TradingBot:
 
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
-        self.trades.append(trade_data)
         with self._state_lock:
+            self.trades.append(trade_data)          # ✅ movido para dentro do lock
             self.stats['total'] += 1
             self.stats['total_invested'] += trade_data['amount']
             self.daily_stats['trades'] += 1
@@ -162,7 +162,7 @@ class TradingBot:
                 is_digit = trade.get('is_digit', False)
                 timeout = 120 if is_digit else 90
                 if elapsed > timeout:
-                    with self._state_lock:          # ✅ PROTECÇÃO DAS ESCRITAS
+                    with self._state_lock:
                         trade['result'] = 'loss'
                         trade['profit'] = 0
                         updated = True
@@ -241,7 +241,8 @@ class TradingBot:
                     'action': t.get('action', ''),
                     'amount': t.get('amount', 0),
                     'result': t.get('result', 'pending'),
-                    'profit': t.get('profit', 0)
+                    'profit': t.get('profit', 0),
+                    'is_digit': t.get('is_digit', False)      # ✅ adicionado
                 } for t in list(self.trades)[-50:]]
             }
 
