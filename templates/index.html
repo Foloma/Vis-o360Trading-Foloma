@@ -310,7 +310,7 @@ function playBeep() {
   const audio = document.getElementById('hybridSound');
   if(audio) {
     audio.currentTime = 0;
-    audio.play().catch(() => {});
+    audio.play().catch(e => {});  // erro silencioso em produção
   }
 }
 
@@ -325,12 +325,14 @@ function chgSym(s, el){
   document.querySelectorAll('.sym-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
 }
+
 function startPolling(){
   if(_updateInterval) return;
   _updateInterval = setInterval(updateAll, 5000);
 }
-function stopPolling(){
-  if(_updateInterval){
+
+function stopPolling() {
+  if (_updateInterval) {
     clearInterval(_updateInterval);
     _updateInterval = null;
   }
@@ -424,7 +426,7 @@ function updateAll(){
             const ad = document.getElementById('amtDigit');
             if(ad) ad.value = (m.next_amount||0.35).toFixed(2);
           }
-        }).catch(()=>{});
+        }).catch(() => {});
         
         if (modo === 'hybrid' && data.digits && bot.signal) {
             const digitAnalysis = data.digits.analysis;
@@ -437,7 +439,7 @@ function updateAll(){
         } else {
             document.getElementById('hybridAlert')?.classList.add('hidden');
         }
-    }).catch(()=>{});
+    }).catch(() => {});
 }
 function updateDigits(digits){
   if(!digits)return;
@@ -483,8 +485,6 @@ async function conectar(){
     } else {
       toast('✅ Pedido de conexão enviado','win');
       document.getElementById('conSt').textContent = '🔄 A aguardar...';
-      // ✅ Inicia polling apenas após conectar (se já não estiver activo)
-      startPolling();
     }
   } catch(e) {
     toast('❌ Erro de rede','loss');
@@ -666,58 +666,36 @@ function loadHistory(){
     let html = '';
     const trades = (Array.isArray(data.historico) ? data.historico : []).reverse();
     trades.forEach(t => {
-    const win = t.result === 'win';
-    const lose = t.result === 'loss';
-    const cor = win ? 'var(--accent)' : lose ? 'var(--danger)' : 'var(--muted)';
-    const icon = win ? '✅' : lose ? '❌' : '⏳';
-    const profit = win ? `+$${t.profit.toFixed(2)}` : lose ? `-$${t.amount.toFixed(2)}` : '---';
-    
-    // ✅ Identificar se é trade de dígito (CALL=ÍMPAR, PUT=PAR)
-    const isDigitTrade = (t.action === 'CALL' || t.action === 'PUT');
-    let digitLabel = '';
-    if (isDigitTrade) {
+      const win = t.result === 'win';
+      const lose = t.result === 'loss';
+      const cor = win ? 'var(--accent)' : lose ? 'var(--danger)' : 'var(--muted)';
+      const icon = win ? '✅' : lose ? '❌' : '⏳';
+      const profit = win ? `+$${t.profit.toFixed(2)}` : lose ? `-$${t.amount.toFixed(2)}` : '---';
+      
+      const isDigitTrade = t.is_digit === true;
+      let digitLabel = '';
+      if (isDigitTrade) {
         const digitText = (t.action === 'CALL') ? 'ÍMPAR' : 'PAR';
         const labelColor = win ? 'var(--accent)' : (lose ? 'var(--danger)' : 'var(--muted)');
         digitLabel = `<span style="font-size:10px;color:${labelColor}"> ${digitText}</span>`;
-    }
-    
-    html += `
+      }
+      
+      html += `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:12px">
-            <div>
-                <div style="font-weight:600">${icon} ${t.action}${digitLabel} — ${t.symbol}</div>
-                <div style="color:var(--muted)">${t.time}</div>
-            </div>
-            <div style="text-align:right">
-                <div style="font-weight:bold;color:${cor}">${profit}</div>
-                <div style="color:var(--muted)">$${t.amount.toFixed(2)}</div>
-            </div>
+          <div>
+            <div style="font-weight:600">${icon} ${t.action}${digitLabel} — ${t.symbol}</div>
+            <div style="color:var(--muted)">${t.time}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-weight:bold;color:${cor}">${profit}</div>
+            <div style="color:var(--muted)">$${t.amount.toFixed(2)}</div>
+          </div>
         </div>`;
-});
+    });
     const list = document.getElementById('histList');
     if(list) list.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
     const sum2 = document.getElementById('histSummary2');
-    if(sum2) {
-      // ✅ não depende de sum, simplesmente preenche
-      sum2.innerHTML = `
-        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-          <div style="font-size:10px;color:var(--muted)">TOTAL TRADES</div>
-          <div style="font-size:20px;font-weight:bold">${s.total_trades}</div>
-        </div>
-        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-          <div style="font-size:10px;color:var(--muted)">WIN RATE</div>
-          <div style="font-size:20px;font-weight:bold;color:var(--accent)">${s.win_rate}%</div>
-        </div>
-        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-          <div style="font-size:10px;color:var(--muted)">LUCRO/PERDA</div>
-          <div style="font-size:20px;font-weight:bold;color:${s.profit_loss>=0?'var(--accent)':'var(--danger)'}">
-            ${s.profit_loss>=0?'+':''}$${s.profit_loss.toFixed(2)}
-          </div>
-        </div>
-        <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-          <div style="font-size:10px;color:var(--muted)">HOJE</div>
-          <div style="font-size:20px;font-weight:bold">${s.trades_hoje}</div>
-        </div>`;
-    }
+    if(sum2 && sum) sum2.innerHTML = sum.innerHTML;
     const list2 = document.getElementById('histList2');
     if(list2) list2.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
   }).catch(()=>toast('❌ Erro ao carregar histórico','loss'));
@@ -756,6 +734,7 @@ function showTab(t){
   document.getElementById('registerForm').style.display=t==='register'?'block':'none';
   document.getElementById('forgotForm').style.display=t==='forgot'?'block':'none';
 }
+
 function doLogin(){
   const email=document.getElementById('lEmail').value,password=document.getElementById('lPass').value;
   fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
@@ -768,13 +747,16 @@ function doLogin(){
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();loadHistory();
+    
+    // ✅ Sempre iniciar polling após login
+    startPolling();
+    
     if(d.user?.has_deriv_token){
       setTimeout(() => conectar(), 1000);
-    } else {
-      // se não tem token, não inicia polling (só quando conectar)
     }
   });
 }
+
 function doRegister(){
   const d={name:document.getElementById('rName').value,email:document.getElementById('rEmail').value,password:document.getElementById('rPass').value,referral_code:document.getElementById('rRef').value};
   fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
@@ -791,7 +773,11 @@ function doReset(){
   fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('fEmail').value})})
   .then(r=>r.json()).then(d=>{document.getElementById('fMsg').innerHTML=d.error?'❌ '+d.error:'✅ '+(d.message||'Link enviado!');});
 }
-function doLogout(){fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload());}
+
+function doLogout() {
+  stopPolling();
+  fetch('/api/auth/logout', { method: 'POST' }).then(() => location.reload());
+}
 
 async function saveTokAcct(acctType){
   if(isConnecting){
@@ -852,10 +838,10 @@ function setModo(m){
   const p=new URLSearchParams(location.search);
   if(p.get('connected')==='true'){
     toast('✅ Deriv conectada!','win',5000);
+    startPolling();   // ✅ polling ativo após OAuth
     setTimeout(()=>{
       fetch('/api/status').then(r=>r.json()).then(data=>{
         if(!data.bot?.authorized) conectar();
-        else startPolling();
       }).catch(()=>conectar());
     },2000);
     history.replaceState({},'',location.pathname);
@@ -875,6 +861,7 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();loadHistory();
+    startPolling();   // ✅ já existia, mantido
     if(d.user?.has_deriv_token){
       setTimeout(() => conectar(), 1500);
     }
