@@ -666,23 +666,33 @@ function loadHistory(){
     let html = '';
     const trades = (Array.isArray(data.historico) ? data.historico : []).reverse();
     trades.forEach(t => {
-      const win = t.result === 'win';
-      const lose = t.result === 'loss';
-      const cor = win ? 'var(--accent)' : lose ? 'var(--danger)' : 'var(--muted)';
-      const icon = win ? '✅' : lose ? '❌' : '⏳';
-      const profit = win ? `+$${t.profit.toFixed(2)}` : lose ? `-$${t.amount.toFixed(2)}` : '---';
-      html += `
+    const win = t.result === 'win';
+    const lose = t.result === 'loss';
+    const cor = win ? 'var(--accent)' : lose ? 'var(--danger)' : 'var(--muted)';
+    const icon = win ? '✅' : lose ? '❌' : '⏳';
+    const profit = win ? `+$${t.profit.toFixed(2)}` : lose ? `-$${t.amount.toFixed(2)}` : '---';
+    
+    // ✅ Identificar se é trade de dígito (CALL=ÍMPAR, PUT=PAR)
+    const isDigitTrade = (t.action === 'CALL' || t.action === 'PUT');
+    let digitLabel = '';
+    if (isDigitTrade) {
+        const digitText = (t.action === 'CALL') ? 'ÍMPAR' : 'PAR';
+        const labelColor = win ? 'var(--accent)' : (lose ? 'var(--danger)' : 'var(--muted)');
+        digitLabel = `<span style="font-size:10px;color:${labelColor}"> ${digitText}</span>`;
+    }
+    
+    html += `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:12px">
-          <div>
-            <div style="font-weight:600">${icon} ${t.action} — ${t.symbol}</div>
-            <div style="color:var(--muted)">${t.time}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-weight:bold;color:${cor}">${profit}</div>
-            <div style="color:var(--muted)">$${t.amount.toFixed(2)}</div>
-          </div>
+            <div>
+                <div style="font-weight:600">${icon} ${t.action}${digitLabel} — ${t.symbol}</div>
+                <div style="color:var(--muted)">${t.time}</div>
+            </div>
+            <div style="text-align:right">
+                <div style="font-weight:bold;color:${cor}">${profit}</div>
+                <div style="color:var(--muted)">$${t.amount.toFixed(2)}</div>
+            </div>
         </div>`;
-    });
+});
     const list = document.getElementById('histList');
     if(list) list.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
     const sum2 = document.getElementById('histSummary2');
