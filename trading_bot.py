@@ -44,7 +44,7 @@ class TradingBot:
 
         self._client_connected = False
         self._client_authorized = False
-        self._state_lock = threading.Lock()
+        self._state_lock = threading.RLock()          # ✅ CORREÇÃO: RLock permite aquisição aninhada
 
     def start(self, client):
         self.client = client
@@ -162,9 +162,10 @@ class TradingBot:
                 is_digit = trade.get('is_digit', False)
                 timeout = 120 if is_digit else 90
                 if elapsed > timeout:
-                    trade['result'] = 'loss'
-                    trade['profit'] = 0
-                    updated = True
+                    with self._state_lock:          # ✅ PROTECÇÃO DAS ESCRITAS
+                        trade['result'] = 'loss'
+                        trade['profit'] = 0
+                        updated = True
                     logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')} (digit={is_digit})")
         if updated:
             self.update_stats()
