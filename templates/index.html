@@ -84,8 +84,7 @@
     .mbox { background: var(--card); padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
     .token-status { font-size: 12px; color: var(--accent); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
     button:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
-    .hybrid-notify { background: #ffaa00; color: #000; padding: 8px; border-radius: 8px; text-align: center; font-weight: bold; animation: pulse 1s infinite; }
-    @keyframes pulse { 0% { opacity: 0.7; } 50% { opacity: 1; } 100% { opacity: 0.7; } }
+    /* .hybrid-notify removido — não utilizado */
   </style>
 </head>
 <body>
@@ -102,6 +101,7 @@
 </div>
 <div class="side-menu" id="sideMenu">
   <div class="menu-header"><span style="color:var(--accent);font-weight:bold">MENU</span><button class="menu-close" onclick="toggleMenu()">✕</button></div>
+  <div id="userNameDisplay" style="padding:10px 0;color:var(--accent);font-size:13px;font-weight:600"></div>
   <div class="menu-item" onclick="showSec('dashboard')">📊 Dashboard</div>
   <div class="menu-item" onclick="showSec('affiliate')">🔗 Afiliado</div>
   <div class="menu-item" onclick="showSec('history')">📋 Histórico</div>
@@ -299,6 +299,8 @@ let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
 let isConnecting = false;
 let lastHybridState = null;
+let _loggingIn = false;     // ✅ debounce login
+let _registering = false;   // ✅ debounce registo
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 function toast(msg,type='info',ms=4000){
@@ -310,7 +312,7 @@ function playBeep() {
   const audio = document.getElementById('hybridSound');
   if(audio) {
     audio.currentTime = 0;
-    audio.play().catch(e => {});  // erro silencioso em produção
+    audio.play().catch(()=>{});
   }
 }
 
@@ -368,8 +370,8 @@ function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
 
 function updateAll(){
   fetch('/api/status')
-    .then(r => r.json())
-    .then(data => {
+    .then(r=>r.json())
+    .then(data=>{
         if(data.error) return;
         const bot = data.bot;
         if (!bot) return;
@@ -426,7 +428,7 @@ function updateAll(){
             const ad = document.getElementById('amtDigit');
             if(ad) ad.value = (m.next_amount||0.35).toFixed(2);
           }
-        }).catch(() => {});
+        }).catch(()=>{});
         
         if (modo === 'hybrid' && data.digits && bot.signal) {
             const digitAnalysis = data.digits.analysis;
@@ -439,7 +441,7 @@ function updateAll(){
         } else {
             document.getElementById('hybridAlert')?.classList.add('hidden');
         }
-    }).catch(() => {});
+    }).catch(()=>{});
 }
 function updateDigits(digits){
   if(!digits)return;
@@ -735,39 +737,47 @@ function showTab(t){
   document.getElementById('forgotForm').style.display=t==='forgot'?'block':'none';
 }
 
+// ✅ debounce implementado
 function doLogin(){
+  if(_loggingIn) return;
+  _loggingIn = true;
   const email=document.getElementById('lEmail').value,password=document.getElementById('lPass').value;
   fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
   .then(r=>r.json()).then(d=>{
-    if(d.error){document.getElementById('authErr').textContent=d.error;return;}
+    if(d.error){document.getElementById('authErr').textContent=d.error; return;}
     if(d.user?.active_account) selectedAcct = d.user.active_account;
     document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
     document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
+    if(d.user?.name){
+      document.getElementById('userNameDisplay').textContent = '👤 ' + d.user.name;
+    }
     document.getElementById('authModal').style.display='none';
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();loadHistory();
-    
-    // ✅ Sempre iniciar polling após login
     startPolling();
-    
     if(d.user?.has_deriv_token){
       setTimeout(() => conectar(), 1000);
     }
-  });
+  }).finally(() => { _loggingIn = false; });
 }
 
+// ✅ debounce implementado
 function doRegister(){
+  if(_registering) return;
+  _registering = true;
   const d={name:document.getElementById('rName').value,email:document.getElementById('rEmail').value,password:document.getElementById('rPass').value,referral_code:document.getElementById('rRef').value};
   fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
   .then(r=>r.json()).then(d=>{
     if(d.error) document.getElementById('authErr').textContent=d.error;
     else {
-      toast('✅ Conta criada! Faça login e conecte a Deriv.','win');
+      toast('✅ Conta criada! Agora entra com o teu email e senha.', 'win', 6000);
       showTab('login');
       document.getElementById('lEmail').value = document.getElementById('rEmail').value;
+      document.getElementById('lPass').value = '';
+      document.getElementById('authErr').textContent = '';
     }
-  });
+  }).finally(() => { _registering = false; });
 }
 function doReset(){
   fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('fEmail').value})})
@@ -838,7 +848,7 @@ function setModo(m){
   const p=new URLSearchParams(location.search);
   if(p.get('connected')==='true'){
     toast('✅ Deriv conectada!','win',5000);
-    startPolling();   // ✅ polling ativo após OAuth
+    startPolling();
     setTimeout(()=>{
       fetch('/api/status').then(r=>r.json()).then(data=>{
         if(!data.bot?.authorized) conectar();
@@ -857,11 +867,14 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     if(d.user?.active_account) selectedAcct = d.user.active_account;
     document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
     document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
+    if(d.user?.name){
+      document.getElementById('userNameDisplay').textContent = '👤 ' + d.user.name;
+    }
     document.getElementById('authModal').style.display='none';
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();loadHistory();
-    startPolling();   // ✅ já existia, mantido
+    startPolling();
     if(d.user?.has_deriv_token){
       setTimeout(() => conectar(), 1500);
     }
