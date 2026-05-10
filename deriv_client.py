@@ -325,8 +325,8 @@ class DerivWebSocketClient:
                 logger.warning("🚫 Sem streaming"); return False
             if self.balance <= 0:
                 logger.warning("🚫 Saldo não carregado"); return False
-            if amount > self.balance * 0.02:
-                logger.warning("🚫 Excede 2%"); return False
+            if self.balance < 0.35:
+                logger.warning("🚫 Saldo insuficiente (mínimo 0.35 USD)"); return False
             if time.time() - self._last_trade_time < 2:
                 logger.warning("⏱️ Intervalo mínimo 2s"); return False
             if not self.authorized:
