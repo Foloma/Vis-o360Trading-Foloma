@@ -84,7 +84,6 @@
     .mbox { background: var(--card); padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
     .token-status { font-size: 12px; color: var(--accent); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
     button:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
-    /* .hybrid-notify removido — não utilizado */
   </style>
 </head>
 <body>
@@ -241,6 +240,25 @@
     </div>
   </div>
   <div id="settings-section" class="hidden">
+    <!-- Card para criar conta Deriv (link de afiliado) -->
+    <div class="card">
+      <div class="card-title">🚀 CRIAR CONTA DERIV</div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
+        Ainda não tens conta na Deriv? Cria aqui e começa a operar.
+      </p>
+      <a href="https://track.deriv.com/_d7vlKgtFe-1MjdsyM5hasGNd7ZgqdRLk/1/" target="_blank" 
+         class="btn-buy"
+         style="display:block;width:100%;text-align:center;
+                padding:14px;border-radius:12px;
+                text-decoration:none;font-weight:700;color:#000">
+        🚀 Criar Conta Deriv
+      </a>
+      <p style="color:var(--muted);font-size:11px;
+                margin-top:8px;text-align:center">
+        Após criar a conta, volta aqui e conecta o token.
+      </p>
+    </div>
+    <!-- Card para guardar token -->
     <div class="card">
       <div class="card-title">🔐 TOKEN DERIV</div>
       <a href="https://app.deriv.com/account/api-token" target="_blank" style="color:var(--accent);font-size:12px;display:block;margin-bottom:8px">
@@ -299,8 +317,8 @@ let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
 let isConnecting = false;
 let lastHybridState = null;
-let _loggingIn = false;     // ✅ debounce login
-let _registering = false;   // ✅ debounce registo
+let _loggingIn = false;
+let _registering = false;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 function toast(msg,type='info',ms=4000){
@@ -737,7 +755,6 @@ function showTab(t){
   document.getElementById('forgotForm').style.display=t==='forgot'?'block':'none';
 }
 
-// ✅ debounce implementado
 function doLogin(){
   if(_loggingIn) return;
   _loggingIn = true;
@@ -762,7 +779,6 @@ function doLogin(){
   }).finally(() => { _loggingIn = false; });
 }
 
-// ✅ debounce implementado
 function doRegister(){
   if(_registering) return;
   _registering = true;
