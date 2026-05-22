@@ -161,7 +161,7 @@
         <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
         <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" style="margin-top:8px">
         <div class="ms">
-          <div>Martingale: <span id="mgtActDig">DESATIVADO</span></div>
+          <div>Martingale: <span id="mgtActDig">INATIVO</span></div>
           <div>Próximo: <span id="mgtNxtDig">$0.35</span></div>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -189,7 +189,7 @@
         <button class="bmr" onclick="mgtDivide('amt')">− DIVIDIR</button>
         <button class="bmr" onclick="rstMgt()">RESET</button>
       </div>
-      <div class="ms"><div>Martingale: <span id="mgtAct">DESATIVADO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
+      <div class="ms"><div>Martingale: <span id="mgtAct">INATIVO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
     </div>
     <div id="hybridAlert" class="card hidden" style="background:#ffaa0010; border-color:#ffaa00">
       <div class="card-title">🔔 SINAL HÍBRIDO</div>
@@ -245,7 +245,7 @@
     <div class="card">
       <div class="card-title">🚀 CRIAR CONTA DERIV</div>
       <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
-        Ainda não tens conta na Deriv? Cria aqui e comece a operar.
+        Ainda não tens conta na Deriv? Cria aqui e começa a operar.
       </p>
       <a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" 
          class="btn-buy"
@@ -364,6 +364,31 @@ function stopPolling() {
   }
 }
 
+// ✅ Auto-connect inteligente
+async function autoConnect() {
+  if (isConnecting) return;
+  try {
+    const r = await fetch('/api/auth/auto-connect');
+    const d = await r.json();
+    if (d.status === 'already_connected') {
+      // Já está conectado – não faz nada, o polling atualiza o estado
+      return;
+    } else if (d.status === 'no_token') {
+      // Precisa de token – mostra o botão de conexão
+      document.getElementById('connectOAuthBtn').style.animation = 'pulse 1s infinite';
+      setTimeout(() => {
+        document.getElementById('connectOAuthBtn').style.animation = '';
+      }, 10000);
+      return;
+    } else if (d.status === 'connecting') {
+      // Inicia a conexão
+      await conectar();
+    }
+  } catch (e) {
+    console.error('autoConnect falhou:', e);
+  }
+}
+
 function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
     if (modo !== 'hybrid') return;
     const alertDiv = document.getElementById('hybridAlert');
@@ -422,7 +447,20 @@ function updateAll(){
         const btnBuy = document.querySelector('#pTrade .btn-buy');
         const btnSell = document.querySelector('#pTrade .btn-sell');
         const btnHybrid = document.getElementById('btnHybrid');
-        if (confidence < 60) {
+        
+        // ✅ Exibição condicional: se sem dados, mostra mensagem
+        const isWaiting = confidence === 0 && bot.signal === 'NEUTRAL';
+        if (isWaiting) {
+            sigBadge.textContent = 'Aguarde dados...';
+            sigBadge.className = 'signal neutral';
+            if (btnBuy) btnBuy.disabled = true;
+            if (btnSell) btnSell.disabled = true;
+            if (btnHybrid) btnHybrid.disabled = true;
+            document.getElementById('rsS').textContent = '...';
+            document.getElementById('mcS').textContent = '...';
+            document.getElementById('trS').textContent = '...';
+            document.getElementById('bbS').textContent = '...';
+        } else if (confidence < 60) {
             sigBadge.textContent = 'NEUTRO';
             sigBadge.className = 'signal neutral';
             if (btnBuy) btnBuy.disabled = true;
@@ -458,7 +496,7 @@ function updateAll(){
             }
         }
         fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
-          const act = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
+          const act = m.active ? `ATIVO (passo ${m.step})` : 'INATIVO';
           const nxt = '$' + (m.next_amount||0.35).toFixed(2);
           document.getElementById('mgtAct').textContent = act;
           document.getElementById('mgtNxt').textContent = nxt;
@@ -642,7 +680,7 @@ async function mgtMultiply(fieldId){
 async function mgtDivide(fieldId){
   const input = document.getElementById(fieldId);
   const current = parseFloat(input.value) || 0.35;
-  let multiplier = 2.0; // fallback
+  let multiplier = 2.0;
   try {
     const r = await fetch('/api/martingale/status');
     const m = await r.json();
@@ -843,8 +881,9 @@ function doLogin(){
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();loadHistory();
     startPolling();
+    // ✅ Usa autoConnect em vez de conectar diretamente
     if(d.user?.has_deriv_token){
-      setTimeout(() => conectar(), 1000);
+      setTimeout(() => autoConnect(), 1000);
     }
   }).finally(() => { _loggingIn = false; });
 }
@@ -863,7 +902,6 @@ function doRegister(){
       if(d.user?.name){
         document.getElementById('userNameDisplay').textContent = '👤 ' + d.user.name;
       }
-      // ✅ Mostrar admin se o utilizador for admin
       if(d.user?.role === 'admin') {
         document.getElementById('adminMI').style.display = 'block';
       }
@@ -911,7 +949,8 @@ async function saveTokAcct(acctType){
       demoStatus.style.display = 'none';
     }
     toast('✅ Token guardado para conta ' + (acctType === 'demo' ? 'Demo' : 'Real'), 'win');
-    conectar();
+    // ✅ Usa autoConnect em vez de conectar diretamente
+    autoConnect();
   }
 }
 
@@ -954,8 +993,8 @@ function setModo(m){
     startPolling();
     setTimeout(()=>{
       fetch('/api/status').then(r=>r.json()).then(data=>{
-        if(!data.bot?.authorized) conectar();
-      }).catch(()=>conectar());
+        if(!data.bot?.authorized) autoConnect();
+      }).catch(()=>autoConnect());
     },2000);
     history.replaceState({},'',location.pathname);
   }
@@ -979,7 +1018,7 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     initSyms();loadAffiliate();loadHistory();
     startPolling();
     if(d.user?.has_deriv_token){
-      setTimeout(() => conectar(), 1500);
+      setTimeout(() => autoConnect(), 1500);
     }
   }
 });
