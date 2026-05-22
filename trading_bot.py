@@ -89,12 +89,6 @@ class TradingBot:
         return (recent[-1] - recent[0]) / recent[0] * 100
 
     def calculate_signal(self):
-        """Calcula o sinal combinando análise técnica e, para índices R_, o DigitAnalyzer."""
-        prices = self.indicators.get_prices(self.current_symbol)
-        # Exige um mínimo de 20 preços para ter indicadores fiáveis
-        if not prices or len(prices) < 20:
-            return 'NEUTRAL', 0
-
         if not self.last_analysis:
             return 'NEUTRAL', 0
 
@@ -113,62 +107,24 @@ class TradingBot:
         total_votes = len(votes)
 
         if total_votes == 0:
-            tech_signal = 0
-            tech_confidence = 0
-        elif buy_votes > sell_votes:
-            tech_signal = 1          # BUY
-            tech_confidence = (buy_votes / total_votes) * 100
+            return 'NEUTRAL', 0
+
+        if buy_votes > sell_votes:
+            signal = 'BUY'
+            confidence = (buy_votes / total_votes) * 100
         elif sell_votes > buy_votes:
-            tech_signal = -1         # SELL
-            tech_confidence = (sell_votes / total_votes) * 100
-        else:
-            tech_signal = 0
-            tech_confidence = 0
-
-        # Ajuste por momentum
-        momentum = self.get_momentum()
-        if tech_signal == 1 and momentum > 0.1:
-            tech_confidence = min(tech_confidence + 5, 100)
-        elif tech_signal == -1 and momentum < -0.1:
-            tech_confidence = min(tech_confidence + 5, 100)
-
-        # Para índices sintéticos (R_*), combina com o sinal do DigitAnalyzer
-        if 'R_' in self.current_symbol and self.digit_analyzer:
-            da = self.digit_analyzer.get_analysis()
-            rec = da.get('recommended_action')
-            digit_confidence = da.get('confidence', 0)
-
-            digit_signal = 0
-            if rec == 'BUY':
-                digit_signal = 1
-            elif rec == 'SELL':
-                digit_signal = -1
-
-            w_tech = config.SYNTHETIC_TECHNICAL_WEIGHT
-            w_digit = config.SYNTHETIC_DIGIT_WEIGHT
-
-            # Combinação ponderada
-            weighted_sum = (tech_signal * tech_confidence * w_tech) + (digit_signal * digit_confidence * w_digit)
-
-            if weighted_sum > 0:
-                final_signal = 'BUY'
-                final_confidence = min(abs(weighted_sum), 100)
-            elif weighted_sum < 0:
-                final_signal = 'SELL'
-                final_confidence = min(abs(weighted_sum), 100)
-            else:
-                final_signal = 'NEUTRAL'
-                final_confidence = 0
-
-            return final_signal, round(final_confidence, 1)
-
-        # Sem DigitAnalyzer ou símbolo não R_ → sinal puramente técnico
-        if tech_signal == 1:
-            return 'BUY', min(tech_confidence, 100)
-        elif tech_signal == -1:
-            return 'SELL', min(tech_confidence, 100)
+            signal = 'SELL'
+            confidence = (sell_votes / total_votes) * 100
         else:
             return 'NEUTRAL', 0
+
+        momentum = self.get_momentum()
+        if signal == 'BUY' and momentum > 0.1:
+            confidence = min(confidence + 5, 100)
+        elif signal == 'SELL' and momentum < -0.1:
+            confidence = min(confidence + 5, 100)
+
+        return signal, min(confidence, 100)
 
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
@@ -337,9 +293,8 @@ class TradingBot:
             return base_amount * (multiplier ** self.martingale['step'])
 
     def apply_martingale_after_loss(self, last_trade_amount):
+        """Chamado manualmente via rota /api/martingale/apply. Ignora a flag 'enabled'."""
         with self._state_lock:
-            if not config.MARTINGALE_CONFIG.get('enabled', False):
-                return False, "Martingale desativado"
             max_steps = config.MARTINGALE_CONFIG.get('max_steps', 2)
             if self.martingale['step'] >= max_steps:
                 return False, f"Máximo de {max_steps} perdas consecutivas atingido"
