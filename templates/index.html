@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Foloma Trading</title>
+  <title>Foloma Visão 360</title>
   <style>
     :root {
       --bg: #020617;
@@ -37,6 +37,7 @@
     .price { font-size: 34px; font-weight: 900; color: var(--accent); }
     .signal { font-weight: 700; padding: 6px 12px; border-radius: 20px; }
     .buy { background: var(--accent); color: #000; } .sell { background: var(--danger); }
+    .neutral { background: var(--muted); color: #fff; }
     .trade-box { display: grid; gap: 12px; }
     input { width: 100%; padding: 14px; border-radius: 10px; border: 1px solid var(--border); background: #020617; color: white; }
     input:focus { border-color: var(--accent); box-shadow: 0 0 10px #00f0b550; }
@@ -80,6 +81,7 @@
     .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--card); border-radius: 14px; padding: 14px 22px; font-size: 13px; z-index: 2000; display: none; text-align: center; max-width: 320px; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
     .toast.show { display: block; animation: su .3s ease; }
     @keyframes su { from { transform: translateX(-50%) translateY(16px); opacity: 0 } to { transform: translateX(-50%) translateY(0); opacity: 1 } }
+    @keyframes pulse { 0%{box-shadow:0 0 0 0 #00f0b5} 70%{box-shadow:0 0 15px 5px #00f0b5} 100%{box-shadow:0 0 0 0 #00f0b5} }
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 1100; display: flex; align-items: center; justify-content: center; }
     .mbox { background: var(--card); padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
     .token-status { font-size: 12px; color: var(--accent); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
@@ -89,10 +91,7 @@
 <body>
 <div class="top-bar">
   <button class="menu-btn" onclick="toggleMenu()">☰</button>
-  <div class="logo">
-    <img src="/static/logo.svg" height="28" alt="Foloma">
-    FOLOMA
-  </div>
+  <div class="logo">FOLOMA VISÃO 360</div>
   <div class="account-switch" id="accountSwitch">
     <button id="btnDemo" class="active" onclick="selAcct('demo')">DEMO</button>
     <button id="btnReal" onclick="selAcct('real')">REAL</button>
@@ -158,6 +157,7 @@
           <div class="big-p wait" id="bigP">AGUARDANDO</div>
           <div id="cdown" style="color:#ffaa00;font-size:14px;margin-top:8px">⏱ 10 ticks</div>
         </div>
+        <div id="seqInfo" style="font-size:12px;color:var(--muted);text-align:center;margin-top:6px"></div>
         <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
         <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" style="margin-top:8px">
         <div class="ms">
@@ -165,8 +165,9 @@
           <div>Próximo: <span id="mgtNxtDig">$0.35</span></div>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:8px">
-          <button class="bm" onclick="mgt('amtDigit')">MARTINGALE</button>
-          <button class="bmr" onclick="rstMgtDigit()">RESET</button>
+          <button class="bm" onclick="mgtMultiply('amtDigit')">✕ MULTIPLICAR</button>
+          <button class="bmr" onclick="mgtDivide('amtDigit')">− DIVIDIR</button>
+          <button class="bmr" onclick="rstMgt()">RESET</button>
         </div>
         <div class="dbet" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
           <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')">ÍMPAR</button>
@@ -184,7 +185,8 @@
       </div>
       <button id="btnHybrid" class="btn-buy hidden" style="width:100%;margin-top:8px" onclick="trade('BUY')">🔗 EXECUTAR HÍBRIDO</button>
       <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="bm" onclick="mgt('amt')">MARTINGALE</button>
+        <button class="bm" onclick="mgtMultiply('amt')">✕ MULTIPLICAR</button>
+        <button class="bmr" onclick="mgtDivide('amt')">− DIVIDIR</button>
         <button class="bmr" onclick="rstMgt()">RESET</button>
       </div>
       <div class="ms"><div>Martingale: <span id="mgtAct">DESATIVADO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
@@ -240,13 +242,12 @@
     </div>
   </div>
   <div id="settings-section" class="hidden">
-    <!-- Card para criar conta Deriv (link de afiliado) -->
     <div class="card">
       <div class="card-title">🚀 CRIAR CONTA DERIV</div>
       <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
-        Ainda não tens conta na Deriv? Cria aqui e começa a operar.
+        Ainda não tens conta na Deriv? Cria aqui e comece a operar.
       </p>
-      <a href="https://track.deriv.com/_d7vlKgtFe-1MjdsyM5hasGNd7ZgqdRLk/1/" target="_blank" 
+      <a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" 
          class="btn-buy"
          style="display:block;width:100%;text-align:center;
                 padding:14px;border-radius:12px;
@@ -258,7 +259,6 @@
         Após criar a conta, volta aqui e conecta o token.
       </p>
     </div>
-    <!-- Card para guardar token -->
     <div class="card">
       <div class="card-title">🔐 TOKEN DERIV</div>
       <a href="https://app.deriv.com/account/api-token" target="_blank" style="color:var(--accent);font-size:12px;display:block;margin-bottom:8px">
@@ -282,12 +282,18 @@
       <div id="adminUserList" style="margin-top:8px"></div>
       <button class="btn-buy" style="width:100%;margin-top:12px;font-size:13px" onclick="loadAdminUsers()">🔄 Actualizar</button>
     </div>
+    <div class="card">
+      <div class="card-title">💸 COMISSÃO DE AFILIADO (%)</div>
+      <input type="number" id="markupInput" value="0.5" step="0.1" min="0" max="3">
+      <button class="btn-buy" style="width:100%;margin-top:8px" onclick="saveMarkup()">GUARDAR</button>
+      <div id="markupMsg" style="text-align:center;margin-top:6px;font-size:12px"></div>
+    </div>
   </div>
 </div>
 
 <div id="authModal" class="modal">
   <div class="mbox">
-    <h2 style="color:var(--accent);text-align:center;margin-bottom:16px">FOLOMA</h2>
+    <h2 style="color:var(--accent);text-align:center;margin-bottom:16px">FOLOMA VISÃO 360</h2>
     <div style="display:flex;gap:8px;margin-bottom:16px">
       <button class="bmr" style="flex:1" onclick="showTab('login')">ENTRAR</button>
       <button class="bmr" style="flex:1" onclick="showTab('register')">REGISTAR</button>
@@ -410,9 +416,27 @@ function updateAll(){
         document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
         document.getElementById('cur').textContent=bot.currency||'USD';
         document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
-        const sig=bot.signal||'NEUTRAL';
-        document.getElementById('sigBadge').textContent=sig;
-        document.getElementById('sigBadge').className='signal '+(sig==='BUY'?'buy':(sig==='SELL'?'sell':''));
+
+        const confidence = bot.confidence || 0;
+        const sigBadge = document.getElementById('sigBadge');
+        const btnBuy = document.querySelector('#pTrade .btn-buy');
+        const btnSell = document.querySelector('#pTrade .btn-sell');
+        const btnHybrid = document.getElementById('btnHybrid');
+        if (confidence < 60) {
+            sigBadge.textContent = 'NEUTRO';
+            sigBadge.className = 'signal neutral';
+            if (btnBuy) btnBuy.disabled = true;
+            if (btnSell) btnSell.disabled = true;
+            if (btnHybrid) btnHybrid.disabled = true;
+        } else {
+            const sig = bot.signal || 'NEUTRAL';
+            sigBadge.textContent = sig;
+            sigBadge.className = 'signal ' + (sig==='BUY'?'buy':(sig==='SELL'?'sell':'neutral'));
+            if (btnBuy) btnBuy.disabled = false;
+            if (btnSell) btnSell.disabled = false;
+            if (btnHybrid) btnHybrid.disabled = false;
+        }
+
         document.getElementById('rsS').textContent=(bot.analysis?.rsi?.score||0).toFixed(1);
         document.getElementById('mcS').textContent=bot.analysis?.macd?.desc||'---';
         document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
@@ -461,6 +485,7 @@ function updateAll(){
         }
     }).catch(()=>{});
 }
+
 function updateDigits(digits){
   if(!digits)return;
   const tpd=digits.ticks_per_digit||10, tr=Math.max(0,Math.round(digits.ticks_remaining||tpd));
@@ -477,6 +502,16 @@ function updateDigits(digits){
     document.getElementById('histRow').innerHTML=html;
     const scroll = document.getElementById('histScroll');
     scroll.scrollLeft = scroll.scrollWidth;
+  }
+  const analysis = digits.analysis;
+  if (analysis && analysis.sequences) {
+    const seq = analysis.sequences;
+    const seqDiv = document.getElementById('seqInfo');
+    if (seq && seq.descricao) {
+      seqDiv.textContent = seq.descricao;
+    } else {
+      seqDiv.textContent = '';
+    }
   }
 }
 
@@ -580,6 +615,7 @@ function trade(action){
     }
   }).catch(()=>toast('❌ Erro de rede','loss'));
 }
+
 function tradeDigit(pred){
   const amt = parseFloat(document.getElementById('amtDigit').value) || 0.35;
   fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred, amount:amt})})
@@ -591,27 +627,42 @@ function tradeDigit(pred){
     }
   }).catch(()=>toast('❌ Erro de rede','loss'));
 }
-async function mgt(fieldId){
+
+async function mgtMultiply(fieldId){
   const amt = parseFloat(document.getElementById(fieldId).value);
   const r = await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount: amt})});
   const d = await r.json();
   if(d.error) toast('❌ '+d.error,'loss');
   else {
-    document.getElementById('amt').value = d.martingale.next_amount.toFixed(2);
-    document.getElementById('amtDigit').value = d.martingale.next_amount.toFixed(2);
+    document.getElementById(fieldId).value = d.martingale.next_amount.toFixed(2);
     toast('📈 '+d.martingale.message,'info');
   }
 }
+
+async function mgtDivide(fieldId){
+  const input = document.getElementById(fieldId);
+  const current = parseFloat(input.value) || 0.35;
+  let multiplier = 2.0; // fallback
+  try {
+    const r = await fetch('/api/martingale/status');
+    const m = await r.json();
+    if (m && m.multiplier) {
+      multiplier = parseFloat(m.multiplier) || 2.0;
+    }
+  } catch (e) { /* mantém fallback */ }
+  const newVal = current / multiplier;
+  if (newVal >= 0.35) {
+    input.value = newVal.toFixed(2);
+    toast('Valor dividido', 'info');
+  } else {
+    toast('Valor mínimo é $0.35', 'loss');
+  }
+}
+
 async function rstMgt(){
   await fetch('/api/martingale/reset',{method:'POST'});
   document.getElementById('amt').value = '0.35';
   document.getElementById('amtDigit').value = '0.35';
-  toast('🔄 Martingale resetado','info');
-}
-async function rstMgtDigit(){
-  await fetch('/api/martingale/reset',{method:'POST'});
-  document.getElementById('amtDigit').value = '0.35';
-  document.getElementById('amt').value = '0.35';
   toast('🔄 Martingale resetado','info');
 }
 
@@ -656,7 +707,7 @@ function loadAffiliate() {
   }
 }
 
-function cpLink(){const l=document.getElementById('refLink');l.select();document.execCommand('copy');toast('✅ Link copiado!','win');}
+function cpLink(){const l=document.getElementById('refLink');l.select();navigator.clipboard.writeText(l.value).then(()=>toast('✅ Link copiado!','win'));}
 
 function loadHistory(){
   fetch('/api/report').then(r=>r.json()).then(data=>{
@@ -741,12 +792,31 @@ function loadAdminUsers(){
     document.getElementById('adminUserList').innerHTML = html || '<p style="color:var(--muted)">Sem utilizadores.</p>';
   }).catch(()=>toast('❌ Erro ao carregar utilizadores','loss'));
 }
+
 function toggleUser(email, enable){
   fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email, enable})})
   .then(r=>r.json()).then(d=>{
     if(d.error) toast('❌ '+d.error,'loss');
     else { toast('✅ '+d.message,'win'); loadAdminUsers(); }
   });
+}
+
+async function saveMarkup() {
+  const pct = parseFloat(document.getElementById('markupInput').value);
+  if (isNaN(pct) || pct < 0 || pct > 3) {
+    return toast('Valor inválido (0–3%)', 'loss');
+  }
+  const r = await fetch('/api/admin/set-markup', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({percentage: pct})
+  });
+  const d = await r.json();
+  if (d.error) {
+    document.getElementById('markupMsg').innerHTML = '❌ ' + d.error;
+  } else {
+    document.getElementById('markupMsg').innerHTML = '✅ Atualizado para ' + d.percentage + '%';
+  }
 }
 
 function showTab(t){
@@ -787,14 +857,25 @@ function doRegister(){
   .then(r=>r.json()).then(d=>{
     if(d.error) document.getElementById('authErr').textContent=d.error;
     else {
-      toast('✅ Conta criada! Agora entra com o teu email e senha.', 'win', 6000);
-      showTab('login');
-      document.getElementById('lEmail').value = document.getElementById('rEmail').value;
-      document.getElementById('lPass').value = '';
-      document.getElementById('authErr').textContent = '';
+      toast('✅ Conta criada! Agora conecta à Deriv.', 'win', 6000);
+      document.getElementById('authModal').style.display='none';
+      document.getElementById('mainContent').style.display='block';
+      if(d.user?.name){
+        document.getElementById('userNameDisplay').textContent = '👤 ' + d.user.name;
+      }
+      // ✅ Mostrar admin se o utilizador for admin
+      if(d.user?.role === 'admin') {
+        document.getElementById('adminMI').style.display = 'block';
+      }
+      initSyms(); loadAffiliate(); loadHistory();
+      startPolling();
+      const connectBtn = document.getElementById('connectOAuthBtn');
+      connectBtn.style.animation = 'pulse 1s infinite';
+      setTimeout(() => { connectBtn.style.animation = ''; }, 10000);
     }
   }).finally(() => { _registering = false; });
 }
+
 function doReset(){
   fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('fEmail').value})})
   .then(r=>r.json()).then(d=>{document.getElementById('fMsg').innerHTML=d.error?'❌ '+d.error:'✅ '+(d.message||'Link enviado!');});
@@ -840,7 +921,13 @@ function showSec(s){
   document.getElementById(s+'-section').classList.remove('hidden');
   toggleMenu();
   if(s==='affiliate') loadAffiliate();
-  if(s==='admin') loadAdminUsers();
+  if(s==='admin'){
+    loadAdminUsers();
+    fetch('/api/admin/settings')
+      .then(r=>r.json())
+      .then(d=>{ if(d.markup !== undefined) document.getElementById('markupInput').value = d.markup; })
+      .catch(()=>{});
+  }
   if(s==='history') loadHistory();
 }
 function setModo(m){
