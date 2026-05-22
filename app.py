@@ -16,6 +16,37 @@ DATABASE_PATH = os.path.join(DATA_PATH, 'foloma.db')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+# ==================== ENVIO DE EMAIL (opcional) ====================
+mail = None
+try:
+    from flask_mail import Mail, Message
+    mail = Mail()
+    EMAIL_ENABLED = True
+except ImportError:
+    logger.warning("Flask-Mail não instalado. Emails não serão enviados (apenas log).")
+    EMAIL_ENABLED = False
+
+def send_reset_email(email, reset_token):
+    """Envia o link de recuperação de password. Se email não configurado, loga o link."""
+    reset_url = f"{os.environ.get('BASE_URL', 'http://localhost:5000')}/reset-password?token={reset_token}"
+    if EMAIL_ENABLED and mail:
+        try:
+            msg = Message(
+                subject="Foloma Visão 360 - Recuperação de senha",
+                recipients=[email],
+                body=f"Use este link para redefinir a sua senha: {reset_url}\nValidade: 1 hora.",
+                sender=os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@foloma.com')
+            )
+            mail.send(msg)
+            logger.info(f"Email de recuperação enviado para {email}")
+            return True
+        except Exception as e:
+            logger.error(f"Falha ao enviar email para {email}: {e}")
+            return False
+    else:
+        logger.info(f"EMAIL NÃO CONFIGURADO – link de recuperação para {email}: {reset_url}")
+        return False
+
 # ==================== ENCRIPTAÇÃO DE TOKENS ====================
 try:
     from cryptography.fernet import Fernet
@@ -92,10 +123,30 @@ def init_db():
         result TEXT,
         timestamp REAL DEFAULT (strftime('%s','now'))
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )''')
     conn.commit()
     conn.close()
 
 init_db()
+
+# ==================== CARREGAR MARKUP DA BASE DE DADOS ====================
+def load_markup_from_db():
+    """Sobrescreve config.MARKUP_PERCENTAGE se existir na BD."""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        row = conn.execute("SELECT value FROM settings WHERE key='markup_percentage'").fetchone()
+        if row:
+            from config import config
+            config.MARKUP_PERCENTAGE = float(row[0])
+            logger.info(f"Markup carregado da BD: {config.MARKUP_PERCENTAGE}%")
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao carregar markup: {e}")
+
+load_markup_from_db()
 
 # ==================== MIGRAÇÃO DE users.json ====================
 def migrate_from_json():
@@ -266,7 +317,6 @@ sessions = {}
 sessions_lock = threading.RLock()
 oauth_states = {}
 oauth_states_lock = threading.Lock()
-# Lock para evitar múltiplas conexões simultâneas por utilizador
 connecting_lock = threading.Lock()
 connecting_users = set()
 
@@ -400,6 +450,17 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 
 from config import config
 
+# Configuração de email (se disponível)
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.example.com')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() == 'true'
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@foloma.com')
+
+if EMAIL_ENABLED:
+    mail.init_app(app)
+
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
@@ -461,7 +522,6 @@ def auth_status():
 @app.route('/api/auth/register', methods=['POST'])
 @limit_if_available("10 per hour")
 def register():
-    # ✅ Limpa qualquer sessão existente antes de registar
     session.clear()
     try:
         d = request.json
@@ -474,7 +534,28 @@ def register():
         user = AuthService.register(name, email, password, ref)
         if not user:
             return jsonify({'error': 'Email já registado'}), 400
-        return jsonify({'status': 'ok', 'message': 'Conta criada!', 'referral_code': user['referral_link_code']})
+
+        # ✅ Auto‑login após registo
+        session.permanent = True
+        session['user_id'] = user['id']
+        session['user_name'] = user['name']
+        session['user_email'] = user['email']
+        session['user_role'] = user.get('role', 'user')
+        logger.info(f"Registo e auto‑login: {email}")
+
+        return jsonify({
+            'status': 'ok',
+            'message': 'Conta criada! Conecte à Deriv para começar.',
+            'user': {
+                'id': user['id'],
+                'name': user['name'],
+                'email': user['email'],
+                'role': user.get('role'),
+                'has_deriv_token': False,
+                'active_account': 'demo'
+            },
+            'referral_code': user['referral_link_code']
+        })
     except Exception:
         logger.exception("Erro no registo")
         return jsonify({'error': 'Erro interno'}), 500
@@ -516,6 +597,20 @@ def logout():
     session.clear()
     return jsonify({'status': 'ok'})
 
+@app.route('/api/disconnect', methods=['POST'])
+@require_auth
+def disconnect():
+    """Desconectar manualmente o WebSocket."""
+    user_id = session['user_id']
+    sess = get_session(user_id)
+    if sess:
+        sess['client']._stop_event.set()
+        # Removida a chamada dupla a _close_connection() – _stop_event já trata do fecho
+        with sessions_lock:
+            sessions.pop(user_id, None)
+        logger.info(f"Sessão de {user_id} desconectada manualmente")
+    return jsonify({'status': 'ok', 'message': 'Desconectado'})
+
 @app.route('/api/auth/save_token', methods=['POST'])
 @require_auth
 def save_token():
@@ -547,6 +642,10 @@ def reset_password():
         conn.commit()
     finally:
         conn.close()
+
+    # Envia o email (ou regista no log)
+    send_reset_email(email, token)
+
     return jsonify({'status': 'ok', 'message': 'Se o email existir, receberá um link.'})
 
 @app.route('/api/auth/reset-password-confirm', methods=['POST'])
@@ -577,7 +676,6 @@ def reset_password_confirm():
 @limit_if_available("10 per minute")
 def api_connect():
     user_id = session['user_id']
-    # ✅ Protecção contra múltiplas conexões simultâneas
     with connecting_lock:
         if user_id in connecting_users:
             logger.info(f"Conectando já em curso para {user_id}, ignorando pedido duplicado")
@@ -653,7 +751,6 @@ def switch_account():
 def status():
     user_id = session['user_id']
     sess = get_session(user_id)
-    # ✅ Já não cria sessão automaticamente – retorna desconectado se não existir
     if not sess:
         return jsonify({
             'bot': {'connected': False, 'authorized': False},
@@ -672,8 +769,7 @@ def status():
     bot_status['streaming'] = client.streaming if client else False
     analysis = analyzer.get_analysis()
     
-    # 🔍 Log para debug
-    logger.info(f"📊 STATUS: connected={bot_status.get('connected')}, authorized={bot_status.get('authorized')}, balance={bot_status.get('balance')}")
+    logger.debug(f"📊 STATUS: connected={bot_status.get('connected')}, authorized={bot_status.get('authorized')}, balance={bot_status.get('balance')}")
     
     return jsonify({
         'bot': bot_status,
@@ -825,7 +921,7 @@ def trade():
             return jsonify({'error': 'Valor inválido'}), 400
         bot = sess['trading_bot']
         sig, conf = bot.calculate_signal()
-        if conf < config.RISK_LIMITS.get('min_confidence', 50):
+        if conf < config.RISK_LIMITS.get('min_confidence', 60):
             return jsonify({'error': f'Confiança insuficiente: {conf:.1f}%'}), 400
         ok = sess['client'].place_trade('CALL' if action == 'BUY' else 'PUT', amt, False)
         if ok:
@@ -1026,16 +1122,38 @@ def credit_affiliate_commission(user_email, amount):
 @app.route('/api/affiliate/stats')
 @require_auth
 def affiliate_stats():
-    return jsonify({'total_referrals': 0, 'total_commission': 0.0, 'pending_commission': 0.0, 'paid_commission': 0.0})
+    """Devolve estatísticas do afiliado com base na tabela referrals."""
+    email = session.get('user_email')
+    if not email:
+        return jsonify({'error': 'Utilizador não encontrado'}), 404
+
+    # ✅ Movido para antes da conexão – evita dupla conexão SQLite
+    user = UserStore.get(email)
+    if not user:
+        return jsonify({'error': 'Utilizador não encontrado'}), 404
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        referred_count = conn.execute(
+            'SELECT COUNT(*) FROM referrals WHERE referrer_email = ?', (email,)
+        ).fetchone()[0]
+        total_commission = user.get('affiliate_earnings', 0.0)
+    finally:
+        conn.close()
+
+    return jsonify({
+        'total_referrals': referred_count,
+        'total_commission': total_commission,
+        'pending_commission': 0.0,
+        'paid_commission': total_commission
+    })
 
 @app.route('/api/affiliate/link')
 @require_auth
 def affiliate_link():
-    # 1. Tentar obter user pelo email na sessão
     email = session.get('user_email')
     user = UserStore.get(email) if email else None
 
-    # 2. Fallback: buscar pelo user_id (sempre presente)
     if not user:
         user_id = session.get('user_id')
         if user_id:
@@ -1045,7 +1163,6 @@ def affiliate_link():
                 if row:
                     email = row[0]
                     user = UserStore.get(email)
-                    # CORRIGE a sessão para futuros pedidos
                     session['user_email'] = email
             finally:
                 conn.close()
@@ -1053,7 +1170,6 @@ def affiliate_link():
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
 
-    # Garantir que existe referral_link_code (para utilizadores antigos)
     if not user.get('referral_link_code'):
         ref_link = base64.b64encode(hashlib.md5(user['id'].encode()).digest()).hex()[:8]
         conn = sqlite3.connect(DATABASE_PATH)
@@ -1069,11 +1185,9 @@ def affiliate_link():
     link = f"{base_url}/?ref={user['referral_link_code']}"
     return jsonify({'link': link, 'code': user['referral_link_code']})
 
-
 @app.route('/api/affiliate/earnings')
 @require_auth
 def affiliate_earnings():
-    # Mesma lógica de fallback
     email = session.get('user_email')
     user = UserStore.get(email) if email else None
 
@@ -1198,6 +1312,36 @@ def admin_clear_tokens():
                 del sessions[uid]
                 logger.info(f"Sessão de {uid} encerrada")
     return jsonify({'status': 'ok', 'message': 'Tokens removidos. Utilizador terá que refazer OAuth.'})
+
+@app.route('/api/admin/settings')
+@require_admin
+def admin_settings():
+    """Devolve o markup atual da base de dados."""
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key='markup_percentage'").fetchone()
+        markup = float(row[0]) if row else config.MARKUP_PERCENTAGE
+    finally:
+        conn.close()
+    return jsonify({'markup': markup})
+
+@app.route('/api/admin/set-markup', methods=['POST'])
+@require_admin
+def set_markup():
+    d = request.json
+    pct = float(d.get('percentage', 0.5))
+    if not (0.0 <= pct <= 3.0):
+        return jsonify({'error': 'Percentagem deve estar entre 0% e 3%'}), 400
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('markup_percentage', ?)",
+                     (str(pct),))
+        conn.commit()
+    finally:
+        conn.close()
+    config.MARKUP_PERCENTAGE = pct
+    logger.info(f"Markup alterado para {pct}%")
+    return jsonify({'status': 'ok', 'percentage': pct})
 
 # ==================== INICIAR ====================
 if __name__ == '__main__':
