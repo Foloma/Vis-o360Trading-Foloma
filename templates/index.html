@@ -161,7 +161,7 @@
         <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
         <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" style="margin-top:8px">
         <div class="ms">
-          <div>Martingale: <span id="mgtActDig">INATIVO</span></div>
+          <div>Martingale: <span id="mgtActDig">DESATIVADO</span></div>
           <div>Próximo: <span id="mgtNxtDig">$0.35</span></div>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -189,7 +189,7 @@
         <button class="bmr" onclick="mgtDivide('amt')">− DIVIDIR</button>
         <button class="bmr" onclick="rstMgt()">RESET</button>
       </div>
-      <div class="ms"><div>Martingale: <span id="mgtAct">INATIVO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
+      <div class="ms"><div>Martingale: <span id="mgtAct">DESATIVADO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
     </div>
     <div id="hybridAlert" class="card hidden" style="background:#ffaa0010; border-color:#ffaa00">
       <div class="card-title">🔔 SINAL HÍBRIDO</div>
@@ -364,31 +364,6 @@ function stopPolling() {
   }
 }
 
-// ✅ Auto-connect inteligente
-async function autoConnect() {
-  if (isConnecting) return;
-  try {
-    const r = await fetch('/api/auth/auto-connect');
-    const d = await r.json();
-    if (d.status === 'already_connected') {
-      // Já está conectado – não faz nada, o polling atualiza o estado
-      return;
-    } else if (d.status === 'no_token') {
-      // Precisa de token – mostra o botão de conexão
-      document.getElementById('connectOAuthBtn').style.animation = 'pulse 1s infinite';
-      setTimeout(() => {
-        document.getElementById('connectOAuthBtn').style.animation = '';
-      }, 10000);
-      return;
-    } else if (d.status === 'connecting') {
-      // Inicia a conexão
-      await conectar();
-    }
-  } catch (e) {
-    console.error('autoConnect falhou:', e);
-  }
-}
-
 function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
     if (modo !== 'hybrid') return;
     const alertDiv = document.getElementById('hybridAlert');
@@ -417,6 +392,37 @@ function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
     }
 }
 
+function updateHistSummary(bot) {
+  const s = bot.stats;
+  const d = bot.daily_stats;
+  const sum = document.getElementById('histSummary');
+  if (!sum || !s) return;
+
+  const profitLoss = s.profit_loss || 0;
+  const cor = profitLoss >= 0 ? 'var(--accent)' : 'var(--danger)';
+  const sinal = profitLoss >= 0 ? '+' : '';
+
+  sum.innerHTML = `
+    <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+      <div style="font-size:10px;color:var(--muted)">TOTAL TRADES</div>
+      <div style="font-size:20px;font-weight:bold">${s.total || 0}</div>
+    </div>
+    <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+      <div style="font-size:10px;color:var(--muted)">WIN RATE</div>
+      <div style="font-size:20px;font-weight:bold;color:var(--accent)">${s.win_rate || 0}%</div>
+    </div>
+    <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+      <div style="font-size:10px;color:var(--muted)">LUCRO/PERDA</div>
+      <div style="font-size:20px;font-weight:bold;color:${cor}">
+        ${sinal}$${Math.abs(profitLoss).toFixed(2)}
+      </div>
+    </div>
+    <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
+      <div style="font-size:10px;color:var(--muted)">HOJE</div>
+      <div style="font-size:20px;font-weight:bold">${d ? d.trades : 0}</div>
+    </div>`;
+}
+
 function updateAll(){
   fetch('/api/status')
     .then(r=>r.json())
@@ -442,25 +448,15 @@ function updateAll(){
         document.getElementById('cur').textContent=bot.currency||'USD';
         document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
 
-        const confidence = bot.confidence || 0;
+        // ✅ Confiança tratada como número, fallback 0
+        let confidence = parseFloat(bot.confidence);
+        if (isNaN(confidence)) confidence = 0;
+
         const sigBadge = document.getElementById('sigBadge');
         const btnBuy = document.querySelector('#pTrade .btn-buy');
         const btnSell = document.querySelector('#pTrade .btn-sell');
         const btnHybrid = document.getElementById('btnHybrid');
-        
-        // ✅ Exibição condicional: se sem dados, mostra mensagem
-        const isWaiting = confidence === 0 && bot.signal === 'NEUTRAL';
-        if (isWaiting) {
-            sigBadge.textContent = 'Aguarde dados...';
-            sigBadge.className = 'signal neutral';
-            if (btnBuy) btnBuy.disabled = true;
-            if (btnSell) btnSell.disabled = true;
-            if (btnHybrid) btnHybrid.disabled = true;
-            document.getElementById('rsS').textContent = '...';
-            document.getElementById('mcS').textContent = '...';
-            document.getElementById('trS').textContent = '...';
-            document.getElementById('bbS').textContent = '...';
-        } else if (confidence < 60) {
+        if (confidence < 60) {
             sigBadge.textContent = 'NEUTRO';
             sigBadge.className = 'signal neutral';
             if (btnBuy) btnBuy.disabled = true;
@@ -496,7 +492,7 @@ function updateAll(){
             }
         }
         fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
-          const act = m.active ? `ATIVO (passo ${m.step})` : 'INATIVO';
+          const act = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
           const nxt = '$' + (m.next_amount||0.35).toFixed(2);
           document.getElementById('mgtAct').textContent = act;
           document.getElementById('mgtNxt').textContent = nxt;
@@ -510,6 +506,9 @@ function updateAll(){
           }
         }).catch(()=>{});
         
+        // ✅ Atualizar resumo automaticamente
+        updateHistSummary(bot);
+
         if (modo === 'hybrid' && data.digits && bot.signal) {
             const digitAnalysis = data.digits.analysis;
             if (digitAnalysis && digitAnalysis.recommended_action) {
@@ -881,9 +880,8 @@ function doLogin(){
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();loadHistory();
     startPolling();
-    // ✅ Usa autoConnect em vez de conectar diretamente
     if(d.user?.has_deriv_token){
-      setTimeout(() => autoConnect(), 1000);
+      setTimeout(() => conectar(), 1000);
     }
   }).finally(() => { _loggingIn = false; });
 }
@@ -949,8 +947,7 @@ async function saveTokAcct(acctType){
       demoStatus.style.display = 'none';
     }
     toast('✅ Token guardado para conta ' + (acctType === 'demo' ? 'Demo' : 'Real'), 'win');
-    // ✅ Usa autoConnect em vez de conectar diretamente
-    autoConnect();
+    conectar();
   }
 }
 
@@ -993,8 +990,8 @@ function setModo(m){
     startPolling();
     setTimeout(()=>{
       fetch('/api/status').then(r=>r.json()).then(data=>{
-        if(!data.bot?.authorized) autoConnect();
-      }).catch(()=>autoConnect());
+        if(!data.bot?.authorized) conectar();
+      }).catch(()=>conectar());
     },2000);
     history.replaceState({},'',location.pathname);
   }
@@ -1018,7 +1015,7 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     initSyms();loadAffiliate();loadHistory();
     startPolling();
     if(d.user?.has_deriv_token){
-      setTimeout(() => autoConnect(), 1500);
+      setTimeout(() => conectar(), 1500);
     }
   }
 });
