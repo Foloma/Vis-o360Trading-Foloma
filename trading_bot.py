@@ -4,7 +4,6 @@ import threading
 from collections import deque
 from datetime import datetime
 from indicators import TechnicalIndicators
-from synthetics import digit_analyzer
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -64,9 +63,8 @@ class TradingBot:
         self.current_symbol = tick['symbol']
         self.indicators.add_price(self.current_price, self.current_symbol)
 
-        if 'R_' in self.current_symbol:
-            analyzer = self.digit_analyzer if self.digit_analyzer else digit_analyzer
-            analyzer.add_tick(self.current_price)
+        if 'R_' in self.current_symbol and self.digit_analyzer:
+            self.digit_analyzer.add_tick(self.current_price)
 
         self.last_analysis = self.indicators.get_all_indicators(self.current_symbol)
         if self.client:
@@ -131,7 +129,7 @@ class TradingBot:
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
         with self._state_lock:
-            self.trades.append(trade_data)          # ✅ movido para dentro do lock
+            self.trades.append(trade_data)
             self.stats['total'] += 1
             self.stats['total_invested'] += trade_data['amount']
             self.daily_stats['trades'] += 1
@@ -156,7 +154,7 @@ class TradingBot:
     def check_pending_trades(self):
         now = datetime.now()
         updated = False
-        for trade in self.trades:
+        for trade in list(self.trades):
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
                 is_digit = trade.get('is_digit', False)
@@ -210,7 +208,6 @@ class TradingBot:
                     self.consecutive_losses += 1
                     self.consecutive_wins = 0
                     logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
-                    self.apply_martingale_after_loss(loss)
 
             self.update_stats()
             if self.client:
@@ -222,7 +219,8 @@ class TradingBot:
     def get_trade_report(self):
         self.check_pending_trades()
         hoje = datetime.now().date()
-        trades_hoje = [t for t in self.trades if t['timestamp'].date() == hoje]
+        trades_snapshot = list(self.trades)
+        trades_hoje = [t for t in trades_snapshot if t['timestamp'].date() == hoje]
         with self._state_lock:
             return {
                 'resumo': {
@@ -242,8 +240,8 @@ class TradingBot:
                     'amount': t.get('amount', 0),
                     'result': t.get('result', 'pending'),
                     'profit': t.get('profit', 0),
-                    'is_digit': t.get('is_digit', False)      # ✅ adicionado
-                } for t in list(self.trades)[-50:]]
+                    'is_digit': t.get('is_digit', False)
+                } for t in trades_snapshot[-50:]]
             }
 
     def get_status(self):
@@ -284,7 +282,7 @@ class TradingBot:
                 'next_amount': self.get_martingale_amount(config.DEFAULT_STAKE),
                 'max_steps': config.MARTINGALE_CONFIG.get('max_steps', 2),
                 'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
-                'enabled': config.MARTINGALE_CONFIG.get('enabled', True)
+                'enabled': config.MARTINGALE_CONFIG.get('enabled', False)
             }
 
     def get_martingale_amount(self, base_amount):
@@ -296,7 +294,7 @@ class TradingBot:
 
     def apply_martingale_after_loss(self, last_trade_amount):
         with self._state_lock:
-            if not config.MARTINGALE_CONFIG.get('enabled', True):
+            if not config.MARTINGALE_CONFIG.get('enabled', False):
                 return False, "Martingale desativado"
             max_steps = config.MARTINGALE_CONFIG.get('max_steps', 2)
             if self.martingale['step'] >= max_steps:
@@ -313,10 +311,14 @@ class TradingBot:
             }
 
     def reset_martingale(self):
+        """Repõe apenas o estado do martingale, sem afectar os contadores consecutivos."""
         with self._state_lock:
-            self.martingale = {'active': False, 'step': 0, 'original_amount': 0, 'last_result': None}
-            self.consecutive_losses = 0
-            self.consecutive_wins = 0
+            self.martingale = {
+                'active': False,
+                'step': 0,
+                'original_amount': 0,
+                'last_result': None
+            }
 
     def reset_stats(self):
         with self._state_lock:
@@ -329,5 +331,3 @@ class TradingBot:
             self.consecutive_losses = 0
             self.consecutive_wins = 0
         logger.info("📊 Estatísticas e histórico resetados")
-
-trading_bot = TradingBot()
