@@ -27,7 +27,6 @@ except ImportError:
     EMAIL_ENABLED = False
 
 def send_reset_email(email, reset_token):
-    """Envia o link de recuperação de password. Se email não configurado, loga o link."""
     reset_url = f"{os.environ.get('BASE_URL', 'http://localhost:5000')}/reset-password?token={reset_token}"
     if EMAIL_ENABLED and mail:
         try:
@@ -134,7 +133,6 @@ init_db()
 
 # ==================== CARREGAR MARKUP DA BASE DE DADOS ====================
 def load_markup_from_db():
-    """Sobrescreve config.MARKUP_PERCENTAGE se existir na BD."""
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         row = conn.execute("SELECT value FROM settings WHERE key='markup_percentage'").fetchone()
@@ -535,7 +533,6 @@ def register():
         if not user:
             return jsonify({'error': 'Email já registado'}), 400
 
-        # ✅ Auto‑login após registo
         session.permanent = True
         session['user_id'] = user['id']
         session['user_name'] = user['name']
@@ -600,12 +597,10 @@ def logout():
 @app.route('/api/disconnect', methods=['POST'])
 @require_auth
 def disconnect():
-    """Desconectar manualmente o WebSocket."""
     user_id = session['user_id']
     sess = get_session(user_id)
     if sess:
         sess['client']._stop_event.set()
-        # Removida a chamada dupla a _close_connection() – _stop_event já trata do fecho
         with sessions_lock:
             sessions.pop(user_id, None)
         logger.info(f"Sessão de {user_id} desconectada manualmente")
@@ -643,9 +638,7 @@ def reset_password():
     finally:
         conn.close()
 
-    # Envia o email (ou regista no log)
     send_reset_email(email, token)
-
     return jsonify({'status': 'ok', 'message': 'Se o email existir, receberá um link.'})
 
 @app.route('/api/auth/reset-password-confirm', methods=['POST'])
@@ -914,12 +907,16 @@ def trade():
         sess = get_session(session['user_id'])
         if not sess or not sess['client'].authorized:
             return jsonify({'error': 'Não conectado'}), 400
+
+        bot = sess['trading_bot']
+        if bot.stop_loss_active:
+            return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+
         d = request.json
         action = d.get('action')
         amt = float(d.get('amount', 0.35))
         if amt < 0.35 or amt > 100:
             return jsonify({'error': 'Valor inválido'}), 400
-        bot = sess['trading_bot']
         sig, conf = bot.calculate_signal()
         if conf < config.RISK_LIMITS.get('min_confidence', 60):
             return jsonify({'error': f'Confiança insuficiente: {conf:.1f}%'}), 400
@@ -940,6 +937,11 @@ def trade_digit():
         sess = get_session(session['user_id'])
         if not sess or not sess['client'].authorized:
             return jsonify({'error': 'Não conectado'}), 400
+
+        bot = sess['trading_bot']
+        if bot.stop_loss_active:
+            return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+
         d = request.json
         pred = d.get('prediction')
         amt = float(d.get('amount', 0.35))
@@ -968,6 +970,11 @@ def trade_hybrid():
         sess = get_session(session['user_id'])
         if not sess or not sess['client'].authorized:
             return jsonify({'error': 'Não conectado'}), 400
+
+        bot = sess['trading_bot']
+        if bot.stop_loss_active:
+            return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+
         d = request.json
         amt = float(d.get('amount', 0.35))
         bot = sess['trading_bot']
@@ -1000,6 +1007,10 @@ def trade_hybrid():
 @app.route('/api/trade/manual', methods=['POST'])
 @require_auth
 def trade_manual():
+    """
+    Trade manual — NÃO verifica stop_loss_active, permitindo ao utilizador
+    operar mesmo após o limite diário de perda ter sido atingido.
+    """
     try:
         sess = get_session(session['user_id'])
         if not sess or not sess['client'].authorized:
@@ -1122,12 +1133,10 @@ def credit_affiliate_commission(user_email, amount):
 @app.route('/api/affiliate/stats')
 @require_auth
 def affiliate_stats():
-    """Devolve estatísticas do afiliado com base na tabela referrals."""
     email = session.get('user_email')
     if not email:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
 
-    # ✅ Movido para antes da conexão – evita dupla conexão SQLite
     user = UserStore.get(email)
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
@@ -1316,7 +1325,6 @@ def admin_clear_tokens():
 @app.route('/api/admin/settings')
 @require_admin
 def admin_settings():
-    """Devolve o markup atual da base de dados."""
     conn = sqlite3.connect(DATABASE_PATH)
     try:
         row = conn.execute("SELECT value FROM settings WHERE key='markup_percentage'").fetchone()
