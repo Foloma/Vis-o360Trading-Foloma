@@ -161,7 +161,7 @@
         <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
         <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" style="margin-top:8px">
         <div class="ms">
-          <div>Martingale: <span id="mgtActDig">DESATIVADO</span></div>
+          <div>Martingale: <span id="mgtActDig">INATIVO</span></div>
           <div>Próximo: <span id="mgtNxtDig">$0.35</span></div>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -189,7 +189,7 @@
         <button class="bmr" onclick="mgtDivide('amt')">− DIVIDIR</button>
         <button class="bmr" onclick="rstMgt()">RESET</button>
       </div>
-      <div class="ms"><div>Martingale: <span id="mgtAct">DESATIVADO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
+      <div class="ms"><div>Martingale: <span id="mgtAct">INATIVO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
     </div>
     <div id="hybridAlert" class="card hidden" style="background:#ffaa0010; border-color:#ffaa00">
       <div class="card-title">🔔 SINAL HÍBRIDO</div>
@@ -423,6 +423,24 @@ function updateHistSummary(bot) {
     </div>`;
 }
 
+async function autoConnect() {
+  try {
+    const r = await fetch('/api/auth/auto-connect');
+    const d = await r.json();
+    if (d.status === 'already_connected') {
+      document.getElementById('conSt').textContent = '✅ Conectado';
+    } else if (d.status === 'connecting') {
+      document.getElementById('conSt').textContent = '🔄 Auto-conectando...';
+      toast('🔄 Auto-conectando...', 'info');
+      setTimeout(updateAll, 3000);
+    } else if (d.status === 'no_token') {
+      // sem token, não tenta conectar
+    }
+  } catch(e) {
+    // ignora erros de rede
+  }
+}
+
 function updateAll(){
   fetch('/api/status')
     .then(r=>r.json())
@@ -431,12 +449,19 @@ function updateAll(){
         const bot = data.bot;
         if (!bot) return;
         const conn = bot.connected && bot.authorized;
+        let confidence = parseFloat(bot.confidence);
+        if (isNaN(confidence)) confidence = 0;
+
         const connectOAuthBtn = document.getElementById('connectOAuthBtn');
         const connectTokenBtn = document.getElementById('connectTokenBtn');
         if(conn){
           connectOAuthBtn.disabled = true;
           connectTokenBtn.disabled = true;
-          document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
+          if (confidence === 0) {
+            document.getElementById('conSt').innerHTML = '<span style="color:#ffaa00">⏳ A acumular dados...</span>';
+          } else {
+            document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
+          }
         } else {
           connectOAuthBtn.disabled = false;
           connectTokenBtn.disabled = false;
@@ -447,10 +472,6 @@ function updateAll(){
         document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
         document.getElementById('cur').textContent=bot.currency||'USD';
         document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
-
-        // ✅ Confiança tratada como número, fallback 0
-        let confidence = parseFloat(bot.confidence);
-        if (isNaN(confidence)) confidence = 0;
 
         const sigBadge = document.getElementById('sigBadge');
         const btnBuy = document.querySelector('#pTrade .btn-buy');
@@ -492,7 +513,7 @@ function updateAll(){
             }
         }
         fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
-          const act = m.active ? `ATIVO (passo ${m.step})` : 'DESATIVADO';
+          const act = m.active ? `ATIVO (passo ${m.step})` : 'INATIVO';
           const nxt = '$' + (m.next_amount||0.35).toFixed(2);
           document.getElementById('mgtAct').textContent = act;
           document.getElementById('mgtNxt').textContent = nxt;
@@ -506,7 +527,6 @@ function updateAll(){
           }
         }).catch(()=>{});
         
-        // ✅ Atualizar resumo automaticamente
         updateHistSummary(bot);
 
         if (modo === 'hybrid' && data.digits && bot.signal) {
@@ -666,12 +686,19 @@ function tradeDigit(pred){
 }
 
 async function mgtMultiply(fieldId){
-  const amt = parseFloat(document.getElementById(fieldId).value);
-  const r = await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount: amt})});
+  // Usa sempre o stake base (0.35) para manter a sequência correta do martingale
+  const r = await fetch('/api/martingale/apply', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({last_amount: 0.35})
+  });
   const d = await r.json();
-  if(d.error) toast('❌ '+d.error,'loss');
-  else {
-    document.getElementById(fieldId).value = d.martingale.next_amount.toFixed(2);
+  if(d.error) {
+    toast('❌ '+d.error,'loss');
+  } else {
+    const nextAmount = d.martingale.next_amount;
+    document.getElementById('amt').value = nextAmount.toFixed(2);
+    document.getElementById('amtDigit').value = nextAmount.toFixed(2);
     toast('📈 '+d.martingale.message,'info');
   }
 }
@@ -750,8 +777,10 @@ function loadHistory(){
   fetch('/api/report').then(r=>r.json()).then(data=>{
     if (!data || !data.resumo) return;
     const s = data.resumo;
-    const sum = document.getElementById('histSummary');
-    if(sum) sum.innerHTML = `
+
+    // Apenas atualiza o resumo da página de histórico (histSummary2)
+    const sum2 = document.getElementById('histSummary2');
+    if(sum2) sum2.innerHTML = `
       <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
         <div style="font-size:10px;color:var(--muted)">TOTAL TRADES</div>
         <div style="font-size:20px;font-weight:bold">${s.total_trades}</div>
@@ -802,8 +831,6 @@ function loadHistory(){
     });
     const list = document.getElementById('histList');
     if(list) list.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
-    const sum2 = document.getElementById('histSummary2');
-    if(sum2 && sum) sum2.innerHTML = sum.innerHTML;
     const list2 = document.getElementById('histList2');
     if(list2) list2.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
   }).catch(()=>toast('❌ Erro ao carregar histórico','loss'));
@@ -881,7 +908,7 @@ function doLogin(){
     initSyms();loadAffiliate();loadHistory();
     startPolling();
     if(d.user?.has_deriv_token){
-      setTimeout(() => conectar(), 1000);
+      setTimeout(() => autoConnect(), 1000);
     }
   }).finally(() => { _loggingIn = false; });
 }
@@ -990,8 +1017,8 @@ function setModo(m){
     startPolling();
     setTimeout(()=>{
       fetch('/api/status').then(r=>r.json()).then(data=>{
-        if(!data.bot?.authorized) conectar();
-      }).catch(()=>conectar());
+        if(!data.bot?.authorized) autoConnect();
+      }).catch(()=>autoConnect());
     },2000);
     history.replaceState({},'',location.pathname);
   }
@@ -1015,7 +1042,7 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     initSyms();loadAffiliate();loadHistory();
     startPolling();
     if(d.user?.has_deriv_token){
-      setTimeout(() => conectar(), 1500);
+      setTimeout(() => autoConnect(), 1500);
     }
   }
 });
