@@ -89,6 +89,11 @@ class TradingBot:
         return (recent[-1] - recent[0]) / recent[0] * 100
 
     def calculate_signal(self):
+        """Calcula sinal técnico. Exige pelo menos 20 preços antes de gerar confiança."""
+        prices = self.indicators.get_prices(self.current_symbol)
+        if len(prices) < 20:
+            return 'NEUTRAL', 0
+
         if not self.last_analysis:
             return 'NEUTRAL', 0
 
@@ -281,8 +286,8 @@ class TradingBot:
                 'original_amount': self.martingale['original_amount'],
                 'next_amount': self.get_martingale_amount(config.DEFAULT_STAKE),
                 'max_steps': config.MARTINGALE_CONFIG.get('max_steps', 2),
-                'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
-                'enabled': config.MARTINGALE_CONFIG.get('enabled', False)
+                'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0)
+                # removida chave 'enabled' para não confundir
             }
 
     def get_martingale_amount(self, base_amount):
