@@ -140,6 +140,7 @@
       <div class="card"><div class="card-title">SÍMBOLO</div><div class="sym-row" id="symSel"></div></div>
       <div class="card">
         <div class="price-box"><div class="price" id="priceEl">0.0000</div><div class="signal buy" id="sigBadge">NEUTRAL</div></div>
+        <canvas id="priceChart" width="480" height="80" style="width:100%;margin-top:8px;border-radius:8px;background:#020617"></canvas>
         <div class="indicators" style="margin-top:12px">
           <div class="ind"><span class="label">RSI</span><span class="value" id="rsS">-</span></div>
           <div class="ind"><span class="label">MACD</span><span class="value" id="mcS">-</span></div>
@@ -325,6 +326,9 @@ let isConnecting = false;
 let lastHybridState = null;
 let _loggingIn = false;
 let _registering = false;
+let lastTradeCount = 0;
+const priceHistory = [];
+const MAX_POINTS = 50;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 function toast(msg,type='info',ms=4000){
@@ -441,6 +445,47 @@ async function autoConnect() {
   }
 }
 
+function checkTradeResults(bot) {
+  const total = bot.stats?.total || 0;
+  if (total > lastTradeCount && lastTradeCount > 0) {
+    const wins = bot.stats?.wins || 0;
+    const losses = bot.stats?.losses || 0;
+    if (wins > losses) {
+      toast('✅ Trade ganho!', 'win', 3000);
+      playBeep();
+    } else {
+      toast('❌ Trade perdido', 'loss', 3000);
+    }
+  }
+  lastTradeCount = total;
+}
+
+function updatePriceChart(price) {
+  if (!price || price <= 0) return;
+  priceHistory.push(price);
+  if (priceHistory.length > MAX_POINTS) priceHistory.shift();
+  
+  const canvas = document.getElementById('priceChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  
+  const min = Math.min(...priceHistory);
+  const max = Math.max(...priceHistory);
+  const range = max - min || 1;
+  
+  ctx.strokeStyle = '#00f0b5';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  priceHistory.forEach((p, i) => {
+    const x = (i / (MAX_POINTS - 1)) * w;
+    const y = h - ((p - min) / range) * h;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
 function updateAll(){
   fetch('/api/status')
     .then(r=>r.json())
@@ -457,7 +502,10 @@ function updateAll(){
         if(conn){
           connectOAuthBtn.disabled = true;
           connectTokenBtn.disabled = true;
-          if (confidence === 0) {
+          if (bot.stop_loss_active) {
+            document.getElementById('conSt').innerHTML =
+              '<span style="color:var(--danger)">🛑 Stop-loss activo — limite diário atingido</span>';
+          } else if (confidence === 0) {
             document.getElementById('conSt').innerHTML = '<span style="color:#ffaa00">⏳ A acumular dados...</span>';
           } else {
             document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
@@ -473,12 +521,15 @@ function updateAll(){
         document.getElementById('cur').textContent=bot.currency||'USD';
         document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
 
+        // Gráfico de preço
+        updatePriceChart(bot.price || 0);
+
         const sigBadge = document.getElementById('sigBadge');
         const btnBuy = document.querySelector('#pTrade .btn-buy');
         const btnSell = document.querySelector('#pTrade .btn-sell');
         const btnHybrid = document.getElementById('btnHybrid');
-        if (confidence < 60) {
-            sigBadge.textContent = 'NEUTRO';
+        if (confidence < 60 || bot.stop_loss_active) {
+            sigBadge.textContent = bot.stop_loss_active ? 'STOP' : 'NEUTRO';
             sigBadge.className = 'signal neutral';
             if (btnBuy) btnBuy.disabled = true;
             if (btnSell) btnSell.disabled = true;
@@ -528,6 +579,7 @@ function updateAll(){
         }).catch(()=>{});
         
         updateHistSummary(bot);
+        checkTradeResults(bot);
 
         if (modo === 'hybrid' && data.digits && bot.signal) {
             const digitAnalysis = data.digits.analysis;
@@ -686,7 +738,6 @@ function tradeDigit(pred){
 }
 
 async function mgtMultiply(fieldId){
-  // Usa sempre o stake base (0.35) para manter a sequência correta do martingale
   const r = await fetch('/api/martingale/apply', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -778,7 +829,6 @@ function loadHistory(){
     if (!data || !data.resumo) return;
     const s = data.resumo;
 
-    // Apenas atualiza o resumo da página de histórico (histSummary2)
     const sum2 = document.getElementById('histSummary2');
     if(sum2) sum2.innerHTML = `
       <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
