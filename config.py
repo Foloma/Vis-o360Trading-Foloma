@@ -62,10 +62,9 @@ class Config:
         'hybrid_mode_enabled': True
     }
 
-    # Pesos para combinação de sinais em índices sintéticos (R_)
-    # signal_final = signal_tecnico * TECHNICAL_WEIGHT + signal_digitos * DIGIT_WEIGHT
-    SYNTHETIC_TECHNICAL_WEIGHT = 0.4
-    SYNTHETIC_DIGIT_WEIGHT = 0.6
+    # Pesos para combinação de sinais técnicos e de dígitos em índices R_
+    SYNTHETIC_TECHNICAL_WEIGHT = 0.6
+    SYNTHETIC_DIGIT_WEIGHT = 0.4
 
     LOG_LEVEL = logging.INFO
 
