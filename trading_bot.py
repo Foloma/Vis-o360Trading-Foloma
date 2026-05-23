@@ -22,6 +22,7 @@ class TradingBot:
         self.balance = 0
         self.currency = 'USD'
         self.paused = False
+        self.stop_loss_active = False      # indica bloqueio por risco
         self.last_analysis = {}
         self.digit_analyzer = None
 
@@ -63,6 +64,28 @@ class TradingBot:
         self.paused = False
         logger.info("▶️ Resumido")
 
+    def check_risk_limits(self):
+        """
+        Verifica se os limites diários foram atingidos.
+        Retorna True se estiver OK para operar, False se estiver bloqueado.
+        """
+        max_loss_pct = config.RISK_LIMITS.get('max_daily_loss_percent', 5)
+        if self.daily_stats['start_balance'] > 0:
+            daily_loss_pct = (
+                abs(min(0, self.daily_stats['profit_loss'])) /
+                self.daily_stats['start_balance'] * 100
+            )
+            if daily_loss_pct >= max_loss_pct:
+                if not self.paused:
+                    self.pause()
+                    logger.warning(
+                        f"🛑 Stop-loss activado: {daily_loss_pct:.1f}% perda diária"
+                    )
+                self.stop_loss_active = True
+                return False
+        self.stop_loss_active = False
+        return True
+
     def on_tick(self, tick):
         self.current_price = tick['price']
         self.current_symbol = tick['symbol']
@@ -79,12 +102,16 @@ class TradingBot:
             if self.daily_stats['date'] != today:
                 self.reset_daily_stats()
 
+        # Verifica limites de risco a cada tick
+        self.check_risk_limits()
+
     def reset_daily_stats(self):
         self.daily_stats = {
             'date': datetime.now().date(), 'trades': 0,
             'wins': 0, 'losses': 0, 'profit_loss': 0,
             'start_balance': self.balance
         }
+        self.stop_loss_active = False
 
     def get_momentum(self):
         prices = self.indicators.get_prices(self.current_symbol)
@@ -148,10 +175,8 @@ class TradingBot:
             dig_action, dig_conf = self._get_digit_signal()
             if dig_action and dig_conf > 0:
                 if dig_action == signal:
-                    # convergente → média ponderada
                     total_weight = _TECH_WEIGHT + _DIGIT_WEIGHT
                     confidence = (_TECH_WEIGHT * confidence + _DIGIT_WEIGHT * dig_conf) / total_weight
-                # se divergente, mantém apenas o sinal técnico (confidence inalterada)
 
         return signal, min(confidence, 100)
 
@@ -296,6 +321,7 @@ class TradingBot:
             'analysis': self.last_analysis,
             'stats': self.stats,
             'paused': self.paused,
+            'stop_loss_active': self.stop_loss_active,
             'martingale': self.get_martingale_status(),
             'daily_stats': self.daily_stats,
             'consecutive_wins': self.consecutive_wins,
