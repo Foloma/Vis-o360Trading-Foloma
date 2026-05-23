@@ -8,6 +8,11 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+# Pesos para combinação de sinais em índices R_
+_TECH_WEIGHT = getattr(config, 'SYNTHETIC_TECHNICAL_WEIGHT', 0.6)
+_DIGIT_WEIGHT = getattr(config, 'SYNTHETIC_DIGIT_WEIGHT', 0.4)
+
+
 class TradingBot:
     def __init__(self):
         self.client = None
@@ -88,8 +93,17 @@ class TradingBot:
         recent = list(prices)[-5:]
         return (recent[-1] - recent[0]) / recent[0] * 100
 
+    def _get_digit_signal(self):
+        """Retorna (action, confidence) do analisador de dígitos."""
+        if not self.digit_analyzer:
+            return None, 0
+        analysis = self.digit_analyzer.get_analysis()
+        action = analysis.get('recommended_action')
+        conf = analysis.get('confidence', 0)
+        return action, conf
+
     def calculate_signal(self):
-        """Calcula sinal técnico. Exige pelo menos 20 preços antes de gerar confiança."""
+        """Calcula sinal técnico. Exige pelo menos 20 preços e combina com dígitos em R_."""
         prices = self.indicators.get_prices(self.current_symbol)
         if len(prices) < 20:
             return 'NEUTRAL', 0
@@ -128,6 +142,16 @@ class TradingBot:
             confidence = min(confidence + 5, 100)
         elif signal == 'SELL' and momentum < -0.1:
             confidence = min(confidence + 5, 100)
+
+        # === Combinação com sinal de dígitos (apenas para R_) ===
+        if self.current_symbol.startswith('R_') and self.digit_analyzer:
+            dig_action, dig_conf = self._get_digit_signal()
+            if dig_action and dig_conf > 0:
+                if dig_action == signal:
+                    # convergente → média ponderada
+                    total_weight = _TECH_WEIGHT + _DIGIT_WEIGHT
+                    confidence = (_TECH_WEIGHT * confidence + _DIGIT_WEIGHT * dig_conf) / total_weight
+                # se divergente, mantém apenas o sinal técnico (confidence inalterada)
 
         return signal, min(confidence, 100)
 
@@ -287,7 +311,6 @@ class TradingBot:
                 'next_amount': self.get_martingale_amount(config.DEFAULT_STAKE),
                 'max_steps': config.MARTINGALE_CONFIG.get('max_steps', 2),
                 'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0)
-                # removida chave 'enabled' para não confundir
             }
 
     def get_martingale_amount(self, base_amount):
@@ -298,7 +321,6 @@ class TradingBot:
             return base_amount * (multiplier ** self.martingale['step'])
 
     def apply_martingale_after_loss(self, last_trade_amount):
-        """Chamado manualmente via rota /api/martingale/apply. Ignora a flag 'enabled'."""
         with self._state_lock:
             max_steps = config.MARTINGALE_CONFIG.get('max_steps', 2)
             if self.martingale['step'] >= max_steps:
@@ -315,7 +337,6 @@ class TradingBot:
             }
 
     def reset_martingale(self):
-        """Repõe apenas o estado do martingale, sem afectar os contadores consecutivos."""
         with self._state_lock:
             self.martingale = {
                 'active': False,
