@@ -32,8 +32,8 @@ class DerivWebSocketClient:
         self.active_trades = {}
         self.pending_trade = None
         self.pending_trade_time = 0
-        self._trade_lock = threading.Lock()     # usado apenas em place_trade
-        self._pending_lock = threading.Lock()   # usado em on_proposal / on_buy_response
+        self._trade_lock = threading.Lock()
+        self._pending_lock = threading.Lock()
         self._req_lock = threading.Lock()
         self._digit_analyzer = None
         self._balance_subscribed = False
@@ -317,10 +317,15 @@ class DerivWebSocketClient:
             return self._req_counter
 
     def place_trade(self, contract_type, amount, is_digit=False):
+        # ✅ Verificação de risco antes de qualquer trade
+        if self.trading_bot and not self.trading_bot.check_risk_limits():
+            logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
+            return False
+
         if is_digit:
             time.sleep(0.5)
 
-        with self._trade_lock:   # adquirido apenas aqui, nunca em callbacks
+        with self._trade_lock:
             if not self.streaming:
                 logger.warning("🚫 Sem streaming"); return False
             if self.balance <= 0:
@@ -391,7 +396,6 @@ class DerivWebSocketClient:
                 return
             self.pending_trade['proposal_id'] = pid
 
-        # Envio do buy protegido contra falhas de conexão
         try:
             self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
         except Exception as e:
