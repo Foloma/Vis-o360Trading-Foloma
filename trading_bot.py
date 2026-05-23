@@ -129,9 +129,8 @@ class TradingBot:
         conf = analysis.get('confidence', 0)
         return action, conf
 
-    def calculate_signal(self):
-        """Calcula sinal técnico. Exige pelo menos 20 preços e combina com dígitos em R_."""
-        prices = self.indicators.get_prices(self.current_symbol)
+    def _calculate_pure_technical(self, prices):
+        """Calcula apenas o sinal técnico, sem combinação com dígitos."""
         if len(prices) < 20:
             return 'NEUTRAL', 0
 
@@ -170,13 +169,58 @@ class TradingBot:
         elif signal == 'SELL' and momentum < -0.1:
             confidence = min(confidence + 5, 100)
 
+        return signal, min(confidence, 100)
+
+    def calculate_signal(self):
+        """Calcula sinal técnico. Exige pelo menos 20 preços e combina com dígitos em R_."""
+        prices = self.indicators.get_prices(self.current_symbol)
+        if len(prices) < 20:
+            logger.debug(f"⏳ [{self.current_symbol}] Apenas {len(prices)} preços – a aguardar 20")
+            return 'NEUTRAL', 0
+
+        if not self.last_analysis:
+            return 'NEUTRAL', 0
+
+        # Calcula sinal técnico puro
+        signal, confidence = self._calculate_pure_technical(prices)
+        dig_action = dig_conf = None
+
+        logger.info(
+            f"🔍 [{self.current_symbol}] TÉCNICO PURO: {signal} ({confidence:.1f}%) "
+            f"| Preços: {len(prices)}"
+        )
+
         # === Combinação com sinal de dígitos (apenas para R_) ===
         if self.current_symbol.startswith('R_') and self.digit_analyzer:
             dig_action, dig_conf = self._get_digit_signal()
-            if dig_action and dig_conf > 0:
-                if dig_action == signal:
-                    total_weight = _TECH_WEIGHT + _DIGIT_WEIGHT
-                    confidence = (_TECH_WEIGHT * confidence + _DIGIT_WEIGHT * dig_conf) / total_weight
+            if dig_action and dig_conf >= 55:
+                logger.info(
+                    f"🎲 [{self.current_symbol}] DÍGITO: {dig_action} ({dig_conf:.1f}%)"
+                )
+                total_weight = _TECH_WEIGHT + _DIGIT_WEIGHT
+                combined = (_TECH_WEIGHT * confidence + _DIGIT_WEIGHT * dig_conf) / total_weight
+                if dig_action != signal and _DIGIT_WEIGHT > _TECH_WEIGHT:
+                    logger.info(
+                        f"🔄 [{self.current_symbol}] Dígito prevalece: {dig_action} (peso {_DIGIT_WEIGHT} > {_TECH_WEIGHT})"
+                    )
+                    signal = dig_action
+                confidence = combined
+                logger.info(
+                    f"✅ [{self.current_symbol}] COMBINADO: {signal} ({confidence:.1f}%)"
+                )
+            else:
+                logger.debug(f"🎲 [{self.current_symbol}] DÍGITO sem recomendação ou confiança < 55%")
+        else:
+            logger.debug(f"📊 [{self.current_symbol}] Sem analisador de dígitos ou não R_")
+
+        if confidence >= 60:
+            logger.info(
+                f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – VÁLIDO"
+            )
+        else:
+            logger.info(
+                f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – ABAIXO DO LIMIAR"
+            )
 
         return signal, min(confidence, 100)
 
