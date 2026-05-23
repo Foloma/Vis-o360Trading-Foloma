@@ -32,8 +32,8 @@ class DerivWebSocketClient:
         self.active_trades = {}
         self.pending_trade = None
         self.pending_trade_time = 0
-        self._trade_lock = threading.Lock()
-        self._pending_lock = threading.Lock()
+        self._trade_lock = threading.Lock()     # usado apenas em place_trade
+        self._pending_lock = threading.Lock()   # usado em on_proposal / on_buy_response
         self._req_lock = threading.Lock()
         self._digit_analyzer = None
         self._balance_subscribed = False
@@ -320,7 +320,7 @@ class DerivWebSocketClient:
         if is_digit:
             time.sleep(0.5)
 
-        with self._trade_lock:
+        with self._trade_lock:   # adquirido apenas aqui, nunca em callbacks
             if not self.streaming:
                 logger.warning("🚫 Sem streaming"); return False
             if self.balance <= 0:
@@ -390,7 +390,14 @@ class DerivWebSocketClient:
                 logger.warning("BUY já enviado")
                 return
             self.pending_trade['proposal_id'] = pid
-        self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
+
+        # Envio do buy protegido contra falhas de conexão
+        try:
+            self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
+        except Exception as e:
+            logger.error(f"❌ Erro ao enviar buy: {e}")
+            with self._pending_lock:
+                self.pending_trade = None
 
     def _on_buy_response(self, data):
         with self._pending_lock:
@@ -423,7 +430,7 @@ class DerivWebSocketClient:
                     'timestamp': time.time(),
                     'action': action,
                     'is_digit': is_digit,
-                    'symbol': self.current_symbol          # ✅ adicionado
+                    'symbol': self.current_symbol
                 }
                 self._subscribe_contract(cid)
                 self.pending_trade = None
