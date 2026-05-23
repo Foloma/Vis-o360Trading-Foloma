@@ -7,13 +7,63 @@ class TechnicalIndicators:
     def __init__(self, max_length=200):
         self.prices_by_symbol = {}
         self.max_length = max_length
-        self._lock = threading.RLock()          # thread safety
+        self._lock = threading.RLock()
+
+        # Caches incrementais para MACD (por símbolo)
+        self._ema_fast_cache = {}
+        self._ema_slow_cache = {}
+        self._macd_line_history = {}    # deque dos últimos valores de MACD line
+        self._macd_initialized = set()  # símbolos cujas EMAs já foram inicializadas
+
+        # Parâmetros do MACD
+        self.fast = 12
+        self.slow = 26
+        self.signal_period = 9
 
     def add_price(self, price, symbol='R_100'):
         with self._lock:
             if symbol not in self.prices_by_symbol:
                 self.prices_by_symbol[symbol] = deque(maxlen=self.max_length)
+                self._macd_line_history[symbol] = deque(maxlen=self.signal_period + 5)
+
             self.prices_by_symbol[symbol].append(price)
+            self._update_macd_cache(symbol)
+
+    def _update_macd_cache(self, symbol):
+        """Atualiza incrementalmente as EMAs e a linha MACD para o símbolo."""
+        prices = self.prices_by_symbol[symbol]
+        if len(prices) < self.slow:
+            return
+
+        k_fast = 2.0 / (self.fast + 1)
+        k_slow = 2.0 / (self.slow + 1)
+
+        # Inicialização das EMAs quando atingimos o número mínimo de preços
+        if symbol not in self._macd_initialized and len(prices) >= self.slow:
+            # Calcula EMAs iniciais com os primeiros 'fast' e 'slow' preços
+            ema_fast = sum(list(prices)[:self.fast]) / self.fast
+            for p in list(prices)[self.fast:]:
+                ema_fast = p * k_fast + ema_fast * (1 - k_fast)
+
+            ema_slow = sum(list(prices)[:self.slow]) / self.slow
+            for p in list(prices)[self.slow:]:
+                ema_slow = p * k_slow + ema_slow * (1 - k_slow)
+
+            self._ema_fast_cache[symbol] = ema_fast
+            self._ema_slow_cache[symbol] = ema_slow
+            self._macd_line_history[symbol].clear()
+            self._macd_initialized.add(symbol)
+            return
+
+        # Atualização incremental
+        if symbol in self._macd_initialized:
+            last_price = prices[-1]
+            ema_fast = last_price * k_fast + self._ema_fast_cache[symbol] * (1 - k_fast)
+            ema_slow = last_price * k_slow + self._ema_slow_cache[symbol] * (1 - k_slow)
+            self._ema_fast_cache[symbol] = ema_fast
+            self._ema_slow_cache[symbol] = ema_slow
+            macd_line = ema_fast - ema_slow
+            self._macd_line_history[symbol].append(macd_line)
 
     def get_prices(self, symbol='R_100'):
         with self._lock:
@@ -25,6 +75,7 @@ class TechnicalIndicators:
         return sum(data[-period:]) / period
 
     def _ema(self, data, period):
+        # Mantido apenas para compatibilidade com outros usos; o MACD usa o cache incremental.
         if len(data) < period:
             return None
         k = 2.0 / (period + 1)
@@ -53,37 +104,32 @@ class TechnicalIndicators:
         rs = avg_gain / avg_loss
         return 100 - (100 / (1 + rs))
 
-    def _macd(self, data, fast=12, slow=26, signal=9):
+    def _macd(self, data, fast=12, slow=26, signal=9, symbol=None):
         """
-        MACD otimizado – não recalcula todos os EMAs a cada tick.
+        Retorna (macd_line, signal_line, histogram) usando caches incrementais.
+        Requer symbol para identificar o cache correto.
         """
-        if len(data) < slow + signal:
+        if symbol is None or symbol not in self._macd_initialized:
             return None, None, None
 
-        ema_fast = self._ema(data, fast)
-        ema_slow = self._ema(data, slow)
-        if ema_fast is None or ema_slow is None:
+        macd_history = self._macd_line_history.get(symbol, deque())
+        if len(macd_history) == 0:
             return None, None, None
 
-        macd_line = ema_fast - ema_slow
+        macd_line = macd_history[-1]
 
-        # Aproximação da signal line com os últimos (signal + 5) valores
-        if len(data) >= slow + signal:
-            macd_values = []
-            for i in range(signal + 5):
-                idx = len(data) - signal - 5 + i
-                if idx < slow:
-                    continue
-                ef = self._ema(data[:idx + 1], fast)
-                es = self._ema(data[:idx + 1], slow)
-                if ef and es:
-                    macd_values.append(ef - es)
-            if len(macd_values) >= signal:
-                signal_line = self._ema(macd_values, signal)
-                histogram = macd_line - signal_line if signal_line else None
-                return macd_line, signal_line, histogram
-
-        return macd_line, None, None
+        # Cálculo da signal line como EMA dos últimos valores do MACD
+        if len(macd_history) >= signal:
+            values = list(macd_history)[-signal:]
+            k_signal = 2.0 / (signal + 1)
+            ema_signal = values[0]
+            for v in values[1:]:
+                ema_signal = v * k_signal + ema_signal * (1 - k_signal)
+            signal_line = ema_signal
+            histogram = macd_line - signal_line
+            return macd_line, signal_line, histogram
+        else:
+            return macd_line, None, None
 
     def _bollinger_bands(self, data, period=20, std_dev=2):
         if len(data) < period:
@@ -177,7 +223,7 @@ class TechnicalIndicators:
             rsi_score, rsi_desc = 50, '---'
 
         # ===== MACD =====
-        macd_line, signal_line, histogram = self._macd(data)
+        macd_line, signal_line, histogram = self._macd(data, symbol=symbol)
         if macd_line is not None and histogram is not None:
             if histogram > 0:
                 macd_desc, macd_score = 'COMPRA', 80
