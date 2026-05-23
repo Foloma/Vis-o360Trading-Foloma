@@ -63,8 +63,8 @@ class Config:
     }
 
     # Pesos para combinação de sinais técnicos e de dígitos em índices R_
-    SYNTHETIC_TECHNICAL_WEIGHT = 0.6
-    SYNTHETIC_DIGIT_WEIGHT = 0.4
+    SYNTHETIC_TECHNICAL_WEIGHT = 0.3
+    SYNTHETIC_DIGIT_WEIGHT = 0.7
 
     LOG_LEVEL = logging.INFO
 
