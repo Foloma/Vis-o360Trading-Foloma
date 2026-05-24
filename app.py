@@ -501,6 +501,16 @@ def require_admin(f):
 def index():
     return render_template('index.html')
 
+# ✅ NOVA ROTA — Redireccionamento seguro para AirTM
+@app.route('/go/airtm')
+def go_airtm():
+    """Redirecciona para o link de afiliado do AirTM (variável de ambiente)."""
+    target = os.environ.get(
+        'AIRTM_AFFILIATE_URL',
+        'https://app.airtm.com/ivt/jacob2wa5qcpp'  # fallback público
+    )
+    return redirect(target)
+
 @app.route('/api/auth/status')
 def auth_status():
     if 'user_id' in session:
@@ -898,7 +908,7 @@ def deriv_oauth_url():
     logger.info(f"URL OAuth gerado: {url}")
     return jsonify({'url': url})
 
-# ==================== TRADING ====================
+# ==================== TRADING (com verificação de stop‑loss) ====================
 @app.route('/api/trade', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
