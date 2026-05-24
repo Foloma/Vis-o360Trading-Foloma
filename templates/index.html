@@ -84,6 +84,16 @@
     @keyframes pulse { 0%{box-shadow:0 0 0 0 #00f0b5} 70%{box-shadow:0 0 15px 5px #00f0b5} 100%{box-shadow:0 0 0 0 #00f0b5} }
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 1100; display: flex; align-items: center; justify-content: center; }
     .mbox { background: var(--card); padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
+    .guide-modal { background: var(--card); padding: 24px; border-radius: 16px; width: 95%; max-width: 550px; max-height: 85vh; overflow-y: auto; position: relative; }
+    .guide-modal h2 { color: var(--accent); margin-bottom: 16px; text-align: center; }
+    .guide-modal h3 { color: var(--accent); margin: 16px 0 8px; font-size: 14px; }
+    .guide-modal p, .guide-modal li { font-size: 12px; color: var(--text); line-height: 1.6; margin-bottom: 6px; }
+    .guide-modal ul { padding-left: 16px; margin-bottom: 8px; }
+    .guide-modal table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 11px; }
+    .guide-modal th, .guide-modal td { border: 1px solid var(--border); padding: 8px; text-align: left; }
+    .guide-modal th { background: #020617; color: var(--accent); }
+    .guide-modal .close-btn { position: sticky; top: 0; float: right; background: none; border: none; color: var(--danger); font-size: 20px; cursor: pointer; padding: 4px 8px; }
+    .guide-modal a { color: var(--accent); word-break: break-all; }
     .token-status { font-size: 12px; color: var(--accent); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
     button:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
   </style>
@@ -115,6 +125,133 @@
 <audio id="hybridSound" preload="auto">
   <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
 </audio>
+
+<!-- Modal do Guia de Utilização -->
+<div class="modal hidden" id="guideModal">
+  <div class="guide-modal">
+    <button class="close-btn" onclick="closeGuide()">✕</button>
+    <h2>🚀 Guia de Utilização — Foloma Visão 360</h2>
+    
+    <h3>1. Primeiros Passos</h3>
+    <p><strong>Criar conta na Foloma e conectar à Deriv</strong></p>
+    <ol style="font-size:12px;padding-left:16px;margin-bottom:8px">
+      <li>Regista-te na Foloma Visão 360 com email e senha.</li>
+      <li>Cria a tua conta na Deriv (se ainda não tens): <a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank">Criar Conta Deriv</a> — nas Configurações.</li>
+      <li>Gera o teu token API na Deriv: <a href="https://app.deriv.com/account/api-token" target="_blank">app.deriv.com/account/api-token</a> — permissões <strong>Read + Trade + Trading Information</strong>.</li>
+      <li>Guarda o token na Foloma (demo ou real) e clica em <strong>"Conectar com Deriv"</strong>.</li>
+      <li>Autoriza a ligação — serás redirecionado de volta.</li>
+      <li>✅ Ponto verde no dashboard = estás conectado.</li>
+    </ol>
+    <p><strong>Contas Demo e Real:</strong> Começa sempre em Demo (dinheiro virtual). Só muda para Real após 2 semanas de consistência.</p>
+
+    <h3>2. Os Três Modos de Trading</h3>
+    <table>
+      <tr><th>Modo</th><th>Como funciona</th><th>Contrato</th><th>Ideal para</th></tr>
+      <tr><td>📈 Ativos</td><td>Aposta na direcção do preço (CALL/PUT)</td><td>5 ticks</td><td>Análise técnica</td></tr>
+      <tr><td>🎲 Dígitos</td><td>Aposta no último dígito (ÍMPAR/PAR)</td><td>10 ticks</td><td>Iniciantes</td></tr>
+      <tr><td>🔗 Híbrido</td><td>Só ativa quando Ativos + Dígitos convergem</td><td>5 ticks</td><td>Conservadores</td></tr>
+    </table>
+    <p>💡 <strong>Para iniciantes:</strong> começa pelos Dígitos — mais simples e rápidos.</p>
+
+    <h3>3. Entender os Indicadores</h3>
+    <table>
+      <tr><th>Indicador</th><th>Significado</th></tr>
+      <tr><td>RSI &lt; 35</td><td>Preço baixo — possível subida</td></tr>
+      <tr><td>RSI &gt; 65</td><td>Preço alto — possível queda</td></tr>
+      <tr><td>RSI 35-65</td><td>Neutro — esperar</td></tr>
+      <tr><td>MACD "COMPRA"</td><td>Momentum a subir</td></tr>
+      <tr><td>MACD "VENDA"</td><td>Momentum a descer</td></tr>
+      <tr><td>TREND "ALTA"</td><td>Tendência de subida</td></tr>
+      <tr><td>TREND "BAIXA"</td><td>Tendência de descida</td></tr>
+      <tr><td>BB "sobrecomprado"</td><td>Preço esticado para cima</td></tr>
+      <tr><td>BB "sobrevendido"</td><td>Preço esticado para baixo</td></tr>
+    </table>
+
+    <h3>4. O Sinal e a Confiança</h3>
+    <table>
+      <tr><th>Sinal</th><th>Significado</th><th>Ação</th></tr>
+      <tr><td>BUY</td><td>Maioria aponta para subida</td><td>Comprar (CALL)</td></tr>
+      <tr><td>SELL</td><td>Maioria aponta para descida</td><td>Vender (PUT)</td></tr>
+      <tr><td>NEUTRO</td><td>Sinais contraditórios</td><td>Não operar</td></tr>
+    </table>
+    <p>🔴 <strong>Regra de ouro:</strong> só opera quando o sinal está BUY ou SELL. Botões cinzentos = protecção (confiança &lt; 60%).</p>
+
+    <h3>5. Quando Entrar e Quando Ficar de Fora</h3>
+    <p><strong>✅ Entrar quando:</strong> Sinal BUY/SELL activo, 2+ indicadores alinhados, nos dígitos após 3+ repetições apostar no oposto.</p>
+    <p><strong>❌ Não entrar quando:</strong> Sinal NEUTRO, botões cinzentos, 2 perdas seguidas (pausa 15 min), cansado ou ansioso.</p>
+
+    <h3>6. Gestão do Valor Operado</h3>
+    <table>
+      <tr><th>Saldo</th><th>Valor máximo</th></tr>
+      <tr><td>$20</td><td>$0.40</td></tr>
+      <tr><td>$50</td><td>$1.00</td></tr>
+      <tr><td>$100</td><td>$2.00</td></tr>
+      <tr><td>$500</td><td>$10.00</td></tr>
+      <tr><td>$1000</td><td>$20.00</td></tr>
+    </table>
+    <p>💵 Começa em <strong>$0.35</strong>. Meta diária: <strong>10% da banca</strong>.</p>
+
+    <h3>7. Martingale — Usar com Cabeça</h3>
+    <p>Perdeste $0.35 → ✕ MULTIPLICAR → $0.70 → Se ganhar: RESET → $0.35. Se perder de novo: RESET e recomeça.</p>
+    <p>🛑 <strong>Nunca mais de 1 nível.</strong> 3 perdas seguidas: $0.35 → $1.40 → $5.60 — destrói contas.</p>
+
+    <h3>8. Stop-Loss — A Tua Protecção</h3>
+    <p><strong>Limite diário de 5%:</strong> ao atingir, a plataforma bloqueia novos trades até ao dia seguinte. Se aparecer "🛑 Stop-loss activo": <strong>PARA TUDO</strong>. Não é erro — é protecção.</p>
+
+    <h3>9. Análise de Dígitos</h3>
+    <p>🟢 Verde = ÍMPAR | 🔴 Vermelho = PAR. Após 4 iguais → apostar no oposto. Aguardar ticks_remaining entre 5-8.</p>
+
+    <h3>10. Rotina Diária</h3>
+    <table>
+      <tr><th>Hora</th><th>Ação</th></tr>
+      <tr><td>Manhã</td><td>Conectar, verificar saldo, 1-2 trades máx.</td></tr>
+      <tr><td>Meio do dia</td><td>Rever win rate. Se positivo, continuar.</td></tr>
+      <tr><td>Final do dia</td><td>Meta 10% atingida: PARAR. Stop-loss ativado: DESCANSAR.</td></tr>
+      <tr><td>Fim de semana</td><td>Rever histórico, ajustar estratégia.</td></tr>
+    </table>
+
+    <h3>11. Sinais Contraditórios</h3>
+    <p>Indicadores dizem VENDA mas sinal diz BUY? A plataforma combina técnicos + dígitos, e os dígitos têm peso maior (0.7). <strong>Confia no sinal da plataforma</strong> — os dígitos são mais recentes. Na dúvida, não entres.</p>
+
+    <h3>12. Erros Comuns</h3>
+    <table>
+      <tr><th>❌ Erro</th><th>✅ Correto</th></tr>
+      <tr><td>Valores altos para recuperar</td><td>Manter $0.35 e ser consistente</td></tr>
+      <tr><td>Ignorar stop-loss</td><td>Parar quando bloqueia</td></tr>
+      <tr><td>Muitos trades seguidos</td><td>Máx. 5-10/dia</td></tr>
+      <tr><td>Operar cansado</td><td>Só concentrado</td></tr>
+      <tr><td>Multiplicar martingale em cascata</td><td>Máx. 1 nível</td></tr>
+    </table>
+
+    <h3>13. Depósitos e Saques</h3>
+    <p>💳 <strong>Depositar:</strong> via AirTM → <a href="/go/airtm" target="_blank">AirTM (link seguro)</a></p>
+    <p>🏧 <strong>Sacar:</strong> na Deriv → <a href="https://app.deriv.com/cashier/withdrawal" target="_blank">app.deriv.com/cashier/withdrawal</a></p>
+
+    <h3>14. Controlo Emocional</h3>
+    <p style="color:var(--accent);font-weight:bold">Aqui ganhas usando a tua sabedoria. Perdes quando colocas a ambição e a ganância acima de tudo.</p>
+    <p>O controlo emocional deve estar sempre sob o teu domínio. A plataforma não é 100% assertiva — o mercado é volátil. Haverá dias verdes e dias vermelhos. Assim é o mercado.</p>
+    <p>A Foloma Visão 360 é uma ferramenta para criares a tua fortuna com conhecimento, sabedoria e metas tranquilas.</p>
+
+    <h3>⚠️ Aviso de Responsabilidade</h3>
+    <p style="color:var(--danger)">A Foloma Visão 360 recomenda buscar 10% da banca por dia, no máximo. Acima disto, a plataforma não se responsabiliza por perdas. Saldo mínimo recomendado: $20. Trades de $0.35 a $0.70.</p>
+
+    <h3>📞 Links Úteis</h3>
+    <table>
+      <tr><td>Plataforma</td><td><a href="https://visao360-jf.onrender.com/?ref=64457052" target="_blank">visao360-jf.onrender.com</a></td></tr>
+      <tr><td>Criar conta Deriv</td><td><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank">track.deriv.com/.../1/</a></td></tr>
+      <tr><td>Depositar (AirTM)</td><td><a href="/go/airtm" target="_blank">/go/airtm</a></td></tr>
+      <tr><td>Sacar (Deriv)</td><td><a href="https://app.deriv.com/cashier/withdrawal" target="_blank">app.deriv.com/cashier/withdrawal</a></td></tr>
+      <tr><td>Token API Deriv</td><td><a href="https://app.deriv.com/account/api-token" target="_blank">app.deriv.com/account/api-token</a></td></tr>
+    </table>
+
+    <p style="text-align:center;margin-top:16px;font-weight:bold;color:var(--accent)">📋 Resumo em 3 Regras</p>
+    <table>
+      <tr><td>1</td><td>Gestão de capital é mais importante que qualquer sinal</td></tr>
+      <tr><td>2</td><td>Na dúvida, não entres</td></tr>
+      <tr><td>3</td><td>O objectivo é consistência, não riqueza rápida</td></tr>
+    </table>
+  </div>
+</div>
 
 <div class="container" id="mainContent" style="display:none">
   <div id="dashboard-section">
@@ -199,7 +336,10 @@
     <div class="card">
       <div class="card-title">
         📋 HISTÓRICO
-        <button class="bmr" style="font-size:11px;padding:4px 8px" onclick="loadHistory()">🔄</button>
+        <div>
+          <button class="bmr" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="loadHistory()">🔄</button>
+          <button class="bmr" style="font-size:11px;padding:4px 8px;color:var(--danger)" onclick="clearHistory()">🗑️</button>
+        </div>
       </div>
       <div id="histSummary" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px"></div>
       <div id="histList" style="max-height:300px;overflow-y:auto"></div>
@@ -226,7 +366,7 @@
       <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
         Deposita fundos via AirTM e transfere para a tua conta Deriv.
       </p>
-      <a href="https://www.airtm.com" target="_blank" class="btn-buy"
+      <a href="/go/airtm" target="_blank" class="btn-buy"
          style="display:block;width:100%;text-align:center;padding:14px;border-radius:12px;text-decoration:none;font-weight:700;color:#000">
         💳 Depositar via AirTM
       </a>
@@ -275,6 +415,16 @@
       </div>
       <div id="tokenStatusDemo" class="token-status" style="display:none">✅ Token Demo guardado</div>
       <div id="tokenStatusReal" class="token-status" style="display:none">✅ Token Real guardado</div>
+    </div>
+    <!-- Card do Guia de Utilização -->
+    <div class="card">
+      <div class="card-title">📖 GUIA DE UTILIZAÇÃO</div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
+        Aprende a usar a plataforma, interpretar sinais, gerir risco e muito mais.
+      </p>
+      <button class="btn-buy" style="width:100%" onclick="openGuide()">
+        📖 Ver Guia Completo
+      </button>
     </div>
   </div>
   <div id="admin-section" class="hidden">
@@ -342,6 +492,14 @@ function playBeep() {
     audio.currentTime = 0;
     audio.play().catch(()=>{});
   }
+}
+
+function openGuide() {
+  document.getElementById('guideModal').classList.remove('hidden');
+}
+
+function closeGuide() {
+  document.getElementById('guideModal').classList.add('hidden');
 }
 
 function initSyms(){
@@ -521,7 +679,6 @@ function updateAll(){
         document.getElementById('cur').textContent=bot.currency||'USD';
         document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
 
-        // Gráfico de preço
         updatePriceChart(bot.price || 0);
 
         const sigBadge = document.getElementById('sigBadge');
@@ -779,6 +936,33 @@ async function rstMgt(){
   document.getElementById('amt').value = '0.35';
   document.getElementById('amtDigit').value = '0.35';
   toast('🔄 Martingale resetado','info');
+}
+
+// ✅ NOVA FUNÇÃO: Limpar histórico
+async function clearHistory(){
+  if (!confirm('Tem a certeza que deseja apagar todo o histórico de trades? Esta acção não pode ser desfeita.')) return;
+  
+  try {
+    const r = await fetch('/api/clear_history', { method: 'POST' });
+    const d = await r.json();
+    if (d.error) {
+      toast('❌ ' + d.error, 'loss');
+    } else {
+      toast('🗑️ Histórico apagado com sucesso', 'info');
+      // Limpa o resumo e a lista de trades no dashboard
+      document.getElementById('histSummary').innerHTML = '';
+      document.getElementById('histList').innerHTML = '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+      // Também limpa na página de histórico
+      const sum2 = document.getElementById('histSummary2');
+      if (sum2) sum2.innerHTML = '';
+      const list2 = document.getElementById('histList2');
+      if (list2) list2.innerHTML = '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+      // Reseta os contadores locais
+      lastTradeCount = 0;
+    }
+  } catch (e) {
+    toast('❌ Erro ao apagar histórico', 'loss');
+  }
 }
 
 function loadAffiliate() {
