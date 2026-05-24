@@ -127,8 +127,8 @@
   <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
 </audio>
 
-<!-- Modal do Guia de Utilização -->
-<div class="modal hidden" id="guideModal">
+<!-- Modal do Guia de Utilização (estilos inline para não conflitar com .modal) -->
+<div id="guideModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:1100;align-items:center;justify-content:center;">
   <div class="guide-modal">
     <button class="close-btn" onclick="closeGuide()">✕</button>
     <h2>🚀 Guia de Utilização — Foloma Visão 360</h2>
@@ -497,11 +497,13 @@ function playBeep() {
 }
 
 function openGuide() {
-  document.getElementById('guideModal').classList.remove('hidden');
+  const m = document.getElementById('guideModal');
+  m.style.display = 'flex';
 }
 
 function closeGuide() {
-  document.getElementById('guideModal').classList.add('hidden');
+  const m = document.getElementById('guideModal');
+  m.style.display = 'none';
 }
 
 function initSyms(){
