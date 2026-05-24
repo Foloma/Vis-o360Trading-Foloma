@@ -22,7 +22,7 @@
     .account-switch { display: flex; background: #020617; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
     .account-switch button { padding: 8px 14px; border: none; background: none; color: var(--muted); cursor: pointer; font-weight: 600; }
     .account-switch .active { background: var(--accent); color: #000; }
-    .side-menu { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: var(--card); z-index: 1000; transition: left .3s; padding: 20px; border-right: 1px solid var(--border); }
+    .side-menu { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: var(--card); z-index: 1000; transition: left .3s; padding: 20px; border-right: 1px solid var(--border); overflow-y: auto; }
     .side-menu.open { left: 0; }
     .menu-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
     .menu-close { background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; }
@@ -115,6 +115,7 @@
   <div class="menu-item" onclick="showSec('history')">📋 Histórico</div>
   <div class="menu-item" onclick="showSec('payment')">💰 Depósito/Saque</div>
   <div class="menu-item" onclick="showSec('settings')">⚙️ Configurações</div>
+  <div class="menu-item" onclick="openGuide();toggleMenu()">📖 Guia de Utilização</div>
   <div class="menu-item" id="adminMI" style="display:none" onclick="showSec('admin')">👑 Administração</div>
   <div class="menu-item" onclick="doLogout()">🚪 Sair</div>
   <div class="menu-item" id="disconnectMI" style="border-top:1px solid var(--border);margin-top:10px;color:var(--danger)" onclick="disconnectWebSocket()">🔌 Desconectar WebSocket</div>
@@ -277,6 +278,7 @@
       <div class="card"><div class="card-title">SÍMBOLO</div><div class="sym-row" id="symSel"></div></div>
       <div class="card">
         <div class="price-box"><div class="price" id="priceEl">0.0000</div><div class="signal buy" id="sigBadge">NEUTRAL</div></div>
+        <div id="confEl" style="font-size:11px;color:var(--muted);text-align:center;margin-top:4px"></div>
         <canvas id="priceChart" width="480" height="80" style="width:100%;margin-top:8px;border-radius:8px;background:#020617"></canvas>
         <div class="indicators" style="margin-top:12px">
           <div class="ind"><span class="label">RSI</span><span class="value" id="rsS">-</span></div>
@@ -679,6 +681,10 @@ function updateAll(){
         document.getElementById('cur').textContent=bot.currency||'USD';
         document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
 
+        // ✅ Mostrar percentagem de confiança
+        document.getElementById('confEl').textContent = 
+          conn && confidence > 0 ? `Confiança: ${confidence.toFixed(1)}%` : '';
+
         updatePriceChart(bot.price || 0);
 
         const sigBadge = document.getElementById('sigBadge');
@@ -938,7 +944,6 @@ async function rstMgt(){
   toast('🔄 Martingale resetado','info');
 }
 
-// ✅ NOVA FUNÇÃO: Limpar histórico
 async function clearHistory(){
   if (!confirm('Tem a certeza que deseja apagar todo o histórico de trades? Esta acção não pode ser desfeita.')) return;
   
@@ -949,15 +954,12 @@ async function clearHistory(){
       toast('❌ ' + d.error, 'loss');
     } else {
       toast('🗑️ Histórico apagado com sucesso', 'info');
-      // Limpa o resumo e a lista de trades no dashboard
       document.getElementById('histSummary').innerHTML = '';
       document.getElementById('histList').innerHTML = '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
-      // Também limpa na página de histórico
       const sum2 = document.getElementById('histSummary2');
       if (sum2) sum2.innerHTML = '';
       const list2 = document.getElementById('histList2');
       if (list2) list2.innerHTML = '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
-      // Reseta os contadores locais
       lastTradeCount = 0;
     }
   } catch (e) {
