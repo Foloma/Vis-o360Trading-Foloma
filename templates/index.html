@@ -834,10 +834,13 @@ async function connectWithDeriv(){
   if(selectedAcct === 'real' && !confirm(confirmMsg)) return;
   const r = await fetch(`/api/auth/deriv_oauth_url?account_type=${selectedAcct}`);
   const d = await r.json();
-  if(d.url) window.location.href = d.url;
-  else toast('❌ Erro ao obter URL OAuth', 'loss');
+  if(d.url) {
+    // Abre em nova janela para evitar conflito com sessão activa da Deriv
+    window.open(d.url, '_blank');
+  } else {
+    toast('❌ Erro ao obter URL OAuth', 'loss');
+  }
 }
-
 async function disconnectWebSocket(){
   const r = await fetch('/api/disconnect', {method:'POST'});
   if(r.ok){
