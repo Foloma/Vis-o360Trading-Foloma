@@ -501,13 +501,12 @@ def require_admin(f):
 def index():
     return render_template('index.html')
 
-# ✅ NOVA ROTA — Redireccionamento seguro para AirTM
 @app.route('/go/airtm')
 def go_airtm():
     """Redirecciona para o link de afiliado do AirTM (variável de ambiente)."""
     target = os.environ.get(
         'AIRTM_AFFILIATE_URL',
-        'https://app.airtm.com/ivt/jacob2wa5qcpp'  # fallback público
+        'https://app.airtm.com/ivt/jacob2wa5qcpp'
     )
     return redirect(target)
 
@@ -904,6 +903,7 @@ def deriv_oauth_url():
         f"&redirect_uri={encoded_redirect}"
         f"&state={state_id}"
         f"&l=PT"
+        f"&prompt=consent"
     )
     logger.info(f"URL OAuth gerado: {url}")
     return jsonify({'url': url})
