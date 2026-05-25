@@ -897,13 +897,16 @@ def deriv_oauth_url():
             'created_at': time.time()
         }
 
+    # Parâmetros obrigatórios do OAuth da Deriv
     url = (
         f"https://oauth.deriv.com/oauth2/authorize"
         f"?app_id={app_id}"
-        f"&redirect_uri={encoded_redirect}"
-        f"&state={state_id}"
         f"&l=PT"
-        f"&prompt=consent"
+        f"&response_type=token"                      # ← token implícito, como esperado pelo teu callback
+        f"&redirect_uri={encoded_redirect}"
+        f"&scope=read trade trading_information payments admin"   # ← permissões da app
+        f"&state={state_id}"
+        f"&prompt=consent"                           # ← força ecrã de autorização sempre
     )
     logger.info(f"URL OAuth gerado: {url}")
     return jsonify({'url': url})
