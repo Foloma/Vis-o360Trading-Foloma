@@ -97,6 +97,7 @@
     .token-status { font-size: 12px; color: var(--accent); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
     button:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
   </style>
+  <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <div class="top-bar">
@@ -127,7 +128,7 @@
   <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
 </audio>
 
-<!-- Modal do Guia de Utilização (estilos inline para não conflitar com .modal) -->
+<!-- Modal do Guia de Utilização -->
 <div id="guideModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:1100;align-items:center;justify-content:center;">
   <div class="guide-modal">
     <button class="close-btn" onclick="closeGuide()">✕</button>
@@ -279,7 +280,7 @@
       <div class="card">
         <div class="price-box"><div class="price" id="priceEl">0.0000</div><div class="signal buy" id="sigBadge">NEUTRAL</div></div>
         <div id="confEl" style="font-size:11px;color:var(--muted);text-align:center;margin-top:4px"></div>
-        <canvas id="priceChart" width="480" height="80" style="width:100%;margin-top:8px;border-radius:8px;background:#020617"></canvas>
+        <div id="priceChart" style="width:100%;height:160px;margin-top:8px;border-radius:8px;overflow:hidden;"></div>
         <div class="indicators" style="margin-top:12px">
           <div class="ind"><span class="label">RSI</span><span class="value" id="rsS">-</span></div>
           <div class="ind"><span class="label">MACD</span><span class="value" id="mcS">-</span></div>
@@ -479,9 +480,11 @@ let lastHybridState = null;
 let _loggingIn = false;
 let _registering = false;
 let lastTradeCount = 0;
-const priceHistory = [];
-const MAX_POINTS = 50;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
+
+// Gráfico de velas
+let candleChart = null;
+let candleSeries = null;
 
 function toast(msg,type='info',ms=4000){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
@@ -622,30 +625,57 @@ function checkTradeResults(bot) {
   lastTradeCount = total;
 }
 
-function updatePriceChart(price) {
-  if (!price || price <= 0) return;
-  priceHistory.push(price);
-  if (priceHistory.length > MAX_POINTS) priceHistory.shift();
+function initCandleChart() {
+  const container = document.getElementById('priceChart');
+  if (!container || candleChart) return;
   
-  const canvas = document.getElementById('priceChart');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  
-  const min = Math.min(...priceHistory);
-  const max = Math.max(...priceHistory);
-  const range = max - min || 1;
-  
-  ctx.strokeStyle = '#00f0b5';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  priceHistory.forEach((p, i) => {
-    const x = (i / (MAX_POINTS - 1)) * w;
-    const y = h - ((p - min) / range) * h;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  candleChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 160,
+    layout: {
+      background: { color: '#020617' },
+      textColor: '#e2e8f0'
+    },
+    grid: {
+      vertLines: { color: '#1e293b' },
+      horzLines: { color: '#1e293b' }
+    },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#1e293b' },
+    timeScale: { borderColor: '#1e293b', timeVisible: true }
   });
-  ctx.stroke();
+
+  candleSeries = candleChart.addCandlestickSeries({
+    upColor: '#00f0b5',
+    downColor: '#ff4d4d',
+    borderUpColor: '#00f0b5',
+    borderDownColor: '#ff4d4d',
+    wickUpColor: '#00f0b5',
+    wickDownColor: '#ff4d4d'
+  });
+}
+
+async function loadCandles() {
+  try {
+    const r = await fetch('/api/candles/data');
+    const d = await r.json();
+    if (!d.candles || d.candles.length === 0) return;
+    
+    if (!candleChart) initCandleChart();
+    
+    const formatted = d.candles.map(c => ({
+      time: c.epoch,
+      open: parseFloat(c.open),
+      high: parseFloat(c.high),
+      low: parseFloat(c.low),
+      close: parseFloat(c.close)
+    })).sort((a, b) => a.time - b.time);
+    
+    candleSeries.setData(formatted);
+    candleChart.timeScale().fitContent();
+  } catch(e) {
+    console.error('Erro ao carregar velas:', e);
+  }
 }
 
 function updateAll(){
@@ -683,11 +713,8 @@ function updateAll(){
         document.getElementById('cur').textContent=bot.currency||'USD';
         document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
 
-        // ✅ Mostrar percentagem de confiança
         document.getElementById('confEl').textContent = 
           conn && confidence > 0 ? `Confiança: ${confidence.toFixed(1)}%` : '';
-
-        updatePriceChart(bot.price || 0);
 
         const sigBadge = document.getElementById('sigBadge');
         const btnBuy = document.querySelector('#pTrade .btn-buy');
@@ -745,6 +772,9 @@ function updateAll(){
         
         updateHistSummary(bot);
         checkTradeResults(bot);
+
+        // Inicializa gráfico de velas se ainda não foi criado
+        if (!candleChart) initCandleChart();
 
         if (modo === 'hybrid' && data.digits && bot.signal) {
             const digitAnalysis = data.digits.analysis;
@@ -835,12 +865,12 @@ async function connectWithDeriv(){
   const r = await fetch(`/api/auth/deriv_oauth_url?account_type=${selectedAcct}`);
   const d = await r.json();
   if(d.url) {
-    // Abre em nova janela para evitar conflito com sessão activa da Deriv
     window.open(d.url, '_blank');
   } else {
     toast('❌ Erro ao obter URL OAuth', 'loss');
   }
 }
+
 async function disconnectWebSocket(){
   const r = await fetch('/api/disconnect', {method:'POST'});
   if(r.ok){
@@ -1250,6 +1280,10 @@ function setModo(m){
     document.getElementById('hybridAlert')?.classList.add('hidden');
   }
 }
+
+// Carregar velas periodicamente
+setInterval(loadCandles, 30000);
+setTimeout(loadCandles, 3000);
 
 (function(){
   const p=new URLSearchParams(location.search);
