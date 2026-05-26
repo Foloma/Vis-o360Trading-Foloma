@@ -394,8 +394,15 @@ def create_session(user_id, user, force=False):
     new_sess = {
         'client': client,
         'trading_bot': bot,
-        'digit_analyzer': analyzer
+        'digit_analyzer': analyzer,
+        'candles': []                          # ✅ armazenamento de velas
     }
+
+    def on_candles(candles):
+        new_sess['candles'] = candles
+
+    client.on_candles_callback = on_candles
+
     with sessions_lock:
         sessions[user_id] = new_sess
 
@@ -1119,6 +1126,15 @@ def report():
     if not sess:
         return jsonify({'error': 'Sessão não encontrada'}), 500
     return jsonify(sess['trading_bot'].get_trade_report())
+
+# ==================== VELAS ====================
+@app.route('/api/candles/data')
+@require_auth
+def candles_data():
+    sess = get_session(session['user_id'])
+    if not sess:
+        return jsonify({'candles': []})
+    return jsonify({'candles': sess.get('candles', [])})
 
 # ==================== AFILIADOS / PAGAMENTOS ====================
 def credit_affiliate_commission(user_email, amount):
