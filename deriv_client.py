@@ -24,6 +24,7 @@ class DerivWebSocketClient:
         self.current_symbol = 'R_100'
         self.on_tick_callback = on_tick_callback
         self.on_result_callback = on_result_callback
+        self.on_candles_callback = None
         self.trading_bot = None
         self.payment_system = None
         self.markup_percentage = 0
@@ -90,6 +91,7 @@ class DerivWebSocketClient:
                 self._subscribe_balance()
                 if self.current_symbol:
                     self._subscribe_ticks(self.current_symbol)
+                    self.request_candles(self.current_symbol)
                 logger.info("🟢 Conectado e autorizado")
                 self._start_keep_alive()
                 self._start_watchdog()
@@ -194,6 +196,7 @@ class DerivWebSocketClient:
                 'buy':                    self._on_buy_response,
                 'proposal_open_contract': self._on_poc,
                 'error':                  self._on_api_error,
+                'history':                self._on_candles,
             }
             handler = handlers.get(msg_type)
             if handler:
@@ -256,6 +259,7 @@ class DerivWebSocketClient:
         self.current_symbol = symbol
         if self.authorized:
             self._subscribe_ticks(symbol)
+            self.request_candles(symbol)          # ✅ actualiza velas ao mudar de símbolo
 
     def _subscribe_balance(self):
         try:
@@ -317,7 +321,6 @@ class DerivWebSocketClient:
             return self._req_counter
 
     def place_trade(self, contract_type, amount, is_digit=False):
-        # ✅ Verificação de risco antes de qualquer trade
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
@@ -480,6 +483,27 @@ class DerivWebSocketClient:
         err = data.get('error', {})
         self.auth_error = err
         logger.error(f"API Error: {err.get('message', 'desconhecido')} (código: {err.get('code', 'N/A')})")
+
+    # ── Velas ──────────────────────────────────────────────
+    def request_candles(self, symbol=None, granularity=60, count=50):
+        symbol = symbol or self.current_symbol
+        try:
+            self.ws.send(json.dumps({
+                "ticks_history": symbol,
+                "style": "candles",
+                "granularity": granularity,
+                "count": count,
+                "end": "latest",
+                "req_id": self._next_req()
+            }))
+            logger.info(f"📊 Pedido de velas enviado para {symbol}")
+        except Exception as e:
+            logger.error(f"Erro ao pedir velas: {e}")
+
+    def _on_candles(self, data):
+        candles = data.get('candles', [])
+        if candles and self.on_candles_callback:
+            self.on_candles_callback(candles)
 
     def request_deposit(self, amount, currency, method):
         return {'status': 'pending', 'message': f'Depósito ${amount} solicitado.', 'amount': amount, 'method': method}
