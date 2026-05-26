@@ -8,7 +8,6 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-# Pesos para combinação de sinais em índices R_
 _TECH_WEIGHT = getattr(config, 'SYNTHETIC_TECHNICAL_WEIGHT', 0.6)
 _DIGIT_WEIGHT = getattr(config, 'SYNTHETIC_DIGIT_WEIGHT', 0.4)
 
@@ -22,7 +21,7 @@ class TradingBot:
         self.balance = 0
         self.currency = 'USD'
         self.paused = False
-        self.stop_loss_active = False      # indica bloqueio por risco
+        self.stop_loss_active = False
         self.last_analysis = {}
         self.digit_analyzer = None
 
@@ -65,10 +64,6 @@ class TradingBot:
         logger.info("▶️ Resumido")
 
     def check_risk_limits(self):
-        """
-        Verifica se os limites diários foram atingidos.
-        Retorna True se estiver OK para operar, False se estiver bloqueado.
-        """
         max_loss_pct = config.RISK_LIMITS.get('max_daily_loss_percent', 5)
         if self.daily_stats['start_balance'] > 0:
             daily_loss_pct = (
@@ -102,7 +97,6 @@ class TradingBot:
             if self.daily_stats['date'] != today:
                 self.reset_daily_stats()
 
-        # Verifica limites de risco a cada tick
         self.check_risk_limits()
 
     def reset_daily_stats(self):
@@ -121,7 +115,6 @@ class TradingBot:
         return (recent[-1] - recent[0]) / recent[0] * 100
 
     def _get_digit_signal(self):
-        """Retorna (action, confidence) do analisador de dígitos."""
         if not self.digit_analyzer:
             return None, 0
         analysis = self.digit_analyzer.get_analysis()
@@ -129,50 +122,104 @@ class TradingBot:
         conf = analysis.get('confidence', 0)
         return action, conf
 
+    # ✅ NOVO MÉTODO DE CONFIANÇA REAL
     def _calculate_pure_technical(self, prices):
-        """Calcula apenas o sinal técnico, sem combinação com dígitos."""
-        if len(prices) < 20:
-            return 'NEUTRAL', 0
-
-        if not self.last_analysis:
+        if len(prices) < 20 or not self.last_analysis:
             return 'NEUTRAL', 0
 
         analysis = self.last_analysis
-        vote_trend = 1 if 'ALTA' in analysis['trend']['desc'] else -1 if 'BAIXA' in analysis['trend']['desc'] else 0
+        scores = []
+
+        # RSI (25%)
         rsi = analysis['rsi']['score']
-        vote_rsi = 1 if rsi < 30 else -1 if rsi > 70 else 0.5 if rsi < 40 else -0.5 if rsi > 60 else 0
-        vote_macd = 1 if 'COMPRA' in analysis['macd']['desc'] else -1 if 'VENDA' in analysis['macd']['desc'] else 0
-        vote_bb = 1 if 'COMPRA' in analysis['bollinger']['desc'] else -1 if 'VENDA' in analysis['bollinger']['desc'] else 0
-        stoch_desc = analysis.get('stochastic', {}).get('desc', '---')
-        vote_stoch = 1 if 'SOBREVENDIDO' in stoch_desc else -1 if 'SOBRECOMPRADO' in stoch_desc else 0
+        if rsi is not None and analysis['rsi']['desc'] != '---':
+            if rsi < 30:
+                rsi_conf = min(100, (30 - rsi) / 30 * 100 + 60)
+                scores.append(('BUY', 0.25, rsi_conf))
+            elif rsi > 70:
+                rsi_conf = min(100, (rsi - 70) / 30 * 100 + 60)
+                scores.append(('SELL', 0.25, rsi_conf))
+            elif rsi < 45:
+                scores.append(('BUY', 0.25, 40))
+            elif rsi > 55:
+                scores.append(('SELL', 0.25, 40))
+            else:
+                scores.append(('NEUTRAL', 0.25, 0))
 
-        votes = [v for v in [vote_trend, vote_rsi, vote_macd, vote_bb, vote_stoch] if v != 0]
-        buy_votes = sum(1 for v in votes if v > 0)
-        sell_votes = sum(1 for v in votes if v < 0)
-        total_votes = len(votes)
+        # MACD (30%)
+        macd_desc = analysis['macd']['desc']
+        macd_score = analysis['macd']['score']
+        if macd_desc != '---':
+            if macd_score == 80:
+                if 'COMPRA' in macd_desc:
+                    scores.append(('BUY', 0.30, 80))
+                elif 'VENDA' in macd_desc:
+                    scores.append(('SELL', 0.30, 80))
+            elif macd_score == 65:
+                if 'COMPRA' in macd_desc:
+                    scores.append(('BUY', 0.30, 55))
+                elif 'VENDA' in macd_desc:
+                    scores.append(('SELL', 0.30, 55))
+            else:
+                scores.append(('NEUTRAL', 0.30, 0))
 
-        if total_votes == 0:
+        # TREND (25%)
+        trend_desc = analysis['trend']['desc']
+        if trend_desc != '---':
+            if 'ALTA' in trend_desc:
+                scores.append(('BUY', 0.25, 70))
+            elif 'BAIXA' in trend_desc:
+                scores.append(('SELL', 0.25, 70))
+            else:
+                scores.append(('NEUTRAL', 0.25, 0))
+
+        # Bollinger (20%)
+        bb_desc = analysis['bollinger']['desc']
+        if bb_desc != '---':
+            if 'sobrevendido' in bb_desc:
+                scores.append(('BUY', 0.20, 80))
+            elif 'sobrecomprado' in bb_desc:
+                scores.append(('SELL', 0.20, 80))
+            elif 'acima' in bb_desc:
+                scores.append(('BUY', 0.20, 45))
+            elif 'abaixo' in bb_desc:
+                scores.append(('SELL', 0.20, 45))
+            else:
+                scores.append(('NEUTRAL', 0.20, 0))
+
+        if not scores:
             return 'NEUTRAL', 0
 
-        if buy_votes > sell_votes:
+        buy_score = sum(peso * conf for dir, peso, conf in scores if dir == 'BUY')
+        sell_score = sum(peso * conf for dir, peso, conf in scores if dir == 'SELL')
+        total_weight = sum(peso for dir, peso, conf in scores if dir != 'NEUTRAL')
+
+        if total_weight == 0:
+            return 'NEUTRAL', 0
+
+        if buy_score > sell_score:
             signal = 'BUY'
-            confidence = (buy_votes / total_votes) * 100
-        elif sell_votes > buy_votes:
+            confidence = buy_score / (buy_score + sell_score) * 100 if (buy_score + sell_score) > 0 else 0
+        elif sell_score > buy_score:
             signal = 'SELL'
-            confidence = (sell_votes / total_votes) * 100
+            confidence = sell_score / (buy_score + sell_score) * 100 if (buy_score + sell_score) > 0 else 0
         else:
             return 'NEUTRAL', 0
 
         momentum = self.get_momentum()
-        if signal == 'BUY' and momentum > 0.1:
+        if signal == 'BUY' and momentum > config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1):
             confidence = min(confidence + 5, 100)
-        elif signal == 'SELL' and momentum < -0.1:
+        elif signal == 'SELL' and momentum < -config.ADVANCED_STRATEGY.get('momentum_threshold', 0.1):
             confidence = min(confidence + 5, 100)
 
-        return signal, min(confidence, 100)
+        opposing = sell_score if signal == 'BUY' else buy_score
+        if opposing > 15:
+            contradiction_penalty = min(15, opposing / 3)
+            confidence = max(0, confidence - contradiction_penalty)
+
+        return signal, min(round(confidence, 1), 100)
 
     def calculate_signal(self):
-        """Calcula sinal técnico. Exige pelo menos 20 preços e combina com dígitos em R_."""
         prices = self.indicators.get_prices(self.current_symbol)
         if len(prices) < 20:
             logger.debug(f"⏳ [{self.current_symbol}] Apenas {len(prices)} preços – a aguardar 20")
@@ -181,7 +228,6 @@ class TradingBot:
         if not self.last_analysis:
             return 'NEUTRAL', 0
 
-        # Calcula sinal técnico puro
         signal, confidence = self._calculate_pure_technical(prices)
         dig_action = dig_conf = None
 
@@ -190,7 +236,6 @@ class TradingBot:
             f"| Preços: {len(prices)}"
         )
 
-        # === Combinação com sinal de dígitos (apenas para R_) ===
         if self.current_symbol.startswith('R_') and self.digit_analyzer:
             dig_action, dig_conf = self._get_digit_signal()
             if dig_action and dig_conf >= 55:
