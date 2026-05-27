@@ -480,6 +480,7 @@ let lastHybridState = null;
 let _loggingIn = false;
 let _registering = false;
 let lastTradeCount = 0;
+let isConnected = false;   // para polling adaptativo
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 // Gráfico de velas
@@ -521,19 +522,29 @@ function chgSym(s, el){
   el.classList.add('active');
 }
 
+// ══════════════ POLLING ADAPTATIVO ══════════════
 function startPolling(){
   if(_updateInterval) return;
-  _updateInterval = setInterval(updateAll, 5000);
+  scheduleNextPoll();
 }
 
 function stopPolling() {
   if (_updateInterval) {
-    clearInterval(_updateInterval);
+    clearTimeout(_updateInterval);
     _updateInterval = null;
   }
 }
 
-function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
+function scheduleNextPoll() {
+  const delay = isConnected ? 1500 : 5000;   // 1.5s conectado, 5s offline
+  _updateInterval = setTimeout(() => {
+    updateAll();
+    scheduleNextPoll();
+  }, delay);
+}
+
+// ══════════════ ALERTA HÍBRIDO (Math.min) ══════════════
+function checkHybridAlert(signalBot, digitRecommendation, confidenceBot, confidenceDigit) {
     if (modo !== 'hybrid') return;
     const alertDiv = document.getElementById('hybridAlert');
     const msgDiv = document.getElementById('hybridMsg');
@@ -541,13 +552,11 @@ function checkHybridAlert(signalBot, digitRecommendation, confidenceCombined) {
         alertDiv.classList.add('hidden');
         return;
     }
-    const botAction = signalBot;
-    const digitAction = digitRecommendation;
-    const convergente = (botAction === digitAction);
+    const convergente = (signalBot === digitRecommendation);
     if (convergente) {
         alertDiv.classList.remove('hidden');
-        const actionText = botAction === 'BUY' ? 'COMPRA 🔼' : 'VENDA 🔽';
-        const conf = confidenceCombined || 0;
+        const actionText = signalBot === 'BUY' ? 'COMPRA 🔼' : 'VENDA 🔽';
+        const conf = Math.min(confidenceBot || 0, confidenceDigit || 0);
         msgDiv.innerHTML = `✅ CONVERGENTE: ${actionText} com ${conf.toFixed(1)}% confiança combinada`;
         msgDiv.style.color = 'var(--accent)';
         if (lastHybridState !== true) {
@@ -598,12 +607,11 @@ async function autoConnect() {
     const d = await r.json();
     if (d.status === 'already_connected') {
       document.getElementById('conSt').textContent = '✅ Conectado';
+      isConnected = true;
     } else if (d.status === 'connecting') {
       document.getElementById('conSt').textContent = '🔄 Auto-conectando...';
       toast('🔄 Auto-conectando...', 'info');
       setTimeout(updateAll, 3000);
-    } else if (d.status === 'no_token') {
-      // sem token, não tenta conectar
     }
   } catch(e) {
     // ignora erros de rede
@@ -686,6 +694,7 @@ function updateAll(){
         const bot = data.bot;
         if (!bot) return;
         const conn = bot.connected && bot.authorized;
+        isConnected = conn;   // atualiza estado para polling adaptativo
         let confidence = parseFloat(bot.confidence);
         if (isNaN(confidence)) confidence = 0;
 
@@ -773,16 +782,14 @@ function updateAll(){
         updateHistSummary(bot);
         checkTradeResults(bot);
 
-        // Inicializa gráfico de velas se ainda não foi criado
         if (!candleChart) initCandleChart();
 
         if (modo === 'hybrid' && data.digits && bot.signal) {
             const digitAnalysis = data.digits.analysis;
             if (digitAnalysis && digitAnalysis.recommended_action) {
-                const combinedConf = ((bot.confidence || 0) + (digitAnalysis.confidence || 0)) / 2;
-                checkHybridAlert(bot.signal, digitAnalysis.recommended_action, combinedConf);
+                checkHybridAlert(bot.signal, digitAnalysis.recommended_action, bot.confidence, digitAnalysis.confidence);
             } else {
-                checkHybridAlert(null, null, 0);
+                checkHybridAlert(null, null, 0, 0);
             }
         } else {
             document.getElementById('hybridAlert')?.classList.add('hidden');
@@ -1281,8 +1288,8 @@ function setModo(m){
   }
 }
 
-// Carregar velas periodicamente
-setInterval(loadCandles, 30000);
+// Carregar velas a cada 10 segundos
+setInterval(loadCandles, 10000);
 setTimeout(loadCandles, 3000);
 
 (function(){
