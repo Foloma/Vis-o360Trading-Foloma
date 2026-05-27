@@ -87,7 +87,8 @@ def init_db():
         active INTEGER DEFAULT 1,
         role TEXT DEFAULT 'user',
         affiliate_earnings REAL DEFAULT 0.0,
-        referral_link_code TEXT
+        referral_link_code TEXT,
+        daily_stats_json TEXT
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS user_tokens (
         email TEXT,
@@ -126,6 +127,11 @@ def init_db():
         key TEXT PRIMARY KEY,
         value TEXT
     )''')
+    # Migração: adicionar coluna daily_stats_json se não existir
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
+    except sqlite3.OperationalError:
+        pass  # coluna já existe
     conn.commit()
     conn.close()
 
@@ -199,10 +205,17 @@ class UserStore:
             if not row:
                 return None
             keys = ['email','id','name','password_hash','active_account','created_at','last_login',
-                    'referral_code','active','role','affiliate_earnings','referral_link_code']
+                    'referral_code','active','role','affiliate_earnings','referral_link_code','daily_stats_json']
             user = dict(zip(keys, row))
             tokens = conn.execute('SELECT account_type, token FROM user_tokens WHERE email = ?', (email,)).fetchall()
             user['tokens'] = {acc: decrypt_token(tok) for acc, tok in tokens}
+            if user.get('daily_stats_json'):
+                try:
+                    user['daily_stats'] = json.loads(user['daily_stats_json'])
+                except:
+                    user['daily_stats'] = None
+            else:
+                user['daily_stats'] = None
             return user
         finally:
             conn.close()
@@ -211,13 +224,14 @@ class UserStore:
     def save(user):
         conn = sqlite3.connect(DATABASE_PATH)
         try:
+            daily_json = json.dumps(user.get('daily_stats')) if user.get('daily_stats') else None
             conn.execute('''INSERT OR REPLACE INTO users (email, id, name, password_hash, active_account,
-                            created_at, last_login, referral_code, active, role, affiliate_earnings, referral_link_code)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+                            created_at, last_login, referral_code, active, role, affiliate_earnings, referral_link_code, daily_stats_json)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                          (user['email'], user['id'], user['name'], user['password_hash'],
                           user.get('active_account','demo'), user.get('created_at'), user.get('last_login'),
                           user.get('referral_code'), user.get('active',1), user.get('role','user'),
-                          user.get('affiliate_earnings',0.0), user.get('referral_link_code')))
+                          user.get('affiliate_earnings',0.0), user.get('referral_link_code'), daily_json))
             conn.execute('DELETE FROM user_tokens WHERE email = ?', (user['email'],))
             for acc, tok in user.get('tokens', {}).items():
                 if tok:
@@ -251,7 +265,8 @@ class UserStore:
             'role': 'user',
             'affiliate_earnings': 0.0,
             'referral_link_code': ref_link,
-            'tokens': {}
+            'tokens': {},
+            'daily_stats': None
         }
         UserStore.save(user)
         return user
@@ -348,6 +363,18 @@ def persist_trade(user_id, trade_data):
     finally:
         conn.close()
 
+def _save_daily_stats_to_db(email, bot):
+    """Guarda as estatísticas diárias do bot na BD."""
+    if not email or not bot:
+        return
+    try:
+        user = UserStore.get(email)
+        if user:
+            user['daily_stats'] = bot.get_daily_stats_for_db()
+            UserStore.save(user)
+    except Exception as e:
+        logger.error(f"Erro ao guardar daily_stats: {e}")
+
 def create_session(user_id, user, force=False):
     with sessions_lock:
         if user_id in sessions:
@@ -391,11 +418,18 @@ def create_session(user_id, user, force=False):
     bot.client = client
     bot.digit_analyzer = analyzer
 
+    # Carregar estatísticas diárias salvas (se existirem)
+    saved_daily = user.get('daily_stats')
+    if saved_daily:
+        bot.set_daily_stats_from_db(saved_daily)
+    else:
+        bot.reset_daily_stats()
+
     new_sess = {
         'client': client,
         'trading_bot': bot,
         'digit_analyzer': analyzer,
-        'candles': []                          # ✅ armazenamento de velas
+        'candles': []
     }
 
     def on_candles(candles):
@@ -510,11 +544,7 @@ def index():
 
 @app.route('/go/airtm')
 def go_airtm():
-    """Redirecciona para o link de afiliado do AirTM (variável de ambiente)."""
-    target = os.environ.get(
-        'AIRTM_AFFILIATE_URL',
-        'https://app.airtm.com/ivt/jacob2wa5qcpp'
-    )
+    target = os.environ.get('AIRTM_AFFILIATE_URL', 'https://app.airtm.com/ivt/jacob2wa5qcpp')
     return redirect(target)
 
 @app.route('/api/auth/status')
@@ -653,7 +683,6 @@ def reset_password():
         conn.commit()
     finally:
         conn.close()
-
     send_reset_email(email, token)
     return jsonify({'status': 'ok', 'message': 'Se o email existir, receberá um link.'})
 
@@ -729,15 +758,12 @@ def switch_account():
     acc_type = d.get('account_type','').strip().lower()
     if acc_type not in ('demo','real'):
         return jsonify({'error': 'Tipo inválido'}), 400
-
     email = session['user_email']
     user = UserStore.get(email)
     if not user.get('tokens', {}).get(acc_type):
         return jsonify({'error': 'Sem token para essa conta'}), 400
-
     UserStore.set_active_account(email, acc_type)
     user = UserStore.get(email)
-
     user_id = session['user_id']
     with sessions_lock:
         if user_id in sessions:
@@ -746,7 +772,6 @@ def switch_account():
             if old_client._ws_thread and old_client._ws_thread.is_alive():
                 old_client._ws_thread.join(timeout=5)
             del sessions[user_id]
-
     sess = create_session(user_id, user, force=True)
     reset_bot_state(sess['trading_bot'])
     return jsonify({
@@ -777,9 +802,11 @@ def status():
     bot_status = bot.get_status()
     bot_status['streaming'] = client.streaming if client else False
     analysis = analyzer.get_analysis()
-    
+
+    # Persistir estatísticas diárias na BD
+    _save_daily_stats_to_db(session.get('user_email'), bot)
+
     logger.debug(f"📊 STATUS: connected={bot_status.get('connected')}, authorized={bot_status.get('authorized')}, balance={bot_status.get('balance')}")
-    
     return jsonify({
         'bot': bot_status,
         'digits': {
@@ -796,6 +823,16 @@ def status():
         'symbols': config.AVAILABLE_SYMBOLS,
         'loginid': client.loginid if client else None
     })
+
+@app.route('/api/daily-stats/sync', methods=['POST'])
+@require_auth
+def sync_daily_stats():
+    """Força a gravação imediata das daily_stats na BD."""
+    sess = get_session(session['user_id'])
+    if sess:
+        _save_daily_stats_to_db(session.get('user_email'), sess['trading_bot'])
+        return jsonify({'status': 'ok'})
+    return jsonify({'error': 'Sem sessão'}), 400
 
 @app.route('/api/debug')
 def debug():
@@ -824,21 +861,17 @@ def oauth_callback():
     if not state_id:
         logger.error("State não enviado pela Deriv")
         return redirect('/?error=invalid_state')
-
     with oauth_states_lock:
         if state_id not in oauth_states:
             logger.error("State inválido ou expirado")
             return redirect('/?error=invalid_state')
         state_data = oauth_states.pop(state_id)
-
         now = time.time()
         expired = [k for k, v in oauth_states.items() if now - v.get('created_at', 0) > 600]
         for k in expired:
             oauth_states.pop(k, None)
-
     user_id = state_data['user_id']
     account_type_request = state_data['account_type']
-
     conn = sqlite3.connect(DATABASE_PATH)
     try:
         row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
@@ -847,7 +880,6 @@ def oauth_callback():
         email = row[0]
     finally:
         conn.close()
-
     accounts = []
     i = 1
     while request.args.get(f'token{i}'):
@@ -856,11 +888,9 @@ def oauth_callback():
             'acct': request.args.get(f'acct{i}', '')
         })
         i += 1
-
     if not accounts:
         logger.error("Nenhum token recebido no OAuth")
         return redirect('/?error=oauth_failed')
-
     for acc in accounts:
         acct = acc['acct']
         tok = acc['token']
@@ -873,14 +903,12 @@ def oauth_callback():
         if (account_type_request == 'demo' and acct.startswith('VR')) or \
            (account_type_request == 'real' and not acct.startswith('VR')):
             UserStore.set_active_account(email, account_type_request)
-
     user = UserStore.get(email)
     session['user_id'] = user_id
     session['user_email'] = email
     session['user_name'] = user['name']
     session['user_role'] = user.get('role', 'user')
     session.permanent = True
-
     create_session(user_id, user, force=True)
     return redirect('/?connected=true')
 
@@ -891,11 +919,9 @@ def deriv_oauth_url():
     if not app_id:
         logger.error("DERIV_APP_ID não definido")
         return jsonify({'error': 'Configuração OAuth em falta'}), 500
-
     base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
     redirect_uri = base_url + '/oauth/callback'
     encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
-
     state_id = uuid.uuid4().hex
     with oauth_states_lock:
         oauth_states[state_id] = {
@@ -903,7 +929,6 @@ def deriv_oauth_url():
             'account_type': request.args.get('account_type', 'demo'),
             'created_at': time.time()
         }
-
     url = (
         f"https://oauth.deriv.com/oauth2/authorize"
         f"?app_id={app_id}"
@@ -914,7 +939,8 @@ def deriv_oauth_url():
     logger.info(f"URL OAuth gerado: {url}")
     return jsonify({'url': url})
 
-# ==================== TRADING (com verificação de stop‑loss) ====================
+# ==================== TRADING ====================
+
 @app.route('/api/trade', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
@@ -933,9 +959,12 @@ def trade():
         amt = float(d.get('amount', 0.35))
         if amt < 0.35 or amt > 100:
             return jsonify({'error': 'Valor inválido'}), 400
+
         sig, conf = bot.calculate_signal()
         if conf < config.RISK_LIMITS.get('min_confidence', 60):
             return jsonify({'error': f'Confiança insuficiente: {conf:.1f}%'}), 400
+
+        # Consenso mínimo já verificado dentro do bot (calculate_signal)
         ok = sess['client'].place_trade('CALL' if action == 'BUY' else 'PUT', amt, False)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
@@ -953,11 +982,9 @@ def trade_digit():
         sess = get_session(session['user_id'])
         if not sess or not sess['client'].authorized:
             return jsonify({'error': 'Não conectado'}), 400
-
         bot = sess['trading_bot']
         if bot.stop_loss_active:
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
-
         d = request.json
         pred = d.get('prediction')
         amt = float(d.get('amount', 0.35))
@@ -986,11 +1013,9 @@ def trade_hybrid():
         sess = get_session(session['user_id'])
         if not sess or not sess['client'].authorized:
             return jsonify({'error': 'Não conectado'}), 400
-
         bot = sess['trading_bot']
         if bot.stop_loss_active:
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
-
         d = request.json
         amt = float(d.get('amount', 0.35))
         bot = sess['trading_bot']
@@ -1002,10 +1027,11 @@ def trade_hybrid():
         dr = da.get('recommended_action')
         dc = da.get('confidence', 0)
         if sig == 'BUY' and dr == 'BUY':
-            comb = (conf_a + dc) / 2
+            # Híbrido usa min() em vez de média aritmética
+            comb = min(conf_a, dc)
             action = 'BUY'
         elif sig == 'SELL' and dr == 'SELL':
-            comb = (conf_a + dc) / 2
+            comb = min(conf_a, dc)
             action = 'SELL'
         else:
             return jsonify({'error': 'Sinais divergentes'}), 400
@@ -1023,10 +1049,6 @@ def trade_hybrid():
 @app.route('/api/trade/manual', methods=['POST'])
 @require_auth
 def trade_manual():
-    """
-    Trade manual — NÃO verifica stop_loss_active, permitindo ao utilizador
-    operar mesmo após o limite diário de perda ter sido atingido.
-    """
     try:
         sess = get_session(session['user_id'])
         if not sess or not sess['client'].authorized:
@@ -1098,7 +1120,10 @@ def martingale_apply():
     sess = get_session(session['user_id'])
     if not sess:
         return jsonify({'error': 'Sessão não encontrada'}), 500
-    ok, res = sess['trading_bot'].apply_martingale_after_loss(la)
+
+    bot = sess['trading_bot']
+    # O bot agora trata internamente das verificações de saldo e limites
+    ok, res = bot.apply_martingale_after_loss(la)
     if ok:
         return jsonify({'status': 'ok', 'martingale': res})
     return jsonify({'error': res}), 400
@@ -1127,7 +1152,6 @@ def report():
         return jsonify({'error': 'Sessão não encontrada'}), 500
     return jsonify(sess['trading_bot'].get_trade_report())
 
-# ==================== VELAS ====================
 @app.route('/api/candles/data')
 @require_auth
 def candles_data():
@@ -1161,11 +1185,9 @@ def affiliate_stats():
     email = session.get('user_email')
     if not email:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
-
     user = UserStore.get(email)
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
-
     conn = sqlite3.connect(DATABASE_PATH)
     try:
         referred_count = conn.execute(
@@ -1174,7 +1196,6 @@ def affiliate_stats():
         total_commission = user.get('affiliate_earnings', 0.0)
     finally:
         conn.close()
-
     return jsonify({
         'total_referrals': referred_count,
         'total_commission': total_commission,
@@ -1187,7 +1208,6 @@ def affiliate_stats():
 def affiliate_link():
     email = session.get('user_email')
     user = UserStore.get(email) if email else None
-
     if not user:
         user_id = session.get('user_id')
         if user_id:
@@ -1200,10 +1220,8 @@ def affiliate_link():
                     session['user_email'] = email
             finally:
                 conn.close()
-
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
-
     if not user.get('referral_link_code'):
         ref_link = base64.b64encode(hashlib.md5(user['id'].encode()).digest()).hex()[:8]
         conn = sqlite3.connect(DATABASE_PATH)
@@ -1214,7 +1232,6 @@ def affiliate_link():
         finally:
             conn.close()
         user['referral_link_code'] = ref_link
-
     base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
     link = f"{base_url}/?ref={user['referral_link_code']}"
     return jsonify({'link': link, 'code': user['referral_link_code']})
@@ -1224,7 +1241,6 @@ def affiliate_link():
 def affiliate_earnings():
     email = session.get('user_email')
     user = UserStore.get(email) if email else None
-
     if not user:
         user_id = session.get('user_id')
         if user_id:
@@ -1237,17 +1253,14 @@ def affiliate_earnings():
                     session['user_email'] = email
             finally:
                 conn.close()
-
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
-
     conn = sqlite3.connect(DATABASE_PATH)
     try:
         referred_count = conn.execute('SELECT COUNT(*) FROM referrals WHERE referrer_email = ?',
                                        (user['email'],)).fetchone()[0]
     finally:
         conn.close()
-
     return jsonify({
         'earnings': user.get('affiliate_earnings', 0.0),
         'referral_link': user.get('referral_link_code', ''),
@@ -1319,10 +1332,8 @@ def toggle_user():
 def admin_clear_tokens():
     d = request.json
     email = d.get('email', '').strip().lower()
-
     user = UserStore.get(email) if email else None
     target_uid = user['id'] if user else None
-
     conn = sqlite3.connect(DATABASE_PATH)
     try:
         if email:
@@ -1338,7 +1349,6 @@ def admin_clear_tokens():
             logger.info("Todos os tokens removidos")
     finally:
         conn.close()
-
     with sessions_lock:
         for uid, sess in list(sessions.items()):
             if (target_uid and uid == target_uid) or not target_uid:
