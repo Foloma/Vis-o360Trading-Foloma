@@ -16,10 +16,9 @@ class DigitAnalyzer:
         self.current_digit  = None
         self.current_parity = '---'
 
-        # Contagem de ticks para sincronização
-        self._tick_count       = 0   # ticks totais recebidos
-        self._ticks_in_cycle   = 0   # posição dentro do ciclo actual (0..N-1)
-        self._digit_counter    = 0   # número de dígitos lentos capturados
+        self._tick_count       = 0
+        self._ticks_in_cycle   = 0
+        self._digit_counter    = 0
 
         self._lock = threading.RLock()
 
@@ -39,7 +38,6 @@ class DigitAnalyzer:
             'entropy_verdict': '---'
         }
 
-    # ── Extracção correcta do dígito ───────────────────────────
     def _extract_last_digit(self, price):
         try:
             s = str(Decimal(str(price)).normalize())
@@ -55,29 +53,21 @@ class DigitAnalyzer:
             except:
                 return 0
 
-    # ── Cálculo da entropia de Shannon ─────────────────────────
     def _calculate_entropy(self, digits):
-        """
-        Calcula a entropia de Shannon normalizada (0 a 1) para uma sequência de dígitos.
-        Entropia alta = aleatoriedade alta = previsão difícil.
-        """
         if not digits or len(digits) < 2:
             return 0.0
         
-        # Contar frequências de cada dígito (0-9)
         total = len(digits)
         frequencies = {}
         for d in digits:
             frequencies[d] = frequencies.get(d, 0) + 1
         
-        # Calcular entropia
         entropy = 0.0
         for count in frequencies.values():
             if count > 0:
                 prob = count / total
                 entropy -= prob * math.log2(prob)
         
-        # Normalizar (entropia máxima para 10 dígitos é log2(10) ≈ 3.3219)
         max_entropy = math.log2(min(10, len(frequencies) + 1))
         if max_entropy > 0:
             normalized = entropy / max_entropy
@@ -86,7 +76,6 @@ class DigitAnalyzer:
         
         return min(normalized, 1.0)
 
-    # ── Receber tick (chamado pelo deriv_client a cada tick) ────
     def add_tick(self, price):
         try:
             digit  = self._extract_last_digit(price)
@@ -121,7 +110,6 @@ class DigitAnalyzer:
             logger.error(f"Erro tick: {e}")
             return False, None
 
-    # ── Sequências (chama _calc_streak e formata) ──────────────
     def _find_sequences(self, digits):
         if not digits:
             return None
@@ -133,7 +121,6 @@ class DigitAnalyzer:
             'descricao': descricao
         }
 
-    # ── Análise dos últimos 20 dígitos ─────────────────────────
     def _analyse(self, snap):
         total  = len(snap)
         window = snap[-20:]
@@ -146,8 +133,7 @@ class DigitAnalyzer:
         streak, sp = self._calc_streak(snap)
         seq_info = self._find_sequences(snap)
 
-        # Calcular entropia de Shannon
-        entropy = self._calculate_entropy(snap[-50:])  # analisa os últimos 50 dígitos
+        entropy = self._calculate_entropy(snap[-50:])
 
         candidates = []
 
@@ -189,7 +175,7 @@ class DigitAnalyzer:
                 else:
                     candidates.append((conf, 'BUY', 'alternating', f'🔄 Alternância {alt} → ÍMPAR ({conf:.0f}%)'))
 
-        # 4. Desequilíbrio moderado (agora com confiança 55)
+        # 4. Desequilíbrio moderado
         if w >= 15 and not candidates:
             base_conf = 55
             conf = self._apply_entropy_penalty(base_conf, entropy)
@@ -198,13 +184,11 @@ class DigitAnalyzer:
             elif even_pct >= 62:
                 candidates.append((conf, 'BUY', 'imbalance', f'⚠️ {even_pct}% PAR → possível ÍMPAR'))
 
-        # ✅ Consolidação final — um único bloco with self._lock
         with self._lock:
             if candidates:
                 best = max(candidates, key=lambda x: x[0])
                 conf, action, ptype, reason = best
                 
-                # Verificar se entropia é demasiado alta
                 entropy_verdict = self._get_entropy_verdict(entropy)
                 
                 self.last_analysis.update({
@@ -230,11 +214,6 @@ class DigitAnalyzer:
                                     sequences=seq_info, entropy=entropy)
 
     def _apply_entropy_penalty(self, base_confidence, entropy):
-        """
-        Aplica penalização à confiança com base na entropia de Shannon.
-        Entropia > 0.95: sequência quase aleatória → reduz confiança em até 25%
-        Entropia > 0.85: sequência pouco previsível → reduz confiança em até 15%
-        """
         if entropy > 0.95:
             penalty = 0.25
             logger.info(f"🎲 Entropia alta ({entropy:.3f}) → penalização de {penalty*100:.0f}%")
@@ -247,7 +226,6 @@ class DigitAnalyzer:
         return base_confidence * (1 - penalty)
 
     def _get_entropy_verdict(self, entropy):
-        """Retorna um veredito qualitativo sobre a entropia."""
         if entropy > 0.95:
             return 'ALEATÓRIO (não operar)'
         elif entropy > 0.85:
@@ -299,7 +277,7 @@ class DigitAnalyzer:
                 break
         return count
 
-    # ── API pública ────────────────────────────────────────────
+    # API pública
     def get_ticks_remaining(self):
         with self._lock:
             tr = self.TICKS_PER_DIGIT - (self._tick_count % self.TICKS_PER_DIGIT)
@@ -343,5 +321,5 @@ class DigitAnalyzer:
                 'current_streak':streak,'streak_parity':sp,'recent':snap[-20:]}
 
 
-# Singleton de retrocompatibilidade (já não é usado pelo trading_bot)
+# Singleton de retrocompatibilidade
 digit_analyzer = DigitAnalyzer(max_digits=500)
