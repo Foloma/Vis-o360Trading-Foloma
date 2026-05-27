@@ -131,13 +131,26 @@ class TechnicalIndicators:
         else:
             return macd_line, None, None
 
-    def _bollinger_bands(self, data, period=20, std_dev=2):
+    def _bollinger_bands(self, data, period=20, std_dev=None):
+        """
+        Calcula Bollinger Bands. Se std_dev não for fornecido,
+        ajusta automaticamente com base na volatilidade recente.
+        """
         if len(data) < period:
             return None, None, None
         prices = list(data)[-period:]
         sma = sum(prices) / period
         variance = sum((p - sma) ** 2 for p in prices) / period
         std = math.sqrt(variance)
+
+        # Ajuste adaptativo do desvio padrão
+        if std_dev is None:
+            avg_price = sma
+            volatility = std / avg_price if avg_price > 0 else 0
+            if volatility > 0.001:
+                std_dev = 2.5   # mais volatilidade → bandas mais largas
+            else:
+                std_dev = 2.0
         upper = sma + std_dev * std
         lower = sma - std_dev * std
         return upper, sma, lower
@@ -289,3 +302,10 @@ class TechnicalIndicators:
             'ema12':  ema12,
             'ema26':  ema26
         }
+
+    def reset_macd_cache(self):
+        """Limpa todos os caches do MACD (usado após gaps de reconexão)."""
+        self._ema_fast_cache.clear()
+        self._ema_slow_cache.clear()
+        self._macd_line_history.clear()
+        self._macd_initialized.clear()
