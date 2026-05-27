@@ -128,6 +128,43 @@ class TradingBot:
             self.indicators.reset_macd_cache()
         logger.info("🧹 Histórico de preços e MACD resetados (gap de reconexão)")
 
+    # ------------------------------------------------------------------
+    # NOVOS MÉTODOS PARA PERSISTÊNCIA DAS ESTATÍSTICAS DIÁRIAS
+    # ------------------------------------------------------------------
+    def set_daily_stats_from_db(self, saved):
+        """
+        Aplica estatísticas diárias guardadas na BD, se forem do dia atual.
+        Caso contrário inicia um novo dia.
+        """
+        if saved and isinstance(saved, dict):
+            try:
+                saved_date = datetime.strptime(saved.get('date', ''), '%Y-%m-%d').date()
+                if saved_date == datetime.now().date():
+                    with self._state_lock:
+                        self.daily_stats = {
+                            'date': saved_date,
+                            'trades': saved.get('trades', 0),
+                            'wins': saved.get('wins', 0),
+                            'losses': saved.get('losses', 0),
+                            'profit_loss': saved.get('profit_loss', 0),
+                            'start_balance': saved.get('start_balance', self.balance)
+                        }
+                        self.stop_loss_active = saved.get('stop_loss_active', False)
+                    logger.info(f"📂 Estatísticas diárias carregadas da BD: {self.daily_stats}")
+                    return
+            except Exception as e:
+                logger.error(f"Erro ao carregar daily_stats da BD: {e}")
+        self.reset_daily_stats()
+
+    def get_daily_stats_for_db(self):
+        """Devolve um dicionário pronto para serializar na BD."""
+        with self._state_lock:
+            s = dict(self.daily_stats)
+            s['date'] = s['date'].strftime('%Y-%m-%d') if isinstance(s['date'], datetime) else str(s['date'])
+            s['stop_loss_active'] = self.stop_loss_active
+            return s
+    # ------------------------------------------------------------------
+
     def get_momentum(self):
         prices = self.indicators.get_prices(self.current_symbol)
         if len(prices) < 25:
