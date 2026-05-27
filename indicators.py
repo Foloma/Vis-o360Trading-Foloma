@@ -40,7 +40,6 @@ class TechnicalIndicators:
 
         # Inicialização das EMAs quando atingimos o número mínimo de preços
         if symbol not in self._macd_initialized and len(prices) >= self.slow:
-            # Calcula EMAs iniciais com os primeiros 'fast' e 'slow' preços
             ema_fast = sum(list(prices)[:self.fast]) / self.fast
             for p in list(prices)[self.fast:]:
                 ema_fast = p * k_fast + ema_fast * (1 - k_fast)
@@ -75,7 +74,7 @@ class TechnicalIndicators:
         return sum(data[-period:]) / period
 
     def _ema(self, data, period):
-        # Mantido apenas para compatibilidade com outros usos; o MACD usa o cache incremental.
+        # Mantido para compatibilidade; o MACD usa o cache incremental.
         if len(data) < period:
             return None
         k = 2.0 / (period + 1)
@@ -309,3 +308,12 @@ class TechnicalIndicators:
         self._ema_slow_cache.clear()
         self._macd_line_history.clear()
         self._macd_initialized.clear()
+
+    def reset_all(self):
+        """Limpa histórico de preços e todos os caches (MACD, EMAs, etc.)."""
+        with self._lock:
+            self.prices_by_symbol.clear()
+            self._ema_fast_cache.clear()
+            self._ema_slow_cache.clear()
+            self._macd_line_history.clear()
+            self._macd_initialized.clear()
