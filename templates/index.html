@@ -480,12 +480,13 @@ let lastHybridState = null;
 let _loggingIn = false;
 let _registering = false;
 let lastTradeCount = 0;
-let isConnected = false;   // para polling adaptativo
+let isConnected = false;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 // Gráfico de velas
 let candleChart = null;
 let candleSeries = null;
+let resizeObserver = null;
 
 function toast(msg,type='info',ms=4000){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
@@ -536,7 +537,7 @@ function stopPolling() {
 }
 
 function scheduleNextPoll() {
-  const delay = isConnected ? 1500 : 5000;   // 1.5s conectado, 5s offline
+  const delay = isConnected ? 1500 : 5000;
   _updateInterval = setTimeout(() => {
     updateAll();
     scheduleNextPoll();
@@ -613,9 +614,7 @@ async function autoConnect() {
       toast('🔄 Auto-conectando...', 'info');
       setTimeout(updateAll, 3000);
     }
-  } catch(e) {
-    // ignora erros de rede
-  }
+  } catch(e) {}
 }
 
 function checkTradeResults(bot) {
@@ -661,15 +660,25 @@ function initCandleChart() {
     wickUpColor: '#00f0b5',
     wickDownColor: '#ff4d4d'
   });
+
+  // Bug #6: Adiciona ResizeObserver para redimensionar o gráfico
+  if (window.ResizeObserver) {
+    resizeObserver = new ResizeObserver(() => {
+      if (candleChart && container) {
+        candleChart.applyOptions({ width: container.clientWidth });
+      }
+    });
+    resizeObserver.observe(container);
+  }
 }
 
 async function loadCandles() {
+  // Bug #8: Não carrega velas se não houver gráfico criado (evita requests antes de login)
+  if (!candleChart) return;
   try {
     const r = await fetch('/api/candles/data');
     const d = await r.json();
     if (!d.candles || d.candles.length === 0) return;
-    
-    if (!candleChart) initCandleChart();
     
     const formatted = d.candles.map(c => ({
       time: c.epoch,
@@ -694,7 +703,7 @@ function updateAll(){
         const bot = data.bot;
         if (!bot) return;
         const conn = bot.connected && bot.authorized;
-        isConnected = conn;   // atualiza estado para polling adaptativo
+        isConnected = conn;
         let confidence = parseFloat(bot.confidence);
         if (isNaN(confidence)) confidence = 0;
 
@@ -942,11 +951,14 @@ function tradeDigit(pred){
   }).catch(()=>toast('❌ Erro de rede','loss'));
 }
 
+// Bug #2: mgtMultiply agora usa o valor atual do campo (não hardcoded 0.35)
 async function mgtMultiply(fieldId){
+  const input = document.getElementById(fieldId);
+  const currentAmount = parseFloat(input.value) || 0.35;
   const r = await fetch('/api/martingale/apply', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({last_amount: 0.35})
+    body:JSON.stringify({last_amount: currentAmount})
   });
   const d = await r.json();
   if(d.error) {
@@ -1184,6 +1196,8 @@ function doLogin(){
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();loadHistory();
+    // Bug #8: Inicializa o gráfico apenas após autenticação
+    initCandleChart();
     startPolling();
     if(d.user?.has_deriv_token){
       setTimeout(() => autoConnect(), 1000);
@@ -1209,6 +1223,8 @@ function doRegister(){
         document.getElementById('adminMI').style.display = 'block';
       }
       initSyms(); loadAffiliate(); loadHistory();
+      // Bug #8: Inicializa o gráfico apenas após autenticação
+      initCandleChart();
       startPolling();
       const connectBtn = document.getElementById('connectOAuthBtn');
       connectBtn.style.animation = 'pulse 1s infinite';
@@ -1224,6 +1240,7 @@ function doReset(){
 
 function doLogout() {
   stopPolling();
+  if (resizeObserver) resizeObserver.disconnect();
   fetch('/api/auth/logout', { method: 'POST' }).then(() => location.reload());
 }
 
@@ -1290,7 +1307,9 @@ function setModo(m){
 
 // Carregar velas a cada 10 segundos
 setInterval(loadCandles, 10000);
-setTimeout(loadCandles, 3000);
+
+// Bug #8: Primeira carga de velas só após autenticação (chamada em doLogin/doRegister)
+// Removido o setTimeout inicial que disparava antes de auth
 
 (function(){
   const p=new URLSearchParams(location.search);
@@ -1322,6 +1341,9 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';
     initSyms();loadAffiliate();loadHistory();
+    // Bug #8: Inicializa gráfico e velas só depois de autenticado
+    initCandleChart();
+    setTimeout(loadCandles, 3000);
     startPolling();
     if(d.user?.has_deriv_token){
       setTimeout(() => autoConnect(), 1500);
