@@ -56,6 +56,7 @@ class DerivWebSocketClient:
         self._connecting = False
         self._connect_lock = threading.Lock()
         self.auth_error = None
+        self._had_gap = False
 
     def set_digit_analyzer(self, a): self._digit_analyzer = a
     def set_trading_bot(self, b):
@@ -92,6 +93,14 @@ class DerivWebSocketClient:
                 if self.current_symbol:
                     self._subscribe_ticks(self.current_symbol)
                     self.request_candles(self.current_symbol)
+                if self._had_gap and self.trading_bot:
+                    logger.warning("🕳️ Gap detetado – a limpar dados históricos do bot")
+                    if hasattr(self.trading_bot, 'reset_price_history'):
+                        self.trading_bot.reset_price_history()
+                    else:
+                        logger.warning("método reset_price_history não encontrado – a usar reset_stats como fallback")
+                        self.trading_bot.reset_stats()
+                    self._had_gap = False
                 logger.info("🟢 Conectado e autorizado")
                 self._start_keep_alive()
                 self._start_watchdog()
@@ -121,6 +130,7 @@ class DerivWebSocketClient:
         self.state = self.ST_DISCONNECTED
         self.loginid = None
         self.auth_error = None
+        self._had_gap = True
 
     def _authorize_and_wait(self, timeout=10):
         if not self.user_token:
@@ -259,7 +269,7 @@ class DerivWebSocketClient:
         self.current_symbol = symbol
         if self.authorized:
             self._subscribe_ticks(symbol)
-            self.request_candles(symbol)          # ✅ actualiza velas ao mudar de símbolo
+            self.request_candles(symbol)
 
     def _subscribe_balance(self):
         try:
@@ -324,10 +334,8 @@ class DerivWebSocketClient:
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
-
         if is_digit:
             time.sleep(0.5)
-
         with self._trade_lock:
             if not self.streaming:
                 logger.warning("🚫 Sem streaming"); return False
@@ -339,16 +347,14 @@ class DerivWebSocketClient:
                 logger.warning("⏱️ Intervalo mínimo 2s"); return False
             if not self.authorized:
                 logger.warning("🚫 Não autorizado"); return False
-
             with self._pending_lock:
                 if self.pending_trade is not None:
                     if time.time() - self.pending_trade_time > 60:
                         self.pending_trade = None
                     else:
                         logger.warning("Trade pendente"); return False
-
+            # Removido o filtro de desvio SMA-20 (era demasiado restritivo)
             self._last_trade_time = time.time()
-
             if is_digit:
                 duration = self.config.DIGIT_CONTRACT_DURATION
                 duration_unit = 't'
@@ -357,7 +363,6 @@ class DerivWebSocketClient:
                 duration = self.config.CONTRACT_DURATION
                 duration_unit = self.config.CONTRACT_DURATION_UNIT
                 contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
-
             req_id = self._next_req()
             with self._pending_lock:
                 self.pending_trade = {
@@ -398,7 +403,6 @@ class DerivWebSocketClient:
                 logger.warning("BUY já enviado")
                 return
             self.pending_trade['proposal_id'] = pid
-
         try:
             self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
         except Exception as e:
@@ -484,7 +488,6 @@ class DerivWebSocketClient:
         self.auth_error = err
         logger.error(f"API Error: {err.get('message', 'desconhecido')} (código: {err.get('code', 'N/A')})")
 
-    # ── Velas ──────────────────────────────────────────────
     def request_candles(self, symbol=None, granularity=60, count=50):
         symbol = symbol or self.current_symbol
         try:
