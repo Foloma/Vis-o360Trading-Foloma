@@ -2,7 +2,7 @@ import logging
 import time
 import threading
 from collections import deque
-from datetime import datetime
+from datetime import datetime, date
 from indicators import TechnicalIndicators
 from config import config
 
@@ -122,7 +122,8 @@ class TradingBot:
         self.stop_loss_active = False
 
     def reset_price_history(self):
-        """Limpa histórico de preços e cache MACD (para gaps de reconexão)."""
+        self.indicators.reset_all()
+        logger.info("🧹 Histórico de preços e todos os caches resetados (gap de reconexão)")
         self.indicators.prices_by_symbol.clear()
         if hasattr(self.indicators, 'reset_macd_cache'):
             self.indicators.reset_macd_cache()
@@ -160,7 +161,11 @@ class TradingBot:
         """Devolve um dicionário pronto para serializar na BD."""
         with self._state_lock:
             s = dict(self.daily_stats)
-            s['date'] = s['date'].strftime('%Y-%m-%d') if isinstance(s['date'], datetime) else str(s['date'])
+            # Bug #5: date agora é datetime.date, não datetime.datetime
+            if isinstance(s['date'], date):
+                s['date'] = s['date'].strftime('%Y-%m-%d')
+            else:
+                s['date'] = str(s['date'])
             s['stop_loss_active'] = self.stop_loss_active
             return s
     # ------------------------------------------------------------------
@@ -431,6 +436,9 @@ class TradingBot:
                     with self._state_lock:
                         trade['result'] = 'loss'
                         trade['profit'] = 0
+                        # Bug #4: atualizar daily_stats para refletir perda
+                        self.daily_stats['losses'] += 1
+                        self.daily_stats['profit_loss'] -= trade.get('amount', 0)
                         updated = True
                     logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')} (digit={is_digit})")
         if updated:
