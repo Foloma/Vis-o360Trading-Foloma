@@ -57,6 +57,7 @@ class DerivWebSocketClient:
         self._connect_lock = threading.Lock()
         self.auth_error = None
         self._had_gap = False
+        self._first_connect = True          # <- Bug #3: evita reset na 1ª ligação
 
     def set_digit_analyzer(self, a): self._digit_analyzer = a
     def set_trading_bot(self, b):
@@ -93,14 +94,18 @@ class DerivWebSocketClient:
                 if self.current_symbol:
                     self._subscribe_ticks(self.current_symbol)
                     self.request_candles(self.current_symbol)
-                if self._had_gap and self.trading_bot:
+
+                # Bug #3: só limpa histórico se NÃO for a primeira conexão bem‑sucedida
+                if self._had_gap and not self._first_connect and self.trading_bot:
                     logger.warning("🕳️ Gap detetado – a limpar dados históricos do bot")
                     if hasattr(self.trading_bot, 'reset_price_history'):
                         self.trading_bot.reset_price_history()
                     else:
                         logger.warning("método reset_price_history não encontrado – a usar reset_stats como fallback")
                         self.trading_bot.reset_stats()
-                    self._had_gap = False
+                self._had_gap = False
+                self._first_connect = False   # primeira conexão concluída
+
                 logger.info("🟢 Conectado e autorizado")
                 self._start_keep_alive()
                 self._start_watchdog()
@@ -109,6 +114,10 @@ class DerivWebSocketClient:
                 logger.error(f"Erro no loop principal: {e}", exc_info=True)
             finally:
                 self._teardown_connection()
+                # Se a conexão cair depois da primeira, marcamos gap
+                if not self._first_connect:
+                    self._had_gap = True
+
             if self._stop_event.is_set():
                 break
             backoff = min(backoff * 2, 60)
@@ -130,7 +139,7 @@ class DerivWebSocketClient:
         self.state = self.ST_DISCONNECTED
         self.loginid = None
         self.auth_error = None
-        self._had_gap = True
+        # _had_gap NÃO é alterado aqui – mantém o valor definido em _run_forever
 
     def _authorize_and_wait(self, timeout=10):
         if not self.user_token:
@@ -199,6 +208,7 @@ class DerivWebSocketClient:
             msg_type = data.get('msg_type', '')
             if msg_type not in ['tick', 'balance', 'time', 'ping']:
                 logger.debug(f"📨 [{msg_type}]")
+            # Bug #1: 'history' -> 'candles'
             handlers = {
                 'tick':                   self._on_tick,
                 'balance':                self._on_balance,
@@ -206,7 +216,7 @@ class DerivWebSocketClient:
                 'buy':                    self._on_buy_response,
                 'proposal_open_contract': self._on_poc,
                 'error':                  self._on_api_error,
-                'history':                self._on_candles,
+                'candles':                self._on_candles,
             }
             handler = handlers.get(msg_type)
             if handler:
@@ -353,7 +363,6 @@ class DerivWebSocketClient:
                         self.pending_trade = None
                     else:
                         logger.warning("Trade pendente"); return False
-            # Removido o filtro de desvio SMA-20 (era demasiado restritivo)
             self._last_trade_time = time.time()
             if is_digit:
                 duration = self.config.DIGIT_CONTRACT_DURATION
