@@ -364,14 +364,18 @@ def persist_trade(user_id, trade_data):
         conn.close()
 
 def _save_daily_stats_to_db(email, bot):
-    """Guarda as estatísticas diárias do bot na BD."""
+    """Guarda as estatísticas diárias do bot diretamente na coluna daily_stats_json."""
     if not email or not bot:
         return
     try:
-        user = UserStore.get(email)
-        if user:
-            user['daily_stats'] = bot.get_daily_stats_for_db()
-            UserStore.save(user)
+        stats_json = json.dumps(bot.get_daily_stats_for_db())
+        conn = sqlite3.connect(DATABASE_PATH)
+        try:
+            conn.execute('UPDATE users SET daily_stats_json = ? WHERE email = ?',
+                         (stats_json, email))
+            conn.commit()
+        finally:
+            conn.close()
     except Exception as e:
         logger.error(f"Erro ao guardar daily_stats: {e}")
 
@@ -484,8 +488,11 @@ def get_session(user_id):
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
-app.config['SESSION_COOKIE_SECURE'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+
+# Bug #7: Cookie seguro apenas em produção (HTTPS)
+is_production = os.environ.get('FLASK_ENV', 'production') == 'production'
+app.config['SESSION_COOKIE_SECURE'] = is_production
+app.config['SESSION_COOKIE_SAMESITE'] = 'None' if is_production else 'Lax'
 
 from config import config
 
@@ -964,7 +971,6 @@ def trade():
         if conf < config.RISK_LIMITS.get('min_confidence', 60):
             return jsonify({'error': f'Confiança insuficiente: {conf:.1f}%'}), 400
 
-        # Consenso mínimo já verificado dentro do bot (calculate_signal)
         ok = sess['client'].place_trade('CALL' if action == 'BUY' else 'PUT', amt, False)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
@@ -1027,7 +1033,6 @@ def trade_hybrid():
         dr = da.get('recommended_action')
         dc = da.get('confidence', 0)
         if sig == 'BUY' and dr == 'BUY':
-            # Híbrido usa min() em vez de média aritmética
             comb = min(conf_a, dc)
             action = 'BUY'
         elif sig == 'SELL' and dr == 'SELL':
@@ -1122,7 +1127,6 @@ def martingale_apply():
         return jsonify({'error': 'Sessão não encontrada'}), 500
 
     bot = sess['trading_bot']
-    # O bot agora trata internamente das verificações de saldo e limites
     ok, res = bot.apply_martingale_after_loss(la)
     if ok:
         return jsonify({'status': 'ok', 'martingale': res})
