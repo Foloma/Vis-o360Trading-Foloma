@@ -8,8 +8,8 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-_TECH_WEIGHT = getattr(config, 'SYNTHETIC_TECHNICAL_WEIGHT', 0.6)
-_DIGIT_WEIGHT = getattr(config, 'SYNTHETIC_DIGIT_WEIGHT', 0.4)
+_TECH_WEIGHT = config.SYNTHETIC_TECHNICAL_WEIGHT   # 0.3
+_DIGIT_WEIGHT = config.SYNTHETIC_DIGIT_WEIGHT      # 0.7
 
 
 class TradingBot:
@@ -81,6 +81,19 @@ class TradingBot:
         self.stop_loss_active = False
         return True
 
+    def check_take_profit(self):
+        """Pausa o bot se atingir a meta diária de lucro (ex.: 10%)."""
+        if not config.RISK_LIMITS.get('take_profit_enabled', True):
+            return False
+        target_pct = config.RISK_LIMITS.get('daily_target_percent', 10)
+        if self.daily_stats['start_balance'] > 0:
+            profit_pct = (self.balance - self.daily_stats['start_balance']) / self.daily_stats['start_balance'] * 100
+            if profit_pct >= target_pct:
+                self.pause()
+                logger.info(f"🏆 Take-profit atingido: {profit_pct:.1f}%")
+                return True
+        return False
+
     def on_tick(self, tick):
         self.current_price = tick['price']
         self.current_symbol = tick['symbol']
@@ -98,6 +111,7 @@ class TradingBot:
                 self.reset_daily_stats()
 
         self.check_risk_limits()
+        self.check_take_profit()
 
     def reset_daily_stats(self):
         self.daily_stats = {
@@ -107,12 +121,22 @@ class TradingBot:
         }
         self.stop_loss_active = False
 
+    def reset_price_history(self):
+        """Limpa histórico de preços e cache MACD (para gaps de reconexão)."""
+        self.indicators.prices_by_symbol.clear()
+        if hasattr(self.indicators, 'reset_macd_cache'):
+            self.indicators.reset_macd_cache()
+        logger.info("🧹 Histórico de preços e MACD resetados (gap de reconexão)")
+
     def get_momentum(self):
         prices = self.indicators.get_prices(self.current_symbol)
-        if len(prices) < 5:
+        if len(prices) < 25:
             return 0
-        recent = list(prices)[-5:]
-        return (recent[-1] - recent[0]) / recent[0] * 100
+        current = prices[-1]
+        past = prices[-21]
+        if past == 0:
+            return 0
+        return (current - past) / past * 100
 
     def _get_digit_signal(self):
         if not self.digit_analyzer:
@@ -122,29 +146,70 @@ class TradingBot:
         conf = analysis.get('confidence', 0)
         return action, conf
 
-    # ✅ NOVO MÉTODO DE CONFIANÇA REAL
+    def _get_rsi_thresholds(self):
+        prices = self.indicators.get_prices(self.current_symbol)
+        if len(prices) < 15:
+            return 30, 70
+        recent = prices[-15:]
+        ranges = [abs(recent[i] - recent[i-1]) for i in range(1, len(recent))]
+        atr = sum(ranges) / len(ranges)
+        avg_price = sum(recent) / len(recent)
+        volatility = (atr / avg_price) * 100 if avg_price > 0 else 0
+        if volatility > 0.15:
+            return 20, 80
+        elif volatility < 0.05:
+            return 35, 65
+        else:
+            return 30, 70
+
+    def _check_consensus(self, analysis, signal):
+        """Retorna True se pelo menos 3 de 4 indicadores apoiam o sinal."""
+        aligned = 0
+        # RSI
+        rsi = analysis['rsi']['score']
+        if signal == 'BUY' and rsi < 55: aligned += 1
+        elif signal == 'SELL' and rsi > 45: aligned += 1
+        # MACD
+        macd_desc = analysis['macd']['desc']
+        if 'COMPRA' in macd_desc and signal == 'BUY': aligned += 1
+        elif 'VENDA' in macd_desc and signal == 'SELL': aligned += 1
+        # TREND
+        trend_desc = analysis['trend']['desc']
+        if 'ALTA' in trend_desc and signal == 'BUY': aligned += 1
+        elif 'BAIXA' in trend_desc and signal == 'SELL': aligned += 1
+        # Bollinger
+        bb_desc = analysis['bollinger']['desc']
+        if signal == 'BUY' and ('sobrevendido' in bb_desc or 'abaixo' in bb_desc):
+            aligned += 1
+        elif signal == 'SELL' and ('sobrecomprado' in bb_desc or 'acima' in bb_desc):
+            aligned += 1
+        return aligned >= 3
+
     def _calculate_pure_technical(self, prices):
         if len(prices) < 20 or not self.last_analysis:
             return 'NEUTRAL', 0
 
         analysis = self.last_analysis
-        scores = []
+        raw_scores = []
 
-        # RSI (25%)
+        # RSI (25%) com thresholds adaptativos
         rsi = analysis['rsi']['score']
+        oversold, overbought = self._get_rsi_thresholds()
         if rsi is not None and analysis['rsi']['desc'] != '---':
-            if rsi < 30:
-                rsi_conf = min(100, (30 - rsi) / 30 * 100 + 60)
-                scores.append(('BUY', 0.25, rsi_conf))
-            elif rsi > 70:
-                rsi_conf = min(100, (rsi - 70) / 30 * 100 + 60)
-                scores.append(('SELL', 0.25, rsi_conf))
-            elif rsi < 45:
-                scores.append(('BUY', 0.25, 40))
-            elif rsi > 55:
-                scores.append(('SELL', 0.25, 40))
+            if rsi < oversold:
+                rsi_conf = min(100, (oversold - rsi) / oversold * 100 + 60)
+                raw_scores.append(('BUY', 0.25, rsi_conf))
+            elif rsi > overbought:
+                rsi_conf = min(100, (rsi - overbought) / (100 - overbought) * 100 + 60)
+                raw_scores.append(('SELL', 0.25, rsi_conf))
+            elif rsi < oversold + 15:
+                raw_scores.append(('BUY', 0.25, 40))
+            elif rsi > overbought - 15:
+                raw_scores.append(('SELL', 0.25, 40))
             else:
-                scores.append(('NEUTRAL', 0.25, 0))
+                raw_scores.append(('NEUTRAL', 0.25, 0))
+        else:
+            raw_scores.append(('NEUTRAL', 0.25, 0))
 
         # MACD (30%)
         macd_desc = analysis['macd']['desc']
@@ -152,50 +217,72 @@ class TradingBot:
         if macd_desc != '---':
             if macd_score == 80:
                 if 'COMPRA' in macd_desc:
-                    scores.append(('BUY', 0.30, 80))
+                    raw_scores.append(('BUY', 0.30, 80))
                 elif 'VENDA' in macd_desc:
-                    scores.append(('SELL', 0.30, 80))
+                    raw_scores.append(('SELL', 0.30, 80))
+                else:
+                    raw_scores.append(('NEUTRAL', 0.30, 0))
             elif macd_score == 65:
                 if 'COMPRA' in macd_desc:
-                    scores.append(('BUY', 0.30, 55))
+                    raw_scores.append(('BUY', 0.30, 55))
                 elif 'VENDA' in macd_desc:
-                    scores.append(('SELL', 0.30, 55))
+                    raw_scores.append(('SELL', 0.30, 55))
+                else:
+                    raw_scores.append(('NEUTRAL', 0.30, 0))
             else:
-                scores.append(('NEUTRAL', 0.30, 0))
+                raw_scores.append(('NEUTRAL', 0.30, 0))
+        else:
+            raw_scores.append(('NEUTRAL', 0.30, 0))
 
         # TREND (25%)
         trend_desc = analysis['trend']['desc']
         if trend_desc != '---':
             if 'ALTA' in trend_desc:
-                scores.append(('BUY', 0.25, 70))
+                raw_scores.append(('BUY', 0.25, 70))
             elif 'BAIXA' in trend_desc:
-                scores.append(('SELL', 0.25, 70))
+                raw_scores.append(('SELL', 0.25, 70))
             else:
-                scores.append(('NEUTRAL', 0.25, 0))
+                raw_scores.append(('NEUTRAL', 0.25, 0))
+        else:
+            raw_scores.append(('NEUTRAL', 0.25, 0))
 
-        # Bollinger (20%)
+        # Bollinger (20%) com contexto de TREND
         bb_desc = analysis['bollinger']['desc']
+        trend_is_bull = 'ALTA' in trend_desc if trend_desc else False
+        trend_is_bear = 'BAIXA' in trend_desc if trend_desc else False
         if bb_desc != '---':
             if 'sobrevendido' in bb_desc:
-                scores.append(('BUY', 0.20, 80))
+                if trend_is_bear:
+                    raw_scores.append(('BUY', 0.20, 30))
+                else:
+                    raw_scores.append(('BUY', 0.20, 80))
             elif 'sobrecomprado' in bb_desc:
-                scores.append(('SELL', 0.20, 80))
+                if trend_is_bull:
+                    raw_scores.append(('SELL', 0.20, 30))
+                else:
+                    raw_scores.append(('SELL', 0.20, 80))
             elif 'acima' in bb_desc:
-                scores.append(('BUY', 0.20, 45))
+                raw_scores.append(('BUY', 0.20, 45))
             elif 'abaixo' in bb_desc:
-                scores.append(('SELL', 0.20, 45))
+                raw_scores.append(('SELL', 0.20, 45))
             else:
-                scores.append(('NEUTRAL', 0.20, 0))
+                raw_scores.append(('NEUTRAL', 0.20, 0))
+        else:
+            raw_scores.append(('NEUTRAL', 0.20, 0))
 
-        if not scores:
+        # Redistribuição dinâmica de pesos
+        active_scores = [s for s in raw_scores if s[0] != 'NEUTRAL' and s[2] > 0]
+        neutral_weight = sum(s[1] for s in raw_scores if s[0] == 'NEUTRAL' or s[2] == 0)
+        if not active_scores:
             return 'NEUTRAL', 0
+        total_active_weight = sum(s[1] for s in active_scores)
+        scores = []
+        for direction, weight, conf in active_scores:
+            extra = (weight / total_active_weight) * neutral_weight if total_active_weight > 0 else 0
+            scores.append((direction, weight + extra, conf))
 
         buy_score = sum(peso * conf for dir, peso, conf in scores if dir == 'BUY')
         sell_score = sum(peso * conf for dir, peso, conf in scores if dir == 'SELL')
-        total_weight = sum(peso for dir, peso, conf in scores if dir != 'NEUTRAL')
-
-        if total_weight == 0:
-            return 'NEUTRAL', 0
 
         if buy_score > sell_score:
             signal = 'BUY'
@@ -224,48 +311,49 @@ class TradingBot:
         if len(prices) < 20:
             logger.debug(f"⏳ [{self.current_symbol}] Apenas {len(prices)} preços – a aguardar 20")
             return 'NEUTRAL', 0
-
         if not self.last_analysis:
             return 'NEUTRAL', 0
 
-        signal, confidence = self._calculate_pure_technical(prices)
-        dig_action = dig_conf = None
-
+        tech_signal, tech_conf = self._calculate_pure_technical(prices)
         logger.info(
-            f"🔍 [{self.current_symbol}] TÉCNICO PURO: {signal} ({confidence:.1f}%) "
+            f"🔍 [{self.current_symbol}] TÉCNICO PURO: {tech_signal} ({tech_conf:.1f}%) "
             f"| Preços: {len(prices)}"
         )
 
-        if self.current_symbol.startswith('R_') and self.digit_analyzer:
-            dig_action, dig_conf = self._get_digit_signal()
-            if dig_action and dig_conf >= 55:
-                logger.info(
-                    f"🎲 [{self.current_symbol}] DÍGITO: {dig_action} ({dig_conf:.1f}%)"
-                )
-                total_weight = _TECH_WEIGHT + _DIGIT_WEIGHT
-                combined = (_TECH_WEIGHT * confidence + _DIGIT_WEIGHT * dig_conf) / total_weight
-                if dig_action != signal and _DIGIT_WEIGHT > _TECH_WEIGHT:
-                    logger.info(
-                        f"🔄 [{self.current_symbol}] Dígito prevalece: {dig_action} (peso {_DIGIT_WEIGHT} > {_TECH_WEIGHT})"
-                    )
-                    signal = dig_action
-                confidence = combined
-                logger.info(
-                    f"✅ [{self.current_symbol}] COMBINADO: {signal} ({confidence:.1f}%)"
-                )
-            else:
-                logger.debug(f"🎲 [{self.current_symbol}] DÍGITO sem recomendação ou confiança < 55%")
+        # Consenso mínimo de indicadores
+        if tech_signal != 'NEUTRAL' and not self._check_consensus(self.last_analysis, tech_signal):
+            logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=3 indicadores)")
+            tech_signal, tech_conf = 'NEUTRAL', 0
+
+        if not (self.current_symbol.startswith('R_') and self.digit_analyzer):
+            return tech_signal, tech_conf
+
+        dig_action, dig_conf = self._get_digit_signal()
+        if not dig_action or dig_conf < 55:
+            logger.debug(f"🎲 [{self.current_symbol}] DÍGITO sem recomendação ou confiança < 55%")
+            return tech_signal, tech_conf
+
+        logger.info(f"🎲 [{self.current_symbol}] DÍGITO: {dig_action} ({dig_conf:.1f}%)")
+
+        if dig_action == tech_signal:
+            total_weight = _TECH_WEIGHT + _DIGIT_WEIGHT
+            confidence = (_TECH_WEIGHT * tech_conf + _DIGIT_WEIGHT * dig_conf) / total_weight
+            signal = tech_signal
+            logger.info(f"✅ [{self.current_symbol}] COMBINADO (concordam): {signal} ({confidence:.1f}%)")
         else:
-            logger.debug(f"📊 [{self.current_symbol}] Sem analisador de dígitos ou não R_")
+            if _DIGIT_WEIGHT > _TECH_WEIGHT:
+                signal = dig_action
+                confidence = dig_conf
+                logger.info(f"🔄 [{self.current_symbol}] Dígito prevalece: {signal} ({confidence:.1f}%)")
+            else:
+                signal = tech_signal
+                confidence = tech_conf
+                logger.info(f"📊 [{self.current_symbol}] Técnico prevalece: {signal} ({confidence:.1f}%)")
 
         if confidence >= 60:
-            logger.info(
-                f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – VÁLIDO"
-            )
+            logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – VÁLIDO")
         else:
-            logger.info(
-                f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – ABAIXO DO LIMIAR"
-            )
+            logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – ABAIXO DO LIMIAR")
 
         return signal, min(confidence, 100)
 
@@ -316,22 +404,18 @@ class TradingBot:
             contract_id = result.get('contract_id')
             profit = result.get('profit', 0)
             is_win = profit > 0
-
             target_trade = None
             if contract_id:
                 for trade in self.trades:
                     if trade.get('contract_id') == contract_id:
                         target_trade = trade
                         break
-
             if not target_trade:
                 logger.warning(f"⚠️ Nenhum trade pendente com contract_id {contract_id}. Ignorando.")
                 return
-
             if target_trade.get('result') != 'pending':
                 logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
                 return
-
             with self._state_lock:
                 if is_win:
                     target_trade['result'] = 'win'
@@ -351,11 +435,9 @@ class TradingBot:
                     self.consecutive_losses += 1
                     self.consecutive_wins = 0
                     logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
-
             self.update_stats()
             if self.client:
                 self.client.get_balance()
-
         except Exception as e:
             logger.error(f"Erro ao processar resultado: {e}")
 
@@ -390,14 +472,12 @@ class TradingBot:
     def get_status(self):
         self.check_pending_trades()
         signal, confidence = self.calculate_signal()
-
         if self.client:
             conn = self.client.connected
             auth = self.client.authorized
         else:
             conn = self._client_connected
             auth = self._client_authorized
-
         return {
             'connected': conn,
             'authorized': auth,
@@ -444,6 +524,10 @@ class TradingBot:
             self.martingale['active'] = True
             self.martingale['original_amount'] = last_trade_amount
             nxt = self.get_martingale_amount(last_trade_amount)
+            # Verificação de saldo disponível
+            if self.balance < nxt * 1.2:
+                self.reset_martingale()
+                return False, f"Saldo insuficiente para martingale (precisa ${nxt*1.2:.2f})"
             return True, {
                 'step': self.martingale['step'],
                 'next_amount': nxt,
