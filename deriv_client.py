@@ -57,13 +57,23 @@ class DerivWebSocketClient:
         self._connect_lock = threading.Lock()
         self.auth_error = None
         self._had_gap = False
-        self._first_connect = True          # <- Bug #3: evita reset na 1ª ligação
+        self._first_connect = True
+        
+        # Cache de candles
+        self._candles_cache = {}
+        self._candles_cache_lock = threading.Lock()
 
-    def set_digit_analyzer(self, a): self._digit_analyzer = a
+    def set_digit_analyzer(self, a): 
+        self._digit_analyzer = a
+        
     def set_trading_bot(self, b):
         self.trading_bot = b
-        if b: b.balance, b.currency, b.client = self.balance, self.currency, self
-    def set_payment_system(self, p): self.payment_system = p
+        if b: 
+            b.balance, b.currency, b.client = self.balance, self.currency, self
+            
+    def set_payment_system(self, p): 
+        self.payment_system = p
+        
     def set_user_token(self, t):
         self.user_token = t
         logger.info("🔑 Token configurado")
@@ -95,7 +105,6 @@ class DerivWebSocketClient:
                     self._subscribe_ticks(self.current_symbol)
                     self.request_candles(self.current_symbol)
 
-                # Bug #3: só limpa histórico se NÃO for a primeira conexão bem‑sucedida
                 if self._had_gap and not self._first_connect and self.trading_bot:
                     logger.warning("🕳️ Gap detetado – a limpar dados históricos do bot")
                     if hasattr(self.trading_bot, 'reset_price_history'):
@@ -104,7 +113,7 @@ class DerivWebSocketClient:
                         logger.warning("método reset_price_history não encontrado – a usar reset_stats como fallback")
                         self.trading_bot.reset_stats()
                 self._had_gap = False
-                self._first_connect = False   # primeira conexão concluída
+                self._first_connect = False
 
                 logger.info("🟢 Conectado e autorizado")
                 self._start_keep_alive()
@@ -114,7 +123,6 @@ class DerivWebSocketClient:
                 logger.error(f"Erro no loop principal: {e}", exc_info=True)
             finally:
                 self._teardown_connection()
-                # Se a conexão cair depois da primeira, marcamos gap
                 if not self._first_connect:
                     self._had_gap = True
 
@@ -139,7 +147,6 @@ class DerivWebSocketClient:
         self.state = self.ST_DISCONNECTED
         self.loginid = None
         self.auth_error = None
-        # _had_gap NÃO é alterado aqui – mantém o valor definido em _run_forever
 
     def _authorize_and_wait(self, timeout=10):
         if not self.user_token:
@@ -208,7 +215,6 @@ class DerivWebSocketClient:
             msg_type = data.get('msg_type', '')
             if msg_type not in ['tick', 'balance', 'time', 'ping']:
                 logger.debug(f"📨 [{msg_type}]")
-            # Bug #1: 'history' -> 'candles'
             handlers = {
                 'tick':                   self._on_tick,
                 'balance':                self._on_balance,
@@ -226,14 +232,17 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
+    # 🔧 CORREÇÃO: ordem correta de clear/set nos eventos
     def _start_keep_alive(self):
-        self._keep_alive_stop.clear()
-        self._stop_keep_alive()
+        self._stop_keep_alive()          # garante que thread anterior está parada
+        self._keep_alive_stop.clear()    # limpa o sinal de paragem
         self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
         self._keep_alive_thread.start()
 
     def _stop_keep_alive(self):
-        self._keep_alive_stop.set()
+        self._keep_alive_stop.set()      # sinaliza para parar
+        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
+            self._keep_alive_thread.join(timeout=2)
 
     def _keep_alive_loop(self):
         while not self._stop_event.is_set() and not self._keep_alive_stop.is_set():
@@ -248,13 +257,15 @@ class DerivWebSocketClient:
                 break
 
     def _start_watchdog(self):
-        self._watchdog_stop.clear()
-        self._stop_watchdog()
+        self._stop_watchdog()            # garante que thread anterior está parada
+        self._watchdog_stop.clear()      # limpa o sinal de paragem
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
     def _stop_watchdog(self):
-        self._watchdog_stop.set()
+        self._watchdog_stop.set()        # sinaliza para parar
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            self._watchdog_thread.join(timeout=2)
 
     def _watchdog_loop(self):
         while not self._stop_event.is_set() and not self._watchdog_stop.is_set():
@@ -344,8 +355,10 @@ class DerivWebSocketClient:
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
+            
         if is_digit:
             time.sleep(0.5)
+            
         with self._trade_lock:
             if not self.streaming:
                 logger.warning("🚫 Sem streaming"); return False
@@ -363,29 +376,44 @@ class DerivWebSocketClient:
                         self.pending_trade = None
                     else:
                         logger.warning("Trade pendente"); return False
+                        
             self._last_trade_time = time.time()
+            
             if is_digit:
                 duration = self.config.DIGIT_CONTRACT_DURATION
                 duration_unit = 't'
-                contract_type_full = 'DIGITODD' if contract_type == 'CALL' else 'DIGITEVEN'
+                if contract_type == 'BUY':
+                    contract_type_full = 'DIGITODD'
+                else:
+                    contract_type_full = 'DIGITEVEN'
             else:
                 duration = self.config.CONTRACT_DURATION
                 duration_unit = self.config.CONTRACT_DURATION_UNIT
                 contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
+                
             req_id = self._next_req()
             with self._pending_lock:
                 self.pending_trade = {
-                    'amount': amount, 'contract_type': contract_type,
-                    'is_digit': is_digit, 'timestamp': time.time(),
-                    'status': 'waiting_proposal', 'req_id': req_id
+                    'amount': amount,
+                    'contract_type': contract_type,
+                    'is_digit': is_digit,
+                    'timestamp': time.time(),
+                    'status': 'waiting_proposal',
+                    'req_id': req_id
                 }
             self.pending_trade_time = time.time()
+            
             try:
                 self.ws.send(json.dumps({
-                    "proposal": 1, "amount": amount, "basis": "stake",
-                    "contract_type": contract_type_full, "currency": self.currency,
-                    "duration": duration, "duration_unit": duration_unit,
-                    "symbol": self.current_symbol, "req_id": req_id
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": contract_type_full,
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": duration_unit,
+                    "symbol": self.current_symbol,
+                    "req_id": req_id
                 }))
                 return True
             except Exception as e:
@@ -412,6 +440,7 @@ class DerivWebSocketClient:
                 logger.warning("BUY já enviado")
                 return
             self.pending_trade['proposal_id'] = pid
+            
         try:
             self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
         except Exception as e:
@@ -432,6 +461,7 @@ class DerivWebSocketClient:
             if self.pending_trade:
                 amt, action = self.pending_trade.get('amount', 0), self.pending_trade.get('contract_type', '')
                 is_digit = self.pending_trade.get('is_digit', False)
+                
                 if self.trading_bot:
                     self.trading_bot.register_trade({
                         'contract_id': cid,
@@ -470,24 +500,36 @@ class DerivWebSocketClient:
             if cid in self._processed_contracts:
                 return
             self._processed_contracts.append(cid)
+            
         bp, sp = c.get('buy_price', 0), c.get('sell_price', 0)
         profit = sp - bp
         amt = self.active_trades.get(cid, {}).get('amount', bp)
         is_win = profit > 0
+        trade_info = self.active_trades.get(cid, {})
+        is_digit = trade_info.get('is_digit', False)
+        
         logger.info(f"📊 RESULTADO [{cid}]: {'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f}")
+        
         if self.trading_bot:
-            self.trading_bot.on_trade_result({'contract_id': cid, 'buy_price': bp, 'sell_price': sp,
-                'profit': profit, 'amount': amt, 'is_win': is_win})
+            self.trading_bot.on_trade_result({
+                'contract_id': cid,
+                'buy_price': bp,
+                'sell_price': sp,
+                'profit': profit,
+                'amount': amt,
+                'is_win': is_win
+            })
         if self.on_result_callback:
             self.on_result_callback({
                 'contract_id': cid,
-                'symbol': self.active_trades.get(cid, {}).get('symbol', self.current_symbol),
-                'action': self.active_trades.get(cid, {}).get('action', ''),
+                'symbol': trade_info.get('symbol', self.current_symbol),
+                'action': trade_info.get('action', ''),
                 'amount': amt,
                 'buy_price': bp,
                 'sell_price': sp,
                 'profit': profit,
-                'is_win': is_win
+                'is_win': is_win,
+                'is_digit': is_digit
             })
         if cid in self.active_trades:
             del self.active_trades[cid]
@@ -514,8 +556,23 @@ class DerivWebSocketClient:
 
     def _on_candles(self, data):
         candles = data.get('candles', [])
-        if candles and self.on_candles_callback:
-            self.on_candles_callback(candles)
+        if candles:
+            with self._candles_cache_lock:
+                self._candles_cache = {
+                    'data': candles,
+                    'timestamp': time.time()
+                }
+            if self.on_candles_callback:
+                self.on_candles_callback(candles)
+
+    def get_cached_candles(self, max_age=10):
+        with self._candles_cache_lock:
+            if not self._candles_cache:
+                return None
+            age = time.time() - self._candles_cache.get('timestamp', 0)
+            if age > max_age:
+                return None
+            return self._candles_cache['data']
 
     def request_deposit(self, amount, currency, method):
         return {'status': 'pending', 'message': f'Depósito ${amount} solicitado.', 'amount': amount, 'method': method}
