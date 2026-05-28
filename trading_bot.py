@@ -172,15 +172,15 @@ class TradingBot:
         )
 
         if tech_signal != 'NEUTRAL' and not self._check_consensus(self.last_analysis, tech_signal):
-            logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=3 indicadores)")
+            logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=2 indicadores)")
             return 'NEUTRAL', 0, tech_conf, 0, None
 
         if not (self.current_symbol.startswith('R_') and self.digit_analyzer):
             return tech_signal, tech_conf, tech_conf, 0, None
 
         dig_action, dig_conf = self._get_digit_signal()
-        # Fallback alinhado com config.py: 60
-        if not dig_action or dig_conf < config.RISK_LIMITS.get('min_confidence_digits', 60):
+        # Fallback alinhado com config.py: 55
+        if not dig_action or dig_conf < config.RISK_LIMITS.get('min_confidence_digits', 55):
             logger.info(f"🎲 [{self.current_symbol}] Dígito sem sinal válido: {dig_action} ({dig_conf:.1f}%)")
             return tech_signal, tech_conf, tech_conf, dig_conf, dig_action
 
@@ -201,7 +201,7 @@ class TradingBot:
                 confidence = tech_conf * 0.85
                 logger.info(f"⚠️ [{self.current_symbol}] DIVERGÊNCIA (Técnico vence): {signal} ({confidence:.1f}%) Técnico:{tech_conf:.0f}% vs Dígito:{dig_conf:.0f}%")
 
-        if confidence >= config.RISK_LIMITS.get('min_confidence', 60):
+        if confidence >= config.RISK_LIMITS.get('min_confidence', 55):
             logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – VÁLIDO")
         else:
             logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – ABAIXO DO LIMIAR")
@@ -303,7 +303,7 @@ class TradingBot:
             aligned += 1
         elif signal == 'SELL' and ('sobrecomprado' in bb_desc or 'acima' in bb_desc):
             aligned += 1
-        return aligned >= 3
+        return aligned >= 2   # era 3, agora 2
 
     def _calculate_pure_technical(self, prices):
         if len(prices) < 20 or not self.last_analysis:
