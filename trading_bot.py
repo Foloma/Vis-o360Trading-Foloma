@@ -49,10 +49,22 @@ class TradingBot:
         self._client_connected = False
         self._client_authorized = False
         self._state_lock = threading.RLock()
+        self._daily_stats_dirty = False
+
+        # Cache do sinal
+        self._cached_signal = 'NEUTRAL'
+        self._cached_confidence = 0
+        self._cached_tech_confidence = 0
+        self._cached_digit_confidence = 0
+        self._cached_digit_action = None
+        
+        # Controlo de atualização do sinal por dígito lento
+        self._last_digit_counter = -1
 
     def start(self, client):
         self.client = client
         self.daily_stats['start_balance'] = self.balance
+        self._daily_stats_dirty = True
         logger.info("🚀 Bot iniciado")
 
     def pause(self):
@@ -82,7 +94,6 @@ class TradingBot:
         return True
 
     def check_take_profit(self):
-        """Pausa o bot se atingir a meta diária de lucro (ex.: 10%)."""
         if not config.RISK_LIMITS.get('take_profit_enabled', True):
             return False
         target_pct = config.RISK_LIMITS.get('daily_target_percent', 10)
@@ -113,6 +124,89 @@ class TradingBot:
         self.check_risk_limits()
         self.check_take_profit()
 
+        # Atualiza o sinal apenas quando há um novo dígito lento (ou se não houver analisador de dígitos)
+        if self._should_update_signal():
+            self._update_signal()
+
+    def _should_update_signal(self):
+        """Determina se o sinal deve ser recalculado neste tick."""
+        if not self.digit_analyzer:
+            return True  # sem analisador de dígitos, atualiza a cada tick
+        
+        current_counter = self.digit_analyzer.get_digit_counter()
+        if current_counter != self._last_digit_counter:
+            self._last_digit_counter = current_counter
+            return True
+        
+        return False
+
+    def _update_signal(self):
+        (self._cached_signal, 
+         self._cached_confidence,
+         self._cached_tech_confidence,
+         self._cached_digit_confidence,
+         self._cached_digit_action) = self._calculate_signal_impl()
+
+    def calculate_signal(self):
+        """Retorna o sinal cacheado (compatível com app.py: 2 valores)."""
+        return self._cached_signal, self._cached_confidence
+
+    def get_cached_signal_details(self):
+        """Retorna todos os detalhes do sinal cacheado."""
+        return (self._cached_signal, self._cached_confidence,
+                self._cached_tech_confidence, self._cached_digit_confidence,
+                self._cached_digit_action)
+
+    def _calculate_signal_impl(self):
+        prices = self.indicators.get_prices(self.current_symbol)
+        if len(prices) < 20:
+            logger.debug(f"⏳ [{self.current_symbol}] Apenas {len(prices)} preços – a aguardar 20")
+            return 'NEUTRAL', 0, 0, 0, None
+        if not self.last_analysis:
+            return 'NEUTRAL', 0, 0, 0, None
+
+        tech_signal, tech_conf = self._calculate_pure_technical(prices)
+        logger.info(
+            f"🔍 [{self.current_symbol}] TÉCNICO PURO: {tech_signal} ({tech_conf:.1f}%) "
+            f"| Preços: {len(prices)}"
+        )
+
+        if tech_signal != 'NEUTRAL' and not self._check_consensus(self.last_analysis, tech_signal):
+            logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=3 indicadores)")
+            return 'NEUTRAL', 0, tech_conf, 0, None
+
+        if not (self.current_symbol.startswith('R_') and self.digit_analyzer):
+            return tech_signal, tech_conf, tech_conf, 0, None
+
+        dig_action, dig_conf = self._get_digit_signal()
+        if not dig_action or dig_conf < config.RISK_LIMITS.get('min_confidence_digits', 55):
+            logger.info(f"🎲 [{self.current_symbol}] Dígito sem sinal válido: {dig_action} ({dig_conf:.1f}%)")
+            return tech_signal, tech_conf, tech_conf, dig_conf, dig_action
+
+        logger.info(f"🎲 [{self.current_symbol}] DÍGITO: {dig_action} ({dig_conf:.1f}%)")
+
+        if dig_action == tech_signal:
+            total_weight = _TECH_WEIGHT + _DIGIT_WEIGHT
+            confidence = (_TECH_WEIGHT * tech_conf + _DIGIT_WEIGHT * dig_conf) / total_weight
+            signal = tech_signal
+            logger.info(f"🤝 [{self.current_symbol}] CONVERGÊNCIA: {signal} ({confidence:.1f}%) Técnico:{tech_conf:.0f}% + Dígito:{dig_conf:.0f}%")
+        else:
+            if _DIGIT_WEIGHT > _TECH_WEIGHT:
+                signal = dig_action
+                confidence = dig_conf * 0.85
+                logger.info(f"⚠️ [{self.current_symbol}] DIVERGÊNCIA (Dígito vence): {signal} ({confidence:.1f}%) Técnico:{tech_conf:.0f}% vs Dígito:{dig_conf:.0f}%")
+            else:
+                signal = tech_signal
+                confidence = tech_conf * 0.85
+                logger.info(f"⚠️ [{self.current_symbol}] DIVERGÊNCIA (Técnico vence): {signal} ({confidence:.1f}%) Técnico:{tech_conf:.0f}% vs Dígito:{dig_conf:.0f}%")
+
+        if confidence >= config.RISK_LIMITS.get('min_confidence', 60):
+            logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – VÁLIDO")
+        else:
+            logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – ABAIXO DO LIMIAR")
+
+        return signal, min(confidence, 100), tech_conf, dig_conf, dig_action
+
     def reset_daily_stats(self):
         self.daily_stats = {
             'date': datetime.now().date(), 'trades': 0,
@@ -120,23 +214,13 @@ class TradingBot:
             'start_balance': self.balance
         }
         self.stop_loss_active = False
+        self._daily_stats_dirty = True
 
     def reset_price_history(self):
         self.indicators.reset_all()
         logger.info("🧹 Histórico de preços e todos os caches resetados (gap de reconexão)")
-        self.indicators.prices_by_symbol.clear()
-        if hasattr(self.indicators, 'reset_macd_cache'):
-            self.indicators.reset_macd_cache()
-        logger.info("🧹 Histórico de preços e MACD resetados (gap de reconexão)")
 
-    # ------------------------------------------------------------------
-    # NOVOS MÉTODOS PARA PERSISTÊNCIA DAS ESTATÍSTICAS DIÁRIAS
-    # ------------------------------------------------------------------
     def set_daily_stats_from_db(self, saved):
-        """
-        Aplica estatísticas diárias guardadas na BD, se forem do dia atual.
-        Caso contrário inicia um novo dia.
-        """
         if saved and isinstance(saved, dict):
             try:
                 saved_date = datetime.strptime(saved.get('date', ''), '%Y-%m-%d').date()
@@ -152,23 +236,21 @@ class TradingBot:
                         }
                         self.stop_loss_active = saved.get('stop_loss_active', False)
                     logger.info(f"📂 Estatísticas diárias carregadas da BD: {self.daily_stats}")
+                    self._daily_stats_dirty = False
                     return
             except Exception as e:
                 logger.error(f"Erro ao carregar daily_stats da BD: {e}")
         self.reset_daily_stats()
 
     def get_daily_stats_for_db(self):
-        """Devolve um dicionário pronto para serializar na BD."""
         with self._state_lock:
             s = dict(self.daily_stats)
-            # Bug #5: date agora é datetime.date, não datetime.datetime
             if isinstance(s['date'], date):
                 s['date'] = s['date'].strftime('%Y-%m-%d')
             else:
                 s['date'] = str(s['date'])
             s['stop_loss_active'] = self.stop_loss_active
             return s
-    # ------------------------------------------------------------------
 
     def get_momentum(self):
         prices = self.indicators.get_prices(self.current_symbol)
@@ -205,21 +287,16 @@ class TradingBot:
             return 30, 70
 
     def _check_consensus(self, analysis, signal):
-        """Retorna True se pelo menos 3 de 4 indicadores apoiam o sinal."""
         aligned = 0
-        # RSI
         rsi = analysis['rsi']['score']
         if signal == 'BUY' and rsi < 55: aligned += 1
         elif signal == 'SELL' and rsi > 45: aligned += 1
-        # MACD
         macd_desc = analysis['macd']['desc']
         if 'COMPRA' in macd_desc and signal == 'BUY': aligned += 1
         elif 'VENDA' in macd_desc and signal == 'SELL': aligned += 1
-        # TREND
         trend_desc = analysis['trend']['desc']
         if 'ALTA' in trend_desc and signal == 'BUY': aligned += 1
         elif 'BAIXA' in trend_desc and signal == 'SELL': aligned += 1
-        # Bollinger
         bb_desc = analysis['bollinger']['desc']
         if signal == 'BUY' and ('sobrevendido' in bb_desc or 'abaixo' in bb_desc):
             aligned += 1
@@ -234,7 +311,6 @@ class TradingBot:
         analysis = self.last_analysis
         raw_scores = []
 
-        # RSI (25%) com thresholds adaptativos
         rsi = analysis['rsi']['score']
         oversold, overbought = self._get_rsi_thresholds()
         if rsi is not None and analysis['rsi']['desc'] != '---':
@@ -253,7 +329,6 @@ class TradingBot:
         else:
             raw_scores.append(('NEUTRAL', 0.25, 0))
 
-        # MACD (30%)
         macd_desc = analysis['macd']['desc']
         macd_score = analysis['macd']['score']
         if macd_desc != '---':
@@ -276,7 +351,6 @@ class TradingBot:
         else:
             raw_scores.append(('NEUTRAL', 0.30, 0))
 
-        # TREND (25%)
         trend_desc = analysis['trend']['desc']
         if trend_desc != '---':
             if 'ALTA' in trend_desc:
@@ -288,7 +362,6 @@ class TradingBot:
         else:
             raw_scores.append(('NEUTRAL', 0.25, 0))
 
-        # Bollinger (20%) com contexto de TREND
         bb_desc = analysis['bollinger']['desc']
         trend_is_bull = 'ALTA' in trend_desc if trend_desc else False
         trend_is_bear = 'BAIXA' in trend_desc if trend_desc else False
@@ -312,7 +385,6 @@ class TradingBot:
         else:
             raw_scores.append(('NEUTRAL', 0.20, 0))
 
-        # Redistribuição dinâmica de pesos
         active_scores = [s for s in raw_scores if s[0] != 'NEUTRAL' and s[2] > 0]
         neutral_weight = sum(s[1] for s in raw_scores if s[0] == 'NEUTRAL' or s[2] == 0)
         if not active_scores:
@@ -348,57 +420,6 @@ class TradingBot:
 
         return signal, min(round(confidence, 1), 100)
 
-    def calculate_signal(self):
-        prices = self.indicators.get_prices(self.current_symbol)
-        if len(prices) < 20:
-            logger.debug(f"⏳ [{self.current_symbol}] Apenas {len(prices)} preços – a aguardar 20")
-            return 'NEUTRAL', 0
-        if not self.last_analysis:
-            return 'NEUTRAL', 0
-
-        tech_signal, tech_conf = self._calculate_pure_technical(prices)
-        logger.info(
-            f"🔍 [{self.current_symbol}] TÉCNICO PURO: {tech_signal} ({tech_conf:.1f}%) "
-            f"| Preços: {len(prices)}"
-        )
-
-        # Consenso mínimo de indicadores
-        if tech_signal != 'NEUTRAL' and not self._check_consensus(self.last_analysis, tech_signal):
-            logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=3 indicadores)")
-            tech_signal, tech_conf = 'NEUTRAL', 0
-
-        if not (self.current_symbol.startswith('R_') and self.digit_analyzer):
-            return tech_signal, tech_conf
-
-        dig_action, dig_conf = self._get_digit_signal()
-        if not dig_action or dig_conf < 55:
-            logger.debug(f"🎲 [{self.current_symbol}] DÍGITO sem recomendação ou confiança < 55%")
-            return tech_signal, tech_conf
-
-        logger.info(f"🎲 [{self.current_symbol}] DÍGITO: {dig_action} ({dig_conf:.1f}%)")
-
-        if dig_action == tech_signal:
-            total_weight = _TECH_WEIGHT + _DIGIT_WEIGHT
-            confidence = (_TECH_WEIGHT * tech_conf + _DIGIT_WEIGHT * dig_conf) / total_weight
-            signal = tech_signal
-            logger.info(f"✅ [{self.current_symbol}] COMBINADO (concordam): {signal} ({confidence:.1f}%)")
-        else:
-            if _DIGIT_WEIGHT > _TECH_WEIGHT:
-                signal = dig_action
-                confidence = dig_conf
-                logger.info(f"🔄 [{self.current_symbol}] Dígito prevalece: {signal} ({confidence:.1f}%)")
-            else:
-                signal = tech_signal
-                confidence = tech_conf
-                logger.info(f"📊 [{self.current_symbol}] Técnico prevalece: {signal} ({confidence:.1f}%)")
-
-        if confidence >= 60:
-            logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – VÁLIDO")
-        else:
-            logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – ABAIXO DO LIMIAR")
-
-        return signal, min(confidence, 100)
-
     def register_trade(self, trade_data):
         trade_data['timestamp'] = datetime.now()
         with self._state_lock:
@@ -406,6 +427,7 @@ class TradingBot:
             self.stats['total'] += 1
             self.stats['total_invested'] += trade_data['amount']
             self.daily_stats['trades'] += 1
+            self._daily_stats_dirty = True
         self.update_stats()
 
     def update_stats(self):
@@ -436,9 +458,9 @@ class TradingBot:
                     with self._state_lock:
                         trade['result'] = 'loss'
                         trade['profit'] = 0
-                        # Bug #4: atualizar daily_stats para refletir perda
                         self.daily_stats['losses'] += 1
                         self.daily_stats['profit_loss'] -= trade.get('amount', 0)
+                        self._daily_stats_dirty = True
                         updated = True
                     logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')} (digit={is_digit})")
         if updated:
@@ -480,6 +502,7 @@ class TradingBot:
                     self.consecutive_losses += 1
                     self.consecutive_wins = 0
                     logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
+                self._daily_stats_dirty = True
             self.update_stats()
             if self.client:
                 self.client.get_balance()
@@ -532,6 +555,9 @@ class TradingBot:
             'currency': self.currency,
             'signal': signal,
             'confidence': round(confidence, 1),
+            'tech_confidence': round(self._cached_tech_confidence, 1),
+            'digit_confidence': round(self._cached_digit_confidence, 1) if self._cached_digit_confidence else 0,
+            'digit_action': self._cached_digit_action,
             'analysis': self.last_analysis,
             'stats': self.stats,
             'paused': self.paused,
@@ -569,7 +595,6 @@ class TradingBot:
             self.martingale['active'] = True
             self.martingale['original_amount'] = last_trade_amount
             nxt = self.get_martingale_amount(last_trade_amount)
-            # Verificação de saldo disponível
             if self.balance < nxt * 1.2:
                 self.reset_martingale()
                 return False, f"Saldo insuficiente para martingale (precisa ${nxt*1.2:.2f})"
