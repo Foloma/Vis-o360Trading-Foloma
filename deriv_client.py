@@ -4,6 +4,7 @@ import threading
 import time
 import logging
 from collections import deque
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -232,15 +233,14 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
-    # 🔧 CORREÇÃO: ordem correta de clear/set nos eventos
     def _start_keep_alive(self):
-        self._stop_keep_alive()          # garante que thread anterior está parada
-        self._keep_alive_stop.clear()    # limpa o sinal de paragem
+        self._stop_keep_alive()
+        self._keep_alive_stop.clear()
         self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
         self._keep_alive_thread.start()
 
     def _stop_keep_alive(self):
-        self._keep_alive_stop.set()      # sinaliza para parar
+        self._keep_alive_stop.set()
         if self._keep_alive_thread and self._keep_alive_thread.is_alive():
             self._keep_alive_thread.join(timeout=2)
 
@@ -257,13 +257,13 @@ class DerivWebSocketClient:
                 break
 
     def _start_watchdog(self):
-        self._stop_watchdog()            # garante que thread anterior está parada
-        self._watchdog_stop.clear()      # limpa o sinal de paragem
+        self._stop_watchdog()
+        self._watchdog_stop.clear()
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
     def _stop_watchdog(self):
-        self._watchdog_stop.set()        # sinaliza para parar
+        self._watchdog_stop.set()
         if self._watchdog_thread and self._watchdog_thread.is_alive():
             self._watchdog_thread.join(timeout=2)
 
@@ -565,7 +565,10 @@ class DerivWebSocketClient:
             if self.on_candles_callback:
                 self.on_candles_callback(candles)
 
-    def get_cached_candles(self, max_age=10):
+    def get_cached_candles(self, max_age=None):
+        """Retorna candles do cache se ainda forem válidos (max_age em segundos)."""
+        if max_age is None:
+            max_age = config.CANDLE_CACHE_TTL
         with self._candles_cache_lock:
             if not self._candles_cache:
                 return None
