@@ -179,7 +179,8 @@ class TradingBot:
             return tech_signal, tech_conf, tech_conf, 0, None
 
         dig_action, dig_conf = self._get_digit_signal()
-        if not dig_action or dig_conf < config.RISK_LIMITS.get('min_confidence_digits', 55):
+        # Fallback alinhado com config.py: 60
+        if not dig_action or dig_conf < config.RISK_LIMITS.get('min_confidence_digits', 60):
             logger.info(f"🎲 [{self.current_symbol}] Dígito sem sinal válido: {dig_action} ({dig_conf:.1f}%)")
             return tech_signal, tech_conf, tech_conf, dig_conf, dig_action
 
