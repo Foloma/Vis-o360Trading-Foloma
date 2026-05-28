@@ -8,13 +8,7 @@ load_dotenv()
 class Config:
     DERIV_APP_ID = os.getenv('DERIV_APP_ID', '133674')
 
-    DEMO_API_TOKEN = os.getenv('DEMO_API_TOKEN', '')   # não utilizado atualmente
-    REAL_API_TOKEN = os.getenv('REAL_API_TOKEN', '')   # não utilizado atualmente
-
     WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
-    DERIV_WS_URL = WS_URL
-
-    DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///users.db')
 
     AVAILABLE_SYMBOLS = {
         'R_100': 'Volatility 100',
@@ -38,17 +32,15 @@ class Config:
     MARKUP_PERCENTAGE = 0.5
 
     MARTINGALE_CONFIG = {
-        'enabled': False,          # martingale manual — nenhum código automático
         'multiplier': 2.0,
-        'max_steps': 2,
-        'reset_on_win': True
+        'max_steps': 2
     }
 
     RISK_LIMITS = {
         'max_daily_loss_percent': 5,
         'max_consecutive_losses': 2,
         'min_confidence': 60,
-        'min_confidence_digits': 55,
+        'min_confidence_digits': 60,
         'max_stake_percent': 5,
         'stop_loss_enabled': True,
         'take_profit_enabled': True,
@@ -57,16 +49,16 @@ class Config:
 
     ADVANCED_STRATEGY = {
         'momentum_threshold': 0.1,
-        'digit_diff_threshold': 20,
-        'hybrid_min_confidence': 60,
+        'hybrid_min_confidence': 65,
         'hybrid_mode_enabled': True
     }
 
-    # Pesos para combinação de sinais técnicos e de dígitos em índices R_
+    # Pesos para combinação de sinais técnicos e de dígitos
     SYNTHETIC_TECHNICAL_WEIGHT = 0.3
     SYNTHETIC_DIGIT_WEIGHT = 0.7
 
-    LOG_LEVEL = logging.INFO
+    # Cache de velas (segundos)
+    CANDLE_CACHE_TTL = 10
 
 
 config = Config()
