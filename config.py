@@ -20,15 +20,12 @@ class Config:
     MIN_STAKE = 0.35
     MAX_STAKE = 100
 
-    # Contratos normais (CALL/PUT) – 5 ticks
     CONTRACT_DURATION = 5
     CONTRACT_DURATION_UNIT = 't'
 
-    # Contratos de DÍGITO – 10 ticks (1 ciclo lento completo)
     DIGIT_CONTRACT_DURATION = 10
     DIGIT_CONTRACT_DURATION_UNIT = 't'
 
-    # MARKUP_PERCENTAGE padrão; será sobrescrito pela base de dados no arranque
     MARKUP_PERCENTAGE = 0.5
 
     MARTINGALE_CONFIG = {
@@ -39,8 +36,8 @@ class Config:
     RISK_LIMITS = {
         'max_daily_loss_percent': 5,
         'max_consecutive_losses': 2,
-        'min_confidence': 60,
-        'min_confidence_digits': 60,
+        'min_confidence': 55,           # ← 60 → 55
+        'min_confidence_digits': 55,    # ← 60 → 55
         'max_stake_percent': 5,
         'stop_loss_enabled': True,
         'take_profit_enabled': True,
@@ -49,15 +46,13 @@ class Config:
 
     ADVANCED_STRATEGY = {
         'momentum_threshold': 0.1,
-        'hybrid_min_confidence': 65,
+        'hybrid_min_confidence': 60,    # ← 65 → 60 (acompanha min_confidence)
         'hybrid_mode_enabled': True
     }
 
-    # Pesos para combinação de sinais técnicos e de dígitos
     SYNTHETIC_TECHNICAL_WEIGHT = 0.3
     SYNTHETIC_DIGIT_WEIGHT = 0.7
 
-    # Cache de velas (segundos)
     CANDLE_CACHE_TTL = 10
 
 
