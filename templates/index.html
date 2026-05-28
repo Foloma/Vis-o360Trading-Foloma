@@ -16,113 +16,104 @@
       --warning: #ffaa00;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-    body { background: linear-gradient(180deg, #020617, #020617 60%, #020617); color: var(--text); min-height: 100vh; }
+    body { background: #020617; color: var(--text); min-height: 100vh; }
     body.modal-open { overflow: hidden; }
-    .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: #020617; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
-    .logo { font-weight: 800; font-size: 18px; color: var(--accent); display: flex; align-items: center; gap: 8px; }
-    .menu-btn { background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; }
-    .account-switch { display: flex; background: #020617; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-    .account-switch button { padding: 8px 14px; border: none; background: none; color: var(--muted); cursor: pointer; font-weight: 600; }
+    .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #020617; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+    .logo { font-weight: 800; font-size: 15px; color: var(--accent); }
+    .menu-btn { background: none; border: none; color: var(--text); font-size: 20px; cursor: pointer; }
+    .account-switch { display: flex; background: #020617; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .account-switch button { padding: 5px 10px; border: none; background: none; color: var(--muted); cursor: pointer; font-weight: 600; font-size: 11px; }
     .account-switch .active { background: var(--accent); color: #000; }
     .side-menu { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: var(--card); z-index: 1000; transition: left .3s; padding: 20px; border-right: 1px solid var(--border); overflow-y: auto; }
     .side-menu.open { left: 0; }
-    .menu-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
-    .menu-close { background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; }
-    .menu-item { padding: 12px 0; color: var(--text); display: block; border-bottom: 1px solid var(--border); cursor: pointer; }
+    .menu-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+    .menu-close { background: none; border: none; color: var(--text); font-size: 20px; cursor: pointer; }
+    .menu-item { padding: 10px 0; color: var(--text); display: block; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; }
     .menu-item:hover { color: var(--accent); }
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 999; display: none; }
     .overlay.show { display: block; }
-    .container { max-width: 520px; margin: auto; padding: 16px; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 15px 40px rgba(0,0,0,.5); }
-    .card-title { font-size: 12px; color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; display: flex; justify-content: space-between; align-items: center; }
-    .price-box { display: flex; justify-content: space-between; align-items: center; background: linear-gradient(135deg, #020617, #0f172a); padding: 18px; border-radius: 14px; border: 1px solid var(--border); }
-    .price { font-size: 34px; font-weight: 900; color: var(--accent); }
-    .signal { font-weight: 700; padding: 6px 12px; border-radius: 20px; }
+    .container { max-width: 500px; margin: auto; padding: 8px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 8px; }
+    .card-title { font-size: 10px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; display: flex; justify-content: space-between; align-items: center; }
+    .price-box { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
+    .price { font-size: 26px; font-weight: 900; color: var(--accent); }
+    .signal { font-weight: 700; padding: 4px 10px; border-radius: 14px; font-size: 12px; }
     .buy { background: var(--accent); color: #000; } .sell { background: var(--danger); }
     .neutral { background: var(--muted); color: #fff; }
-    .trade-box { display: grid; gap: 12px; }
-    input { width: 100%; padding: 14px; border-radius: 10px; border: 1px solid var(--border); background: #020617; color: white; }
-    input:focus { border-color: var(--accent); box-shadow: 0 0 10px #00f0b550; }
-    .trade-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    button { padding: 16px; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; transition: .2s; }
-    button:active { transform: scale(.95); }
+    input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #020617; color: white; font-size: 13px; }
+    input:focus { border-color: var(--accent); }
+    .trade-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    button { padding: 10px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; transition: .2s; font-size: 13px; }
+    button:active { transform: scale(.97); }
     .btn-buy { background: var(--accent); color: #000; }
     .btn-sell { background: var(--danger); }
-    .btn-buy:hover { box-shadow: 0 0 20px #00f0b580; }
-    .btn-sell:hover { box-shadow: 0 0 20px #ff4d4d80; }
-    .indicators { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-    .ind { background: #020617; padding: 10px; border-radius: 10px; text-align: center; }
-    .ind span { display: block; } .ind .label { font-size: 10px; color: var(--muted); } .ind .value { font-weight: 700; }
+    .indicators { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .ind { background: #020617; padding: 6px; border-radius: 8px; text-align: center; }
+    .ind .label { font-size: 9px; color: var(--muted); } .ind .value { font-weight: 700; font-size: 12px; }
     .status { display: flex; justify-content: space-between; align-items: center; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); display: inline-block; margin-right: 6px; }
-    .dot.on { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
-    .balance { font-weight: 800; color: var(--accent); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); display: inline-block; margin-right: 4px; }
+    .dot.on { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .balance { font-weight: 800; color: var(--accent); font-size: 14px; }
     .hidden { display: none; }
-    .sym-row { display: flex; gap: 8px; flex-wrap: wrap; }
-    .sym-btn { background: #020617; border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 20px; cursor: pointer; font-size: 12px; }
+    .sym-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .sym-btn { background: #020617; border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 14px; cursor: pointer; font-size: 11px; }
     .sym-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
-    .dig-main { background: linear-gradient(135deg, #020617, #0f172a); padding: 18px; text-align: center; border-radius: 14px; border: 1px solid var(--border); margin-bottom: 12px; }
-    .tbar-wrap { background: var(--card); border-radius: 6px; height: 8px; margin-bottom: 12px; overflow: hidden; }
-    .tbar { height: 8px; border-radius: 6px; transition: width .8s linear; background: var(--accent); }
-    .big-d { font-size: 88px; font-weight: 900; line-height: 1; transition: transform .2s; }
+    .dig-main { background: linear-gradient(135deg, #020617, #0f172a); padding: 10px; text-align: center; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 8px; }
+    .tbar-wrap { background: var(--card); border-radius: 4px; height: 6px; margin-bottom: 8px; overflow: hidden; }
+    .tbar { height: 6px; border-radius: 4px; transition: width .8s linear; background: var(--accent); }
+    .big-d { font-size: 64px; font-weight: 900; line-height: 1; }
     .big-d.odd { color: var(--accent); } .big-d.even { color: var(--danger); } .big-d.wait { color: var(--muted); }
-    .big-p { font-size: 18px; font-weight: 700; letter-spacing: 3px; margin-top: 4px; }
-    .hist-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
-    .hist-row { display: flex; gap: 5px; width: max-content; padding: 2px; }
-    .dbox { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 14px; font-weight: 700; flex-shrink: 0; background: #020617; }
+    .big-p { font-size: 15px; font-weight: 700; letter-spacing: 2px; }
+    .hist-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+    .hist-row { display: flex; gap: 3px; width: max-content; padding: 1px; }
+    .dbox { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 12px; font-weight: 700; flex-shrink: 0; background: #020617; }
     .dbox.odd { color: var(--accent); border: 1.5px solid var(--accent); } .dbox.even { color: var(--danger); border: 1.5px solid var(--danger); }
-    .mode-sel { display: flex; gap: 8px; margin-bottom: 12px; }
-    .mode-btn { flex: 1; padding: 8px; border-radius: 8px; font-weight: 600; cursor: pointer; background: var(--card); color: var(--text); border: 1px solid var(--border); font-size: 12px; }
+    .mode-sel { display: flex; gap: 6px; margin-bottom: 8px; }
+    .mode-btn { flex: 1; padding: 6px; border-radius: 8px; font-weight: 600; cursor: pointer; background: var(--card); color: var(--text); border: 1px solid var(--border); font-size: 11px; }
     .mode-btn.active { background: var(--accent); color: #000; }
-    .sm { border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; text-align: center; font-size: 13px; font-weight: 600; }
-    .sm.active { background: linear-gradient(135deg, #00f0b540, #00f0b510); border: 1px solid var(--accent); color: var(--accent); }
-    .ms { background: #020617; border-radius: 8px; padding: 10px; font-size: 12px; margin: 10px 0; }
-    .bm { background: #ffaa00; color: #000; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; }
-    .bmr { background: var(--card); color: white; border: none; padding: 8px; border-radius: 6px; font-weight: 600; cursor: pointer; }
-    .lc { display: flex; gap: 8px; } .lc input { flex: 1; padding: 8px; background: #020617; border: 1px solid var(--border); border-radius: 6px; color: white; font-size: 12px; }
-    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--card); border-radius: 14px; padding: 14px 22px; font-size: 13px; z-index: 2000; display: none; text-align: center; max-width: 320px; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+    .ms { background: #020617; border-radius: 6px; padding: 6px; font-size: 11px; margin: 6px 0; }
+    .bm { background: #ffaa00; color: #000; border: none; padding: 6px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 11px; }
+    .bmr { background: var(--card); color: white; border: none; padding: 6px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 11px; }
+    .lc { display: flex; gap: 6px; } .lc input { flex: 1; padding: 8px; font-size: 11px; }
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--card); border-radius: 12px; padding: 10px 18px; font-size: 12px; z-index: 2000; display: none; text-align: center; max-width: 300px; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
     .toast.show { display: block; animation: su .3s ease; }
-    @keyframes su { from { transform: translateX(-50%) translateY(16px); opacity: 0 } to { transform: translateX(-50%) translateY(0); opacity: 1 } }
-    @keyframes pulse { 0%{box-shadow:0 0 0 0 #00f0b5} 70%{box-shadow:0 0 15px 5px #00f0b5} 100%{box-shadow:0 0 0 0 #00f0b5} }
+    @keyframes su { from { transform: translateX(-50%) translateY(12px); opacity: 0 } to { transform: translateX(-50%) translateY(0); opacity: 1 } }
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 1100; display: flex; align-items: center; justify-content: center; }
-    .mbox { background: var(--card); padding: 24px; border-radius: 16px; width: 90%; max-width: 350px; }
-    .guide-modal { background: var(--card); padding: 24px; border-radius: 16px; width: 95%; max-width: 550px; max-height: 85vh; overflow-y: auto; position: relative; }
-    .guide-modal h2 { color: var(--accent); margin-bottom: 16px; text-align: center; }
-    .guide-modal h3 { color: var(--accent); margin: 16px 0 8px; font-size: 14px; }
-    .guide-modal p, .guide-modal li { font-size: 12px; color: var(--text); line-height: 1.6; margin-bottom: 6px; }
-    .guide-modal ul { padding-left: 16px; margin-bottom: 8px; }
-    .guide-modal table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 11px; }
-    .guide-modal th, .guide-modal td { border: 1px solid var(--border); padding: 8px; text-align: left; }
+    .mbox { background: var(--card); padding: 20px; border-radius: 14px; width: 90%; max-width: 340px; }
+    .guide-modal { background: var(--card); padding: 20px; border-radius: 14px; width: 95%; max-width: 500px; max-height: 80vh; overflow-y: auto; position: relative; }
+    .guide-modal h2 { color: var(--accent); margin-bottom: 12px; text-align: center; font-size: 15px; }
+    .guide-modal h3 { color: var(--accent); margin: 12px 0 6px; font-size: 13px; }
+    .guide-modal p, .guide-modal li { font-size: 11px; color: var(--text); line-height: 1.5; margin-bottom: 4px; }
+    .guide-modal ul { padding-left: 14px; margin-bottom: 6px; }
+    .guide-modal table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 10px; }
+    .guide-modal th, .guide-modal td { border: 1px solid var(--border); padding: 6px; text-align: left; }
     .guide-modal th { background: #020617; color: var(--accent); }
-    .guide-modal .close-btn { position: sticky; top: 0; float: right; background: none; border: none; color: var(--danger); font-size: 20px; cursor: pointer; padding: 4px 8px; }
+    .guide-modal .close-btn { position: sticky; top: 0; float: right; background: none; border: none; color: var(--danger); font-size: 18px; cursor: pointer; padding: 2px 6px; }
     .guide-modal a { color: var(--accent); word-break: break-all; }
-    .token-status { font-size: 12px; color: var(--accent); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
-    .tf-btn { padding: 4px 10px; background: #020617; border: 1px solid var(--border); color: var(--text); border-radius: 12px; font-size: 11px; cursor: pointer; }
+    .token-status { font-size: 11px; color: var(--accent); margin-top: 4px; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .tf-btn { padding: 3px 8px; background: #020617; border: 1px solid var(--border); color: var(--text); border-radius: 10px; font-size: 10px; cursor: pointer; }
     .tf-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
-    
-    /* NOVO: Indicadores de confiança */
-    .conf-bar-container { display: flex; gap: 4px; margin-top: 8px; }
-    .conf-bar { flex: 1; background: #020617; border-radius: 6px; padding: 8px; text-align: center; }
-    .conf-bar-label { font-size: 9px; color: var(--muted); text-transform: uppercase; }
-    .conf-bar-value { font-size: 16px; font-weight: 700; margin-top: 2px; }
-    .conf-bar-fill { height: 3px; border-radius: 2px; margin-top: 4px; transition: width 0.5s; }
+    .conf-bar-container { display: flex; gap: 3px; margin-top: 6px; }
+    .conf-bar { flex: 1; background: #020617; border-radius: 5px; padding: 5px; text-align: center; }
+    .conf-bar-label { font-size: 8px; color: var(--muted); text-transform: uppercase; }
+    .conf-bar-value { font-size: 13px; font-weight: 700; }
+    .conf-bar-fill { height: 2px; border-radius: 1px; margin-top: 2px; transition: width 0.5s; }
     .conf-tech .conf-bar-fill { background: #3b82f6; }
     .conf-digit .conf-bar-fill { background: #8b5cf6; }
     .conf-final .conf-bar-fill { background: var(--accent); }
-    .conf-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: 4px; }
-    .conf-badge.high { background: #00f0b520; color: var(--accent); }
-    .conf-badge.medium { background: #ffaa0020; color: var(--warning); }
-    .conf-badge.low { background: #ff4d4d20; color: var(--danger); }
-    
-    /* NOVO: Token status melhorado */
-    .token-display { background: #020617; border-radius: 8px; padding: 10px; margin-top: 8px; font-size: 12px; }
-    .token-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .token-display { background: #020617; border-radius: 6px; padding: 8px; margin-top: 6px; font-size: 11px; }
+    .token-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
     .token-row:last-child { border-bottom: none; }
-    .token-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .token-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 5px; }
     .token-dot.ok { background: var(--accent); }
     .token-dot.missing { background: var(--muted); }
-    .token-dot.active { box-shadow: 0 0 6px var(--accent); }
+    .token-dot.active { box-shadow: 0 0 5px var(--accent); }
+    .trade-row { display: flex; gap: 8px; align-items: center; }
+    .trade-row input { flex: 1; }
+    .trade-row button { flex: 0; white-space: nowrap; padding: 8px 12px; }
+    .inline-actions { display: flex; gap: 4px; margin-top: 6px; }
+    .inline-actions button { padding: 5px 8px; font-size: 11px; border-radius: 6px; }
   </style>
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -137,16 +128,16 @@
 </div>
 <div class="side-menu" id="sideMenu">
   <div class="menu-header"><span style="color:var(--accent);font-weight:bold">MENU</span><button class="menu-close" onclick="toggleMenu()">✕</button></div>
-  <div id="userNameDisplay" style="padding:10px 0;color:var(--accent);font-size:13px;font-weight:600"></div>
+  <div id="userNameDisplay" style="padding:8px 0;color:var(--accent);font-size:12px;font-weight:600"></div>
   <div class="menu-item" onclick="showSec('dashboard')">📊 Dashboard</div>
   <div class="menu-item" onclick="showSec('affiliate')">🔗 Afiliado</div>
   <div class="menu-item" onclick="showSec('history')">📋 Histórico</div>
   <div class="menu-item" onclick="showSec('payment')">💰 Depósito/Saque</div>
   <div class="menu-item" onclick="showSec('settings')">⚙️ Configurações</div>
-  <div class="menu-item" onclick="openGuide();toggleMenu()">📖 Guia de Utilização</div>
-  <div class="menu-item" id="adminMI" style="display:none" onclick="showSec('admin')">👑 Administração</div>
+  <div class="menu-item" onclick="openGuide();toggleMenu()">📖 Guia</div>
+  <div class="menu-item" id="adminMI" style="display:none" onclick="showSec('admin')">👑 Admin</div>
   <div class="menu-item" onclick="doLogout()">🚪 Sair</div>
-  <div class="menu-item" id="disconnectMI" style="border-top:1px solid var(--border);margin-top:10px;color:var(--danger)" onclick="disconnectWebSocket()">🔌 Desconectar WebSocket</div>
+  <div class="menu-item" style="color:var(--danger)" onclick="disconnectWebSocket()">🔌 Desconectar</div>
 </div>
 <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
 <div class="toast" id="toast"></div>
@@ -155,147 +146,64 @@
   <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
 </audio>
 
-<!-- Modal do Guia de Utilização -->
+<!-- Guia de Utilização -->
 <div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
   <div class="guide-modal" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeGuide()">✕</button>
-    <h2>🚀 Guia de Utilização — Foloma Visão 360</h2>
-    
-    <h3>1. Primeiros Passos</h3>
-    <p><strong>Criar conta na Foloma e conectar à Deriv</strong></p>
-    <ol style="font-size:12px;padding-left:16px;margin-bottom:8px">
-      <li>Regista-te na Foloma Visão 360 com email e senha.</li>
-      <li>Cria a tua conta na Deriv (se ainda não tens): <a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank">Criar Conta Deriv</a> — nas Configurações.</li>
-      <li>Gera o teu token API na Deriv: <a href="https://app.deriv.com/account/api-token" target="_blank">app.deriv.com/account/api-token</a> — permissões <strong>Read + Trade + Trading Information</strong>.</li>
-      <li>Guarda o token na Foloma (demo ou real) e clica em <strong>"Conectar com Deriv"</strong>.</li>
-      <li>Autoriza a ligação — serás redirecionado de volta.</li>
-      <li>✅ Ponto verde no dashboard = estás conectado.</li>
-    </ol>
-    <p><strong>Contas Demo e Real:</strong> Começa sempre em Demo (dinheiro virtual). Só muda para Real após 2 semanas de consistência.</p>
-
-    <h3>2. Os Três Modos de Trading</h3>
+    <h2>🚀 Guia Rápido — Foloma Visão 360</h2>
+    <h3>Modos de Trading</h3>
     <table>
-      <tr><th>Modo</th><th>Como funciona</th><th>Contrato</th><th>Ideal para</th></tr>
-      <tr><td>📈 Ativos</td><td>Aposta na direcção do preço (CALL/PUT)</td><td>5 ticks</td><td>Análise técnica</td></tr>
-      <tr><td>🎲 Dígitos</td><td>Aposta no último dígito (ÍMPAR/PAR)</td><td>10 ticks</td><td>Iniciantes</td></tr>
-      <tr><td>🔗 Híbrido</td><td>Só ativa quando Ativos + Dígitos convergem</td><td>5 ticks</td><td>Conservadores</td></tr>
+      <tr><th>Modo</th><th>Contrato</th><th>Ideal</th></tr>
+      <tr><td>📈 Ativos</td><td>CALL/PUT 5 ticks</td><td>Análise técnica</td></tr>
+      <tr><td>🎲 Dígitos</td><td>ÍMPAR/PAR 10 ticks</td><td>Iniciantes</td></tr>
+      <tr><td>🔗 Híbrido</td><td>Ativos + Dígitos</td><td>Conservadores</td></tr>
     </table>
-    <p>💡 <strong>Para iniciantes:</strong> começa pelos Dígitos — mais simples e rápidos.</p>
-
-    <h3>3. Entender os Indicadores</h3>
+    <h3>Regras de Ouro</h3>
+    <p>🔴 Só opera quando BUY/SELL. Botões cinzentos = protecção (<strong>confiança &lt; 55%</strong>).</p>
+    <p>✅ Entrar: sinal ativo, 2+ indicadores alinhados. Nos dígitos: 4+ repetições → apostar oposto.</p>
+    <p>❌ Não entrar: NEUTRO, botões cinzentos, entropia elevada, 2 perdas seguidas.</p>
+    <h3>Gestão de Valor</h3>
     <table>
-      <tr><th>Indicador</th><th>Significado</th></tr>
-      <tr><td>RSI &lt; 35</td><td>Preço baixo — possível subida</td></tr>
-      <tr><td>RSI &gt; 65</td><td>Preço alto — possível queda</td></tr>
-      <tr><td>RSI 35-65</td><td>Neutro — esperar</td></tr>
-      <tr><td>MACD "COMPRA"</td><td>Momentum a subir</td></tr>
-      <tr><td>MACD "VENDA"</td><td>Momentum a descer</td></tr>
-      <tr><td>TREND "ALTA"</td><td>Tendência de subida</td></tr>
-      <tr><td>TREND "BAIXA"</td><td>Tendência de descida</td></tr>
-      <tr><td>BB "sobrecomprado"</td><td>Preço esticado para cima</td></tr>
-      <tr><td>BB "sobrevendido"</td><td>Preço esticado para baixo</td></tr>
-    </table>
-
-    <h3>4. O Sinal e a Confiança</h3>
-    <table>
-      <tr><th>Sinal</th><th>Significado</th><th>Ação</th></tr>
-      <tr><td>BUY</td><td>Maioria aponta para subida</td><td>Comprar (CALL)</td></tr>
-      <tr><td>SELL</td><td>Maioria aponta para descida</td><td>Vender (PUT)</td></tr>
-      <tr><td>NEUTRO</td><td>Sinais contraditórios</td><td>Não operar</td></tr>
-    </table>
-    <p>🔴 <strong>Regra de ouro:</strong> só opera quando o sinal está BUY ou SELL. Botões cinzentos = protecção (confiança &lt; 60%).</p>
-
-    <h3>5. Quando Entrar e Quando Ficar de Fora</h3>
-    <p><strong>✅ Entrar quando:</strong> Sinal BUY/SELL activo, 2+ indicadores alinhados, nos dígitos após 4+ repetições apostar no oposto e ter pelo menos 2 padrões concordantes.</p>
-    <p><strong>❌ Não entrar quando:</strong> Sinal NEUTRO, botões cinzentos, entropia elevada (ver no dashboard), 2 perdas seguidas (pausa 15 min), cansado ou ansioso.</p>
-
-    <h3>6. Gestão do Valor Operado</h3>
-    <table>
-      <tr><th>Saldo</th><th>Valor máximo</th></tr>
       <tr><td>$20</td><td>$0.40</td></tr>
+      <tr><td>$35</td><td>$0.70</td></tr>
       <tr><td>$50</td><td>$1.00</td></tr>
       <tr><td>$100</td><td>$2.00</td></tr>
       <tr><td>$500</td><td>$10.00</td></tr>
       <tr><td>$1000</td><td>$20.00</td></tr>
     </table>
     <p>💵 Começa em <strong>$0.35</strong>. Meta diária: <strong>10% da banca</strong>.</p>
-
-    <h3>7. Martingale — Usar com Cabeça</h3>
-    <p>Perdeste $0.35 → ✕ MULTIPLICAR → $0.70 → Se ganhar: RESET → $0.35. Se perder de novo: RESET e recomeça.</p>
-    <p>🛑 <strong>Nunca mais de 1 nível.</strong> 3 perdas seguidas: $0.35 → $1.40 → $5.60 — destrói contas.</p>
-    <p>✏️ Agora o Martingale multiplica o valor que está no editor, não apenas $0.35. Pode ajustar manualmente antes de clicar.</p>
-
-    <h3>8. Stop-Loss — A Tua Protecção</h3>
-    <p><strong>Limite diário de 5%:</strong> ao atingir, a plataforma bloqueia novos trades até ao dia seguinte. Se aparecer "🛑 Stop-loss activo": <strong>PARA TUDO</strong>. Não é erro — é protecção.</p>
-
-    <h3>9. Análise de Dígitos (Actualizado)</h3>
-    <p>🟢 Verde = ÍMPAR | 🔴 Vermelho = PAR. Agora o sistema exige <strong>dois padrões concordantes</strong> para emitir sinal. Aguarde ticks_remaining entre 5-8. Se aparecer "ALEATÓRIO" ou "IMPREVISÍVEL", não opere.</p>
-
-    <h3>10. Rotina Diária</h3>
-    <table>
-      <tr><th>Hora</th><th>Ação</th></tr>
-      <tr><td>Manhã</td><td>Conectar, verificar saldo, 1-2 trades máx.</td></tr>
-      <tr><td>Meio do dia</td><td>Rever win rate. Se positivo, continuar.</td></tr>
-      <tr><td>Final do dia</td><td>Meta 10% atingida: PARAR. Stop-loss ativado: DESCANSAR.</td></tr>
-      <tr><td>Fim de semana</td><td>Rever histórico, ajustar estratégia.</td></tr>
-    </table>
-
-    <h3>11. Sinais Contraditórios</h3>
-    <p>Indicadores dizem VENDA mas sinal diz BUY? A plataforma combina técnicos + dígitos, e os dígitos têm peso maior (0.7). <strong>Confia no sinal da plataforma</strong> — os dígitos são mais recentes. Na dúvida, não entres.</p>
-
-    <h3>12. Erros Comuns</h3>
-    <table>
-      <tr><th>❌ Erro</th><th>✅ Correto</th></tr>
-      <tr><td>Valores altos para recuperar</td><td>Manter $0.35 e ser consistente</td></tr>
-      <tr><td>Ignorar stop-loss</td><td>Parar quando bloqueia</td></tr>
-      <tr><td>Muitos trades seguidos</td><td>Máx. 5-10/dia</td></tr>
-      <tr><td>Operar cansado</td><td>Só concentrado</td></tr>
-      <tr><td>Multiplicar martingale em cascata</td><td>Máx. 1 nível</td></tr>
-    </table>
-
-    <h3>13. Depósitos e Saques</h3>
-    <p>💳 <strong>Depositar:</strong> via AirTM → <a href="/go/airtm" target="_blank">AirTM (link seguro)</a></p>
-    <p>🏧 <strong>Sacar:</strong> na Deriv → <a href="https://app.deriv.com/cashier/withdrawal" target="_blank">app.deriv.com/cashier/withdrawal</a></p>
-
-    <h3>14. Controlo Emocional</h3>
-    <p style="color:var(--accent);font-weight:bold">Aqui ganhas usando a tua sabedoria. Perdes quando colocas a ambição e a ganância acima de tudo.</p>
-    <p>O controlo emocional deve estar sempre sob o teu domínio. A plataforma não é 100% assertiva — o mercado é volátil. Haverá dias verdes e dias vermelhos. Assim é o mercado.</p>
-    <p>A Foloma Visão 360 é uma ferramenta para criares a tua fortuna com conhecimento, sabedoria e metas tranquilas.</p>
-
-    <h3>⚠️ Aviso de Responsabilidade</h3>
-    <p style="color:var(--danger)">A Foloma Visão 360 recomenda buscar 10% da banca por dia, no máximo. Acima disto, a plataforma não se responsabiliza por perdas. Saldo mínimo recomendado: $20. Trades de $0.35 a $0.70.</p>
-
-    <h3>📞 Links Úteis</h3>
-    <table>
-      <tr><td>Plataforma</td><td><a href="https://visao360-jf.onrender.com/?ref=64457052" target="_blank">visao360-jf.onrender.com</a></td></tr>
-      <tr><td>Criar conta Deriv</td><td><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank">track.deriv.com/.../1/</a></td></tr>
-      <tr><td>Depositar (AirTM)</td><td><a href="/go/airtm" target="_blank">/go/airtm</a></td></tr>
-      <tr><td>Sacar (Deriv)</td><td><a href="https://app.deriv.com/cashier/withdrawal" target="_blank">app.deriv.com/cashier/withdrawal</a></td></tr>
-      <tr><td>Token API Deriv</td><td><a href="https://app.deriv.com/account/api-token" target="_blank">app.deriv.com/account/api-token</a></td></tr>
-    </table>
-
-    <p style="text-align:center;margin-top:16px;font-weight:bold;color:var(--accent)">📋 Resumo em 3 Regras</p>
-    <table>
-      <tr><td>1</td><td>Gestão de capital é mais importante que qualquer sinal</td></tr>
-      <tr><td>2</td><td>Na dúvida, não entres</td></tr>
-      <tr><td>3</td><td>O objectivo é consistência, não riqueza rápida</td></tr>
-    </table>
+    <h3>Martingale</h3>
+    <p>Perda $0.35 → ✕ → $0.70. Ganhou: RESET. Máx. <strong>1 nível</strong>.</p>
+    <h3>Stop‑Loss</h3>
+    <p>Limite diário: <strong>5%</strong>. "🛑 Stop‑loss" = PARAR TUDO até amanhã.</p>
+    <h3>Dígitos</h3>
+    <p>🟢 ÍMPAR | 🔴 PAR. Exige <strong>2 padrões concordantes</strong>. "ALEATÓRIO" = não opere.</p>
+    <h3>Erros Fatais</h3>
+    <p>❌ Valores altos para recuperar → ✅ $0.35 consistente</p>
+    <p>❌ Ignorar stop‑loss → ✅ Parar quando bloqueia</p>
+    <p>❌ Martingale em cascata → ✅ Máx. 1 nível</p>
+    <p>❌ Operar cansado → ✅ Só concentrado</p>
+    <p style="color:var(--accent);font-weight:bold;margin-top:8px">O objetivo é consistência, não riqueza rápida.</p>
   </div>
 </div>
 
 <div class="container" id="mainContent" style="display:none">
+  <!-- DASHBOARD -->
   <div id="dashboard-section">
+    <!-- STATUS + CONEXÃO -->
     <div class="card">
-      <div class="card-title">📡 STATUS</div>
-      <div class="status">
-        <div><span class="dot" id="sDot"></span> <span id="connStatus">Desconectado</span></div>
-        <div class="balance"><span id="bal">0.00</span> <span id="cur">USD</span></div>
+      <div class="card-title">📡 STATUS <span class="balance"><span id="bal">0.00</span> <span id="cur">USD</span></span></div>
+      <div class="status" style="margin-bottom:6px">
+        <div style="font-size:11px"><span class="dot" id="sDot"></span> <span id="connStatus">Desconectado</span></div>
+        <div>
+          <button class="bmr" style="font-size:10px;padding:4px 8px" id="connectOAuthBtn" onclick="connectWithDeriv()">🔗 Deriv</button>
+          <button class="bmr" style="font-size:10px;padding:4px 8px" id="connectTokenBtn" onclick="conectar()">🔌 Token</button>
+        </div>
       </div>
-      <button class="btn-buy" style="width:100%;margin-top:12px" id="connectOAuthBtn" onclick="connectWithDeriv()">🔗 Conectar com Deriv</button>
-      <button class="btn-sell" style="width:100%;margin-top:8px" id="connectTokenBtn" onclick="conectar()">🔌 CONECTAR (token manual)</button>
-      <div id="conSt" style="text-align:center;font-size:11px;color:#ffaa00;margin-top:6px"></div>
+      <div id="conSt" style="text-align:center;font-size:10px;color:#ffaa00"></div>
     </div>
-    
+
+    <!-- MODO + SÍMBOLO + GRÁFICO (tudo junto) -->
     <div class="card">
       <div class="card-title">🎮 MODO</div>
       <div class="mode-sel">
@@ -303,254 +211,180 @@
         <button id="modeDigitos" class="mode-btn" onclick="setModo('digitos')">🎲 DÍGITOS</button>
         <button id="modeHybrid" class="mode-btn" onclick="setModo('hybrid')">🔗 HÍBRIDO</button>
       </div>
-    </div>
-    
-    <div id="pAtivos">
-      <div class="card"><div class="card-title">SÍMBOLO</div><div class="sym-row" id="symSel"></div></div>
-      <div class="card">
-        <div class="price-box"><div class="price" id="priceEl">0.0000</div><div class="signal buy" id="sigBadge">NEUTRAL</div></div>
-        <div id="confEl" style="font-size:11px;color:var(--muted);text-align:center;margin-top:4px"></div>
-        
-        <!-- NOVO: Barras de confiança separadas -->
+
+      <!-- Símbolos + Preço -->
+      <div id="pAtivos">
+        <div class="sym-row" id="symSel" style="margin-bottom:6px"></div>
+        <div class="price-box">
+          <div class="price" id="priceEl">0.0000</div>
+          <div class="signal buy" id="sigBadge">NEUTRAL</div>
+        </div>
+        <div id="confEl" style="font-size:10px;color:var(--muted);text-align:center"></div>
         <div class="conf-bar-container" id="confBars" style="display:none">
-          <div class="conf-bar conf-tech">
-            <div class="conf-bar-label">Técnico</div>
-            <div class="conf-bar-value" id="techConfVal">0%</div>
-            <div class="conf-bar-fill" id="techConfFill" style="width:0%"></div>
-          </div>
-          <div class="conf-bar conf-digit">
-            <div class="conf-bar-label">Dígitos</div>
-            <div class="conf-bar-value" id="digitConfVal">0%</div>
-            <div class="conf-bar-fill" id="digitConfFill" style="width:0%"></div>
-          </div>
-          <div class="conf-bar conf-final">
-            <div class="conf-bar-label">Final</div>
-            <div class="conf-bar-value" id="finalConfVal">0%</div>
-            <div class="conf-bar-fill" id="finalConfFill" style="width:0%"></div>
-          </div>
+          <div class="conf-bar conf-tech"><div class="conf-bar-label">Técnico</div><div class="conf-bar-value" id="techConfVal">0%</div><div class="conf-bar-fill" id="techConfFill" style="width:0%"></div></div>
+          <div class="conf-bar conf-digit"><div class="conf-bar-label">Dígitos</div><div class="conf-bar-value" id="digitConfVal">0%</div><div class="conf-bar-fill" id="digitConfFill" style="width:0%"></div></div>
+          <div class="conf-bar conf-final"><div class="conf-bar-label">Final</div><div class="conf-bar-value" id="finalConfVal">0%</div><div class="conf-bar-fill" id="finalConfFill" style="width:0%"></div></div>
         </div>
-        
-        <div id="priceChart" style="width:100%;height:160px;margin-top:8px;border-radius:8px;overflow:hidden;"></div>
-        <div style="display:flex;gap:6px;margin-top:6px;">
-          <button class="tf-btn active" data-tf="60">1 min</button>
-          <button class="tf-btn" data-tf="300">5 min</button>
-          <button class="tf-btn" data-tf="900">15 min</button>
-          <button class="tf-btn" data-tf="3600">1 h</button>
+        <div id="priceChart" style="width:100%;height:120px;margin-top:6px;border-radius:6px;overflow:hidden;"></div>
+        <div style="display:flex;gap:4px;margin-top:4px;">
+          <button class="tf-btn active" data-tf="60">1m</button>
+          <button class="tf-btn" data-tf="300">5m</button>
+          <button class="tf-btn" data-tf="900">15m</button>
+          <button class="tf-btn" data-tf="3600">1h</button>
         </div>
-        <div class="indicators" style="margin-top:12px">
+        <div class="indicators" style="margin-top:6px">
           <div class="ind"><span class="label">RSI</span><span class="value" id="rsS">-</span></div>
           <div class="ind"><span class="label">MACD</span><span class="value" id="mcS">-</span></div>
           <div class="ind"><span class="label">TREND</span><span class="value" id="trS">-</span></div>
           <div class="ind"><span class="label">BB</span><span class="value" id="bbS">-</span></div>
         </div>
       </div>
-    </div>
-    
-    <div id="pDigitos" class="hidden">
-      <div class="card">
-        <div class="card-title">🎲 DÍGITOS</div>
+
+      <!-- Dígitos -->
+      <div id="pDigitos" class="hidden">
         <div class="dig-main">
           <div class="tbar-wrap"><div class="tbar" id="tBar" style="width:100%"></div></div>
           <div class="big-d wait" id="bigD">—</div>
           <div class="big-p wait" id="bigP">AGUARDANDO</div>
-          <div id="cdown" style="color:#ffaa00;font-size:14px;margin-top:8px">⏱ 10 ticks</div>
+          <div id="cdown" style="color:#ffaa00;font-size:12px;margin-top:4px">⏱ 10 ticks</div>
         </div>
-        <div id="seqInfo" style="font-size:12px;color:var(--muted);text-align:center;margin-top:6px"></div>
-        <div id="entropyInfo" style="font-size:12px;color:var(--muted);text-align:center;margin-top:2px"></div>
+        <div id="seqInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
+        <div id="entropyInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
         <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
-        <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" style="margin-top:8px">
+        <div class="trade-row" style="margin-top:6px">
+          <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100">
+          <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')" style="padding:10px 14px">ÍMPAR</button>
+          <button class="btn-sell" id="btnEven" onclick="tradeDigit('even')" style="padding:10px 14px">PAR</button>
+        </div>
+        <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
         <div class="ms">
-          <div>Martingale: <span id="mgtActDig">INATIVO</span></div>
-          <div>Próximo: <span id="mgtNxtDig">$0.35</span></div>
+          Martingale: <span id="mgtActDig">INATIVO</span> | Próx: <span id="mgtNxtDig">$0.35</span>
+          <div class="inline-actions">
+            <button class="bm" onclick="mgtMultiply('amtDigit')">✕</button>
+            <button class="bmr" onclick="mgtDivide('amtDigit')">÷</button>
+            <button class="bmr" onclick="rstMgt()">⟲</button>
+          </div>
         </div>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <button class="bm" onclick="mgtMultiply('amtDigit')">✕ MULTIPLICAR</button>
-          <button class="bmr" onclick="mgtDivide('amtDigit')">− DIVIDIR</button>
-          <button class="bmr" onclick="rstMgt()">RESET</button>
-        </div>
-        <div class="dbet" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-          <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')">ÍMPAR</button>
-          <button class="btn-sell" id="btnEven" onclick="tradeDigit('even')">PAR</button>
-        </div>
-        <div id="digitBlockerMsg" style="color:#ffaa00;font-size:12px;text-align:center;margin-top:6px"></div>
       </div>
     </div>
-    
+
+    <!-- TRADE (compacto, logo abaixo do gráfico) -->
     <div class="card" id="pTrade">
-      <div class="card-title">EXECUTAR TRADE</div>
-      <input type="number" id="amt" value="0.35" step="0.01" min="0.35" max="100">
-      <div class="trade-actions" style="margin-top:8px">
+      <div class="trade-row">
+        <input type="number" id="amt" value="0.35" step="0.01" min="0.35" max="100">
         <button class="btn-buy" onclick="trade('BUY')">COMPRAR</button>
         <button class="btn-sell" onclick="trade('SELL')">VENDER</button>
       </div>
-      <button id="btnHybrid" class="btn-buy hidden" style="width:100%;margin-top:8px" onclick="trade('BUY')">🔗 EXECUTAR HÍBRIDO</button>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="bm" onclick="mgtMultiply('amt')">✕ MULTIPLICAR</button>
-        <button class="bmr" onclick="mgtDivide('amt')">− DIVIDIR</button>
-        <button class="bmr" onclick="rstMgt()">RESET</button>
+      <button id="btnHybrid" class="btn-buy hidden" style="width:100%;margin-top:6px" onclick="trade('BUY')">🔗 HÍBRIDO</button>
+      <div class="inline-actions">
+        <button class="bm" onclick="mgtMultiply('amt')">✕ MULT</button>
+        <button class="bmr" onclick="mgtDivide('amt')">÷ DIV</button>
+        <button class="bmr" onclick="rstMgt()">⟲ RESET</button>
       </div>
-      <div class="ms"><div>Martingale: <span id="mgtAct">INATIVO</span></div><div>Próximo: <span id="mgtNxt">$0.35</span></div></div>
+      <div class="ms">Martingale: <span id="mgtAct">INATIVO</span> | Próx: <span id="mgtNxt">$0.35</span></div>
     </div>
-    
+
+    <!-- Alerta Híbrido -->
     <div id="hybridAlert" class="card hidden" style="background:#ffaa0010; border-color:#ffaa00">
       <div class="card-title">🔔 SINAL HÍBRIDO</div>
-      <div id="hybridMsg" style="font-weight:bold; text-align:center">Aguardando convergência...</div>
+      <div id="hybridMsg" style="font-weight:bold; text-align:center;font-size:12px">Aguardando convergência...</div>
     </div>
-    
+
+    <!-- Histórico -->
     <div class="card">
-      <div class="card-title">
-        📋 HISTÓRICO
-        <div>
-          <button class="bmr" style="font-size:11px;padding:4px 8px;margin-right:4px" onclick="loadHistory()">🔄</button>
-          <button class="bmr" style="font-size:11px;padding:4px 8px;color:var(--danger)" onclick="clearHistory()">🗑️</button>
-        </div>
-      </div>
-      <div id="histSummary" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px"></div>
-      <div id="histList" style="max-height:300px;overflow-y:auto"></div>
+      <div class="card-title">📋 HISTÓRICO <div><button class="bmr" style="font-size:10px;padding:3px 6px;margin-right:3px" onclick="loadHistory()">🔄</button><button class="bmr" style="font-size:10px;padding:3px 6px;color:var(--danger)" onclick="clearHistory()">🗑️</button></div></div>
+      <div id="histSummary" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px"></div>
+      <div id="histList" style="max-height:250px;overflow-y:auto"></div>
     </div>
   </div>
-  
+
+  <!-- OUTRAS SECÇÕES (inalteradas, apenas compactadas) -->
   <div id="affiliate-section" class="hidden">
     <div class="card">
       <div class="card-title">🔗 SEU LINK</div>
-      <div class="lc"><input type="text" id="refLink" readonly><button class="bmr" onclick="cpLink()">📋 COPIAR</button></div>
+      <div class="lc"><input type="text" id="refLink" readonly><button class="bmr" onclick="cpLink()">📋</button></div>
       <div id="affiliateEarnings"></div>
     </div>
   </div>
-  
   <div id="history-section" class="hidden">
     <div class="card">
       <div class="card-title">📊 RESUMO</div>
-      <div id="histSummary2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px"></div>
+      <div id="histSummary2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px"></div>
       <div class="card-title">📋 OPERAÇÕES</div>
       <div id="histList2"></div>
     </div>
   </div>
-  
   <div id="payment-section" class="hidden">
     <div class="card">
       <div class="card-title">💰 DEPÓSITO</div>
-      <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
-        Deposita fundos via AirTM e transfere para a tua conta Deriv.
-      </p>
-      <a href="/go/airtm" target="_blank" class="btn-buy"
-         style="display:block;width:100%;text-align:center;padding:14px;border-radius:12px;text-decoration:none;font-weight:700;color:#000">
-        💳 Depositar via AirTM
-      </a>
+      <a href="/go/airtm" target="_blank" class="btn-buy" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#000">💳 Depositar via AirTM</a>
     </div>
     <div class="card">
       <div class="card-title">🏦 SAQUE</div>
-      <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
-        Levanta os teus fundos directamente na plataforma Deriv.
-      </p>
-      <a href="https://app.deriv.com/cashier/withdrawal" target="_blank" class="btn-sell"
-         style="display:block;width:100%;text-align:center;padding:14px;border-radius:12px;text-decoration:none;font-weight:700;color:#fff">
-        🏧 Sacar via Deriv
-      </a>
+      <a href="https://app.deriv.com/cashier/withdrawal" target="_blank" class="btn-sell" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#fff">🏧 Sacar via Deriv</a>
     </div>
   </div>
-  
   <div id="settings-section" class="hidden">
     <div class="card">
       <div class="card-title">🚀 CRIAR CONTA DERIV</div>
-      <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
-        Ainda não tens conta na Deriv? Cria aqui e começa a operar.
-      </p>
-      <a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" 
-         class="btn-buy"
-         style="display:block;width:100%;text-align:center;
-                padding:14px;border-radius:12px;
-                text-decoration:none;font-weight:700;color:#000">
-        🚀 Criar Conta Deriv
-      </a>
-      <p style="color:var(--muted);font-size:11px;
-                margin-top:8px;text-align:center">
-        Após criar a conta, volta aqui e conecta o token.
-      </p>
+      <a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" class="btn-buy" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#000">🚀 Criar Conta</a>
     </div>
-    
     <div class="card">
       <div class="card-title">🔐 TOKEN DERIV</div>
-      <a href="https://app.deriv.com/account/api-token" target="_blank" style="color:var(--accent);font-size:12px;display:block;margin-bottom:8px">
-        👉 Clica aqui para criar o token na Deriv
-      </a>
-      <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
-        Cria um token com permissões <strong>Read + Trade + Trading Information</strong> e cola abaixo.
-      </p>
-      <input type="password" id="tokIn" placeholder="Cole o token aqui">
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="bmr" style="flex:1" onclick="saveTokAcct('demo')">💾 GUARDAR DEMO</button>
-        <button class="bmr" style="flex:1" onclick="saveTokAcct('real')">💾 GUARDAR REAL</button>
+      <input type="password" id="tokIn" placeholder="Cole o token">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="bmr" style="flex:1" onclick="saveTokAcct('demo')">💾 DEMO</button>
+        <button class="bmr" style="flex:1" onclick="saveTokAcct('real')">💾 REAL</button>
       </div>
-      
-      <!-- NOVO: Display de tokens guardados -->
       <div class="token-display" id="tokenDisplay" style="display:none">
-        <div class="token-row">
-          <span><span class="token-dot" id="dotDemo"></span> Token Demo</span>
-          <span id="statusDemo" style="color:var(--muted)">Não guardado</span>
-        </div>
-        <div class="token-row">
-          <span><span class="token-dot" id="dotReal"></span> Token Real</span>
-          <span id="statusReal" style="color:var(--muted)">Não guardado</span>
-        </div>
-        <div class="token-row" style="margin-top:4px;padding-top:8px;border-top:1px solid var(--border)">
-          <span style="color:var(--accent);font-weight:600">Conta Activa:</span>
-          <span id="activeAccountDisplay" style="color:var(--accent);font-weight:700">DEMO</span>
-        </div>
+        <div class="token-row"><span><span class="token-dot" id="dotDemo"></span> Demo</span><span id="statusDemo" style="color:var(--muted)">---</span></div>
+        <div class="token-row"><span><span class="token-dot" id="dotReal"></span> Real</span><span id="statusReal" style="color:var(--muted)">---</span></div>
+        <div class="token-row"><span style="color:var(--accent);font-weight:600">Activa:</span><span id="activeAccountDisplay" style="color:var(--accent);font-weight:700">DEMO</span></div>
       </div>
-      
-      <div id="tokenStatusDemo" class="token-status" style="display:none">✅ Token Demo guardado</div>
-      <div id="tokenStatusReal" class="token-status" style="display:none">✅ Token Real guardado</div>
     </div>
-    
     <div class="card">
-      <div class="card-title">📖 GUIA DE UTILIZAÇÃO</div>
-      <p style="color:var(--muted);font-size:12px;margin-bottom:12px">
-        Aprende a usar a plataforma, interpretar sinais, gerir risco e muito mais.
-      </p>
-      <button class="btn-buy" style="width:100%" onclick="openGuide()">
-        📖 Ver Guia Completo
-      </button>
+      <div class="card-title">📖 GUIA</div>
+      <button class="btn-buy" style="width:100%" onclick="openGuide()">📖 Ver Guia</button>
     </div>
   </div>
-  
   <div id="admin-section" class="hidden">
     <div class="card">
-      <div class="card-title">👑 ADMINISTRAÇÃO</div>
-      <div id="adminUserList" style="margin-top:8px"></div>
-      <button class="btn-buy" style="width:100%;margin-top:12px;font-size:13px" onclick="loadAdminUsers()">🔄 Actualizar</button>
+      <div class="card-title">👑 ADMIN</div>
+      <div id="adminUserList"></div>
+      <button class="bmr" style="width:100%;margin-top:8px" onclick="loadAdminUsers()">🔄 Actualizar</button>
     </div>
     <div class="card">
-      <div class="card-title">💸 COMISSÃO DE AFILIADO (%)</div>
+      <div class="card-title">💸 COMISSÃO (%)</div>
       <input type="number" id="markupInput" value="0.5" step="0.1" min="0" max="3">
-      <button class="btn-buy" style="width:100%;margin-top:8px" onclick="saveMarkup()">GUARDAR</button>
-      <div id="markupMsg" style="text-align:center;margin-top:6px;font-size:12px"></div>
+      <button class="btn-buy" style="width:100%;margin-top:6px" onclick="saveMarkup()">GUARDAR</button>
+      <div id="markupMsg" style="text-align:center;margin-top:4px;font-size:11px"></div>
     </div>
   </div>
 </div>
 
+<!-- MODAL AUTENTICAÇÃO -->
 <div id="authModal" class="modal" onclick="if(event.target===this)closeAuthModal()">
   <div class="mbox" onclick="event.stopPropagation()">
-    <h2 style="color:var(--accent);text-align:center;margin-bottom:16px">FOLOMA VISÃO 360</h2>
-    <div style="display:flex;gap:8px;margin-bottom:16px">
+    <h2 style="color:var(--accent);text-align:center;margin-bottom:12px">FOLOMA VISÃO 360</h2>
+    <div style="display:flex;gap:6px;margin-bottom:12px">
       <button class="bmr" style="flex:1" onclick="showTab('login')">ENTRAR</button>
       <button class="bmr" style="flex:1" onclick="showTab('register')">REGISTAR</button>
       <button class="bmr" style="flex:1" onclick="showTab('forgot')">RECUPERAR</button>
     </div>
     <div id="loginForm">
-      <input type="email" id="lEmail" placeholder="Email"><input type="password" id="lPass" placeholder="Senha">
-      <button class="btn-buy" onclick="doLogin()">ENTRAR</button>
+      <input type="email" id="lEmail" placeholder="Email"><input type="password" id="lPass" placeholder="Senha" style="margin-top:6px">
+      <button class="btn-buy" onclick="doLogin()" style="margin-top:6px">ENTRAR</button>
     </div>
     <div id="registerForm" style="display:none">
-      <input type="text" id="rName" placeholder="Nome"><input type="email" id="rEmail" placeholder="Email">
-      <input type="password" id="rPass" placeholder="Senha (min 6)"><input type="text" id="rRef" placeholder="Código de indicação">
-      <button class="btn-buy" onclick="doRegister()">CRIAR CONTA</button>
+      <input type="text" id="rName" placeholder="Nome"><input type="email" id="rEmail" placeholder="Email" style="margin-top:6px">
+      <input type="password" id="rPass" placeholder="Senha (min 6)" style="margin-top:6px"><input type="text" id="rRef" placeholder="Código de indicação" style="margin-top:6px">
+      <button class="btn-buy" onclick="doRegister()" style="margin-top:6px">CRIAR CONTA</button>
     </div>
     <div id="forgotForm" style="display:none">
-      <input type="email" id="fEmail" placeholder="Email"><button class="btn-buy" onclick="doReset()">ENVIAR LINK</button>
-      <div id="fMsg" style="text-align:center;margin-top:8px;font-size:12px"></div>
+      <input type="email" id="fEmail" placeholder="Email"><button class="btn-buy" onclick="doReset()" style="margin-top:6px">ENVIAR LINK</button>
+      <div id="fMsg" style="text-align:center;margin-top:6px;font-size:11px"></div>
     </div>
-    <div id="authErr" style="text-align:center;margin-top:8px;color:var(--danger);font-size:12px"></div>
+    <div id="authErr" style="text-align:center;margin-top:6px;color:var(--danger);font-size:11px"></div>
   </div>
 </div>
 
@@ -572,35 +406,23 @@ let candleChart = null;
 let candleSeries = null;
 let resizeObserver = null;
 
-function toast(msg,type='info',ms=4000){
+function toast(msg,type='info',ms=3500){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
   clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',ms);
 }
 
 function playBeep() {
   const audio = document.getElementById('hybridSound');
-  if(audio) {
-    audio.currentTime = 0;
-    audio.play().catch(()=>{});
-  }
+  if(audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
 }
 
-function openGuide() {
-  document.getElementById('guideModal').style.display='flex';
-  document.body.classList.add('modal-open');
-}
-function closeGuide() {
-  document.getElementById('guideModal').style.display='none';
-  document.body.classList.remove('modal-open');
-}
-function closeAuthModal() {
-  document.getElementById('authModal').style.display='none';
-  document.body.classList.remove('modal-open');
-}
+function openGuide() { document.getElementById('guideModal').style.display='flex'; document.body.classList.add('modal-open'); }
+function closeGuide() { document.getElementById('guideModal').style.display='none'; document.body.classList.remove('modal-open'); }
+function closeAuthModal() { document.getElementById('authModal').style.display='none'; document.body.classList.remove('modal-open'); }
 
 function initSyms(){
   let h='';
-  for(const[k,v]of Object.entries(syms))h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}', this)">${v}</button>`;
+  for(const[k,v] of Object.entries(syms)) h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}', this)">${v}</button>`;
   document.getElementById('symSel').innerHTML=h;
 }
 function chgSym(s, el){
@@ -610,7 +432,6 @@ function chgSym(s, el){
   el.classList.add('active');
 }
 
-// Timeframe
 document.addEventListener('click', (e) => {
   if (e.target.classList.contains('tf-btn')) {
     document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));
@@ -620,29 +441,16 @@ document.addEventListener('click', (e) => {
   }
 });
 
-function startPolling(){
-  if(_updateInterval) return;
-  scheduleNextPoll();
-}
-function stopPolling() {
-  if (_updateInterval) {
-    clearTimeout(_updateInterval);
-    _updateInterval = null;
-  }
-}
+function startPolling(){ if(_updateInterval) return; scheduleNextPoll(); }
+function stopPolling() { if (_updateInterval) { clearTimeout(_updateInterval); _updateInterval = null; } }
 function scheduleNextPoll() {
   const delay = isConnected ? 1500 : 5000;
-  _updateInterval = setTimeout(() => {
-    updateAll();
-    scheduleNextPoll();
-  }, delay);
+  _updateInterval = setTimeout(() => { updateAll(); scheduleNextPoll(); }, delay);
 }
 
-// NOVO: Atualizar barras de confiança
 function updateConfBars(techConf, digitConf, finalConf) {
   const container = document.getElementById('confBars');
   if (!container) return;
-  
   if (modo === 'ativos' || (modo === 'hybrid' && techConf > 0)) {
     container.style.display = 'flex';
     document.getElementById('techConfVal').textContent = techConf.toFixed(0) + '%';
@@ -651,92 +459,52 @@ function updateConfBars(techConf, digitConf, finalConf) {
     document.getElementById('digitConfFill').style.width = Math.min(digitConf, 100) + '%';
     document.getElementById('finalConfVal').textContent = finalConf.toFixed(0) + '%';
     document.getElementById('finalConfFill').style.width = Math.min(finalConf, 100) + '%';
-  } else {
-    container.style.display = 'none';
-  }
+  } else { container.style.display = 'none'; }
 }
 
 function checkHybridAlert(signalBot, digitRecommendation, confidenceBot, confidenceDigit) {
-    if (modo !== 'hybrid') return;
-    const alertDiv = document.getElementById('hybridAlert');
-    const msgDiv = document.getElementById('hybridMsg');
-    if (!signalBot || !digitRecommendation) {
-        alertDiv.classList.add('hidden');
-        return;
-    }
-    const convergente = (signalBot === digitRecommendation);
-    if (convergente) {
-        alertDiv.classList.remove('hidden');
-        const actionText = signalBot === 'BUY' ? 'COMPRA 🔼' : 'VENDA 🔽';
-        const conf = Math.min(confidenceBot || 0, confidenceDigit || 0);
-        msgDiv.innerHTML = `✅ CONVERGENTE: ${actionText} com ${conf.toFixed(1)}% confiança combinada`;
-        msgDiv.style.color = 'var(--accent)';
-        if (lastHybridState !== true) {
-            playBeep();
-            toast(`🔊 SINAL HÍBRIDO! ${actionText} com ${conf.toFixed(0)}%`, 'win', 5000);
-        }
-        lastHybridState = true;
-    } else {
-        lastHybridState = false;
-        alertDiv.classList.add('hidden');
-    }
+  if (modo !== 'hybrid') return;
+  const alertDiv = document.getElementById('hybridAlert');
+  const msgDiv = document.getElementById('hybridMsg');
+  if (!signalBot || !digitRecommendation) { alertDiv.classList.add('hidden'); return; }
+  if (signalBot === digitRecommendation) {
+    alertDiv.classList.remove('hidden');
+    const actionText = signalBot === 'BUY' ? 'COMPRA 🔼' : 'VENDA 🔽';
+    const conf = Math.min(confidenceBot || 0, confidenceDigit || 0);
+    msgDiv.innerHTML = `✅ CONVERGENTE: ${actionText} com ${conf.toFixed(1)}% confiança`;
+    msgDiv.style.color = 'var(--accent)';
+    if (lastHybridState !== true) { playBeep(); toast(`🔊 SINAL HÍBRIDO! ${actionText}`, 'win', 4000); }
+    lastHybridState = true;
+  } else { lastHybridState = false; alertDiv.classList.add('hidden'); }
 }
 
 function updateHistSummary(bot) {
-  const s = bot.stats;
-  const d = bot.daily_stats;
+  const s = bot.stats; const d = bot.daily_stats;
   const sum = document.getElementById('histSummary');
   if (!sum || !s) return;
   const profitLoss = s.profit_loss || 0;
   const cor = profitLoss >= 0 ? 'var(--accent)' : 'var(--danger)';
-  const sinal = profitLoss >= 0 ? '+' : '';
   sum.innerHTML = `
-    <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-      <div style="font-size:10px;color:var(--muted)">TOTAL TRADES</div>
-      <div style="font-size:20px;font-weight:bold">${s.total || 0}</div>
-    </div>
-    <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-      <div style="font-size:10px;color:var(--muted)">WIN RATE</div>
-      <div style="font-size:20px;font-weight:bold;color:var(--accent)">${s.win_rate || 0}%</div>
-    </div>
-    <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-      <div style="font-size:10px;color:var(--muted)">LUCRO/PERDA</div>
-      <div style="font-size:20px;font-weight:bold;color:${cor}">
-        ${sinal}$${Math.abs(profitLoss).toFixed(2)}
-      </div>
-    </div>
-    <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-      <div style="font-size:10px;color:var(--muted)">HOJE</div>
-      <div style="font-size:20px;font-weight:bold">${d ? d.trades : 0}</div>
-    </div>`;
+    <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${s.total||0}</div></div>
+    <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WIN RATE</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${s.win_rate||0}%</div></div>
+    <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">P/L</div><div style="font-size:16px;font-weight:bold;color:${cor}">${profitLoss>=0?'+':''}$${Math.abs(profitLoss).toFixed(2)}</div></div>
+    <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${d?d.trades:0}</div></div>`;
 }
 
 async function autoConnect() {
   try {
     const r = await fetch('/api/auth/auto-connect');
     const d = await r.json();
-    if (d.status === 'already_connected') {
-      document.getElementById('conSt').textContent = '✅ Conectado';
-      isConnected = true;
-    } else if (d.status === 'connecting') {
-      document.getElementById('conSt').textContent = '🔄 Auto-conectando...';
-      toast('🔄 Auto-conectando...', 'info');
-      setTimeout(updateAll, 3000);
-    }
+    if (d.status === 'already_connected') { document.getElementById('conSt').textContent = '✅ Conectado'; isConnected = true; }
+    else if (d.status === 'connecting') { document.getElementById('conSt').textContent = '🔄 Auto-conectando...'; toast('🔄 Auto-conectando...', 'info'); setTimeout(updateAll, 3000); }
   } catch(e) {}
 }
 
 function checkTradeResults(bot) {
   const total = bot.stats?.total || 0;
   if (total > lastTradeCount && lastTradeCount > 0) {
-    const wins = bot.stats?.wins || 0;
-    const losses = bot.stats?.losses || 0;
-    if (wins > losses) {
-      toast('✅ Trade ganho!', 'win', 3000);
-      playBeep();
-    } else {
-      toast('❌ Trade perdido', 'loss', 3000);
-    }
+    if ((bot.stats?.wins||0) > (bot.stats?.losses||0)) { toast('✅ Trade ganho!', 'win', 2500); playBeep(); }
+    else { toast('❌ Trade perdido', 'loss', 2500); }
   }
   lastTradeCount = total;
 }
@@ -745,8 +513,7 @@ function initCandleChart() {
   const container = document.getElementById('priceChart');
   if (!container || candleChart) return;
   candleChart = LightweightCharts.createChart(container, {
-    width: container.clientWidth,
-    height: 160,
+    width: container.clientWidth, height: 120,
     layout: { background: { color: '#020617' }, textColor: '#e2e8f0' },
     grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
@@ -759,9 +526,7 @@ function initCandleChart() {
     wickUpColor: '#00f0b5', wickDownColor: '#ff4d4d'
   });
   if (window.ResizeObserver) {
-    resizeObserver = new ResizeObserver(() => {
-      if (candleChart && container) candleChart.applyOptions({ width: container.clientWidth });
-    });
+    resizeObserver = new ResizeObserver(() => { if (candleChart && container) candleChart.applyOptions({ width: container.clientWidth }); });
     resizeObserver.observe(container);
   }
 }
@@ -772,134 +537,93 @@ async function loadCandles() {
     const r = await fetch(`/api/candles/data?granularity=${currentGranularity}`);
     const d = await r.json();
     if (!d.candles || d.candles.length === 0) return;
-    const formatted = d.candles.map(c => ({
-      time: c.epoch,
-      open: parseFloat(c.open),
-      high: parseFloat(c.high),
-      low: parseFloat(c.low),
-      close: parseFloat(c.close)
-    })).sort((a, b) => a.time - b.time);
+    const formatted = d.candles.map(c => ({ time: c.epoch, open: parseFloat(c.open), high: parseFloat(c.high), low: parseFloat(c.low), close: parseFloat(c.close) })).sort((a, b) => a.time - b.time);
     candleSeries.setData(formatted);
     candleChart.timeScale().fitContent();
   } catch(e) { console.error('Erro ao carregar velas:', e); }
 }
 
 function updateAll(){
-  fetch('/api/status')
-    .then(r=>r.json())
-    .then(data=>{
-        if(data.error) return;
-        const bot = data.bot;
-        if (!bot) return;
-        const conn = bot.connected && bot.authorized;
-        isConnected = conn;
-        let confidence = parseFloat(bot.confidence);
-        if (isNaN(confidence)) confidence = 0;
-        
-        const techConf = parseFloat(bot.tech_confidence) || 0;
-        const digitConf = parseFloat(bot.digit_confidence) || 0;
+  fetch('/api/status').then(r=>r.json()).then(data=>{
+    if(data.error) return;
+    const bot = data.bot;
+    if (!bot) return;
+    const conn = bot.connected && bot.authorized;
+    isConnected = conn;
+    let confidence = parseFloat(bot.confidence);
+    if (isNaN(confidence)) confidence = 0;
+    const techConf = parseFloat(bot.tech_confidence) || 0;
+    const digitConf = parseFloat(bot.digit_confidence) || 0;
 
-        const connectOAuthBtn = document.getElementById('connectOAuthBtn');
-        const connectTokenBtn = document.getElementById('connectTokenBtn');
-        if(conn){
-          connectOAuthBtn.disabled = true;
-          connectTokenBtn.disabled = true;
-          if (bot.stop_loss_active) {
-            document.getElementById('conSt').innerHTML =
-              '<span style="color:var(--danger)">🛑 Stop-loss activo — limite diário atingido</span>';
-          } else if (confidence === 0) {
-            document.getElementById('conSt').innerHTML = '<span style="color:#ffaa00">⏳ A acumular dados...</span>';
-          } else {
-            document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
-          }
-        } else {
-          connectOAuthBtn.disabled = false;
-          connectTokenBtn.disabled = false;
-          document.getElementById('conSt').innerHTML = '';
-        }
-        document.getElementById('sDot').className='dot'+(conn?' on':'');
-        document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
-        document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
-        document.getElementById('cur').textContent=bot.currency||'USD';
-        document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
+    document.getElementById('connectOAuthBtn').disabled = conn;
+    document.getElementById('connectTokenBtn').disabled = conn;
+    if(conn){
+      if (bot.stop_loss_active) document.getElementById('conSt').innerHTML = '<span style="color:var(--danger)">🛑 Stop-loss activo</span>';
+      else if (confidence === 0) document.getElementById('conSt').innerHTML = '<span style="color:#ffaa00">⏳ A acumular dados...</span>';
+      else document.getElementById('conSt').innerHTML = '<span style="color:var(--accent)">✅ Conectado</span>';
+    } else { document.getElementById('conSt').innerHTML = ''; }
+    document.getElementById('sDot').className='dot'+(conn?' on':'');
+    document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
+    document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
+    document.getElementById('cur').textContent=bot.currency||'USD';
+    document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
+    document.getElementById('confEl').textContent = conn && confidence > 0 ? `Confiança: ${confidence.toFixed(1)}%` : '';
 
-        document.getElementById('confEl').textContent = 
-          conn && confidence > 0 ? `Confiança: ${confidence.toFixed(1)}%` : '';
+    const sigBadge = document.getElementById('sigBadge');
+    const btnBuy = document.querySelector('#pTrade .btn-buy');
+    const btnSell = document.querySelector('#pTrade .btn-sell');
+    const btnHybrid = document.getElementById('btnHybrid');
+    // Limiar alinhado com config.py: 55%
+    if (confidence < 55 || bot.stop_loss_active) {
+      sigBadge.textContent = bot.stop_loss_active ? 'STOP' : 'NEUTRO';
+      sigBadge.className = 'signal neutral';
+      if (btnBuy) btnBuy.disabled = true;
+      if (btnSell) btnSell.disabled = true;
+      if (btnHybrid) btnHybrid.disabled = true;
+    } else {
+      const sig = bot.signal || 'NEUTRAL';
+      sigBadge.textContent = sig;
+      sigBadge.className = 'signal ' + (sig==='BUY'?'buy':(sig==='SELL'?'sell':'neutral'));
+      if (btnBuy) btnBuy.disabled = false;
+      if (btnSell) btnSell.disabled = false;
+      if (btnHybrid) btnHybrid.disabled = false;
+    }
 
-        const sigBadge = document.getElementById('sigBadge');
-        const btnBuy = document.querySelector('#pTrade .btn-buy');
-        const btnSell = document.querySelector('#pTrade .btn-sell');
-        const btnHybrid = document.getElementById('btnHybrid');
-        if (confidence < 60 || bot.stop_loss_active) {
-            sigBadge.textContent = bot.stop_loss_active ? 'STOP' : 'NEUTRO';
-            sigBadge.className = 'signal neutral';
-            if (btnBuy) btnBuy.disabled = true;
-            if (btnSell) btnSell.disabled = true;
-            if (btnHybrid) btnHybrid.disabled = true;
-        } else {
-            const sig = bot.signal || 'NEUTRAL';
-            sigBadge.textContent = sig;
-            sigBadge.className = 'signal ' + (sig==='BUY'?'buy':(sig==='SELL'?'sell':'neutral'));
-            if (btnBuy) btnBuy.disabled = false;
-            if (btnSell) btnSell.disabled = false;
-            if (btnHybrid) btnHybrid.disabled = false;
-        }
+    document.getElementById('rsS').textContent=(bot.analysis?.rsi?.score||0).toFixed(1);
+    document.getElementById('mcS').textContent=bot.analysis?.macd?.desc||'---';
+    document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
+    document.getElementById('bbS').textContent=bot.analysis?.bollinger?.desc||'---';
+    updateConfBars(techConf, digitConf, confidence);
 
-        document.getElementById('rsS').textContent=(bot.analysis?.rsi?.score||0).toFixed(1);
-        document.getElementById('mcS').textContent=bot.analysis?.macd?.desc||'---';
-        document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
-        document.getElementById('bbS').textContent=bot.analysis?.bollinger?.desc||'---';
-        
-        updateConfBars(techConf, digitConf, confidence);
-        
-        if(data.digits) {
-            updateDigits(data.digits);
-            const ticksRemaining = data.digits.ticks_remaining;
-            const btnOdd = document.getElementById('btnOdd');
-            const btnEven = document.getElementById('btnEven');
-            const blockerMsg = document.getElementById('digitBlockerMsg');
-            if (ticksRemaining !== undefined && ticksRemaining < 3) {
-                btnOdd.disabled = true;
-                btnEven.disabled = true;
-                blockerMsg.textContent = `⏳ Aguarde ${ticksRemaining} tick(s) para próximo dígito...`;
-            } else {
-                btnOdd.disabled = false;
-                btnEven.disabled = false;
-                blockerMsg.textContent = '';
-            }
-        }
-        
-        fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
-          const act = m.active ? `ATIVO (passo ${m.step})` : 'INATIVO';
-          const nxt = '$' + (m.next_amount||0.35).toFixed(2);
-          document.getElementById('mgtAct').textContent = act;
-          document.getElementById('mgtNxt').textContent = nxt;
-          const dAct = document.getElementById('mgtActDig');
-          const dNxt = document.getElementById('mgtNxtDig');
-          if(dAct) dAct.textContent = act;
-          if(dNxt) dNxt.textContent = nxt;
-          if(m.active){
-            const ad = document.getElementById('amtDigit');
-            if(ad) ad.value = (m.next_amount||0.35).toFixed(2);
-          }
-        }).catch(()=>{});
-        
-        updateHistSummary(bot);
-        checkTradeResults(bot);
+    if(data.digits) {
+      updateDigits(data.digits);
+      const tr = data.digits.ticks_remaining;
+      const btnOdd = document.getElementById('btnOdd');
+      const btnEven = document.getElementById('btnEven');
+      const blockerMsg = document.getElementById('digitBlockerMsg');
+      if (tr !== undefined && tr < 3) { btnOdd.disabled = true; btnEven.disabled = true; blockerMsg.textContent = `⏳ Aguarde ${tr} tick(s)...`; }
+      else { btnOdd.disabled = false; btnEven.disabled = false; blockerMsg.textContent = ''; }
+    }
 
-        if (!candleChart) initCandleChart();
-
-        if (modo === 'hybrid' && data.digits && bot.signal) {
-            const digitAnalysis = data.digits.analysis;
-            if (digitAnalysis && digitAnalysis.recommended_action) {
-                checkHybridAlert(bot.signal, digitAnalysis.recommended_action, bot.confidence, digitAnalysis.confidence);
-            } else {
-                checkHybridAlert(null, null, 0, 0);
-            }
-        } else {
-            document.getElementById('hybridAlert')?.classList.add('hidden');
-        }
+    fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
+      const act = m.active ? `ATIVO (passo ${m.step})` : 'INATIVO';
+      const nxt = '$' + (m.next_amount||0.35).toFixed(2);
+      document.getElementById('mgtAct').textContent = act; document.getElementById('mgtNxt').textContent = nxt;
+      const dAct = document.getElementById('mgtActDig'); if(dAct) dAct.textContent = act;
+      const dNxt = document.getElementById('mgtNxtDig'); if(dNxt) dNxt.textContent = nxt;
+      if(m.active){ const ad = document.getElementById('amtDigit'); if(ad) ad.value = (m.next_amount||0.35).toFixed(2); }
     }).catch(()=>{});
+
+    updateHistSummary(bot);
+    checkTradeResults(bot);
+    if (!candleChart) initCandleChart();
+
+    if (modo === 'hybrid' && data.digits && bot.signal) {
+      const digitAnalysis = data.digits.analysis;
+      if (digitAnalysis && digitAnalysis.recommended_action) checkHybridAlert(bot.signal, digitAnalysis.recommended_action, bot.confidence, digitAnalysis.confidence);
+      else checkHybridAlert(null, null, 0, 0);
+    } else { document.getElementById('hybridAlert')?.classList.add('hidden'); }
+  }).catch(()=>{});
 }
 
 function updateDigits(digits){
@@ -916,22 +640,13 @@ function updateDigits(digits){
     bp.textContent=isOdd?'ÍMPAR':'PAR';bp.className='big-p '+(isOdd?'odd':'even');
     let html='';recent.forEach((d)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
     document.getElementById('histRow').innerHTML=html;
-    const scroll = document.getElementById('histScroll');
-    scroll.scrollLeft = scroll.scrollWidth;
+    const scroll = document.getElementById('histScroll'); scroll.scrollLeft = scroll.scrollWidth;
   }
   const analysis = digits.analysis;
   if (analysis) {
-    if (analysis.sequences && analysis.sequences.descricao) {
-      document.getElementById('seqInfo').textContent = analysis.sequences.descricao;
-    } else {
-      document.getElementById('seqInfo').textContent = '';
-    }
-    if (analysis.entropy !== undefined) {
-      document.getElementById('entropyInfo').textContent = 
-        `Entropia: ${analysis.entropy.toFixed(2)} (${analysis.entropy_verdict || '---'})`;
-    } else {
-      document.getElementById('entropyInfo').textContent = '';
-    }
+    document.getElementById('seqInfo').textContent = (analysis.sequences?.descricao) || '';
+    if (analysis.entropy !== undefined) document.getElementById('entropyInfo').textContent = `Entropia: ${analysis.entropy.toFixed(2)} (${analysis.entropy_verdict||'---'})`;
+    else document.getElementById('entropyInfo').textContent = '';
   }
 }
 
@@ -939,19 +654,12 @@ async function conectar(){
   const tok = document.getElementById('tokIn').value.trim();
   if(!tok){ toast('❌ Token obrigatório','loss'); return; }
   try {
-    const r = await fetch('/api/auth/save_token', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({token:tok, account_type: selectedAcct})
-    });
+    const r = await fetch('/api/auth/save_token', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:tok, account_type: selectedAcct}) });
     const d = await r.json();
     if(d.error){ toast('❌ '+d.error,'loss'); return; }
     toast('✅ Token guardado','win');
     document.getElementById('conSt').textContent = '🔄 A conectar...';
-    setTimeout(() => {
-      fetch('/api/connect', {method:'POST'}).then(r=>r.json()).then(d=>{
-        if(d.status==='connecting') toast('🔄 Conectando...','info');
-      });
-    }, 500);
+    setTimeout(() => { fetch('/api/connect', {method:'POST'}).then(r=>r.json()).then(d=>{ if(d.status==='connecting') toast('🔄 Conectando...','info'); }); }, 500);
   } catch(e) { toast('❌ Erro de rede','loss'); }
 }
 
@@ -967,12 +675,9 @@ async function connectWithDeriv(){
 async function disconnectWebSocket(){
   try {
     await fetch('/api/disconnect', {method:'POST'});
-    toast('🔌 Desconectado','info');
-    isConnected = false;
-    document.getElementById('sDot').className = 'dot';
-    document.getElementById('connStatus').textContent = 'Desconectado';
-    document.getElementById('connectOAuthBtn').disabled = false;
-    document.getElementById('connectTokenBtn').disabled = false;
+    toast('🔌 Desconectado','info'); isConnected = false;
+    document.getElementById('sDot').className = 'dot'; document.getElementById('connStatus').textContent = 'Desconectado';
+    document.getElementById('connectOAuthBtn').disabled = false; document.getElementById('connectTokenBtn').disabled = false;
   } catch(e) { toast('❌ Erro','loss'); }
 }
 
@@ -981,10 +686,7 @@ async function selAcct(a){
   document.getElementById('btnDemo').classList.toggle('active', a==='demo');
   document.getElementById('btnReal').classList.toggle('active', a==='real');
   try {
-    const r = await fetch('/api/auth/switch-account', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({account_type: a})
-    });
+    const r = await fetch('/api/auth/switch-account', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({account_type: a}) });
     const d = await r.json();
     if(d.error){ toast('❌ '+d.error,'loss'); return; }
     toast(`✅ Conta ${a.toUpperCase()} activa`,'win');
@@ -996,39 +698,24 @@ function trade(action){
   const amt=parseFloat(document.getElementById('amt').value);
   const endpoint = modo==='hybrid' ? '/api/trade/hybrid' : '/api/trade';
   fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,amount:amt})})
-  .then(r=>r.json()).then(d=>{
-    if(d.error) toast('❌ '+d.error,'loss');
-    else {
-      toast('⏳ Trade enviado','info');
-      setTimeout(loadHistory, 8000);
-    }
-  }).catch(()=>toast('❌ Erro de rede','loss'));
+  .then(r=>r.json()).then(d=>{ if(d.error) toast('❌ '+d.error,'loss'); else { toast('⏳ Trade enviado','info'); setTimeout(loadHistory, 8000); } })
+  .catch(()=>toast('❌ Erro de rede','loss'));
 }
 
 function tradeDigit(pred){
   const amt = parseFloat(document.getElementById('amtDigit').value) || 0.35;
   fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred, amount:amt})})
-  .then(r=>r.json()).then(d=>{
-    if(d.error) toast('❌ '+d.error,'loss');
-    else {
-      toast('⏳ Aposta enviada!','info');
-      setTimeout(loadHistory, 13000);
-    }
-  }).catch(()=>toast('❌ Erro de rede','loss'));
+  .then(r=>r.json()).then(d=>{ if(d.error) toast('❌ '+d.error,'loss'); else { toast('⏳ Aposta enviada!','info'); setTimeout(loadHistory, 13000); } })
+  .catch(()=>toast('❌ Erro de rede','loss'));
 }
 
 async function mgtMultiply(fieldId){
   const input = document.getElementById(fieldId);
   const currentAmount = parseFloat(input.value) || 0.35;
-  const r = await fetch('/api/martingale/apply', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({last_amount: currentAmount})
-  });
+  const r = await fetch('/api/martingale/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({last_amount: currentAmount}) });
   const d = await r.json();
-  if(d.error) {
-    toast('❌ '+d.error,'loss');
-  } else {
+  if(d.error) { toast('❌ '+d.error,'loss'); }
+  else {
     const nextAmount = d.martingale.next_amount;
     document.getElementById('amt').value = nextAmount.toFixed(2);
     document.getElementById('amtDigit').value = nextAmount.toFixed(2);
@@ -1041,79 +728,70 @@ async function mgtDivide(fieldId){
   const currentAmount = parseFloat(input.value) || 0.35;
   const nextAmount = Math.max(0.35, currentAmount / 2);
   input.value = nextAmount.toFixed(2);
-  toast('📉 Valor reduzido para $'+nextAmount.toFixed(2),'info');
+  toast('📉 $'+nextAmount.toFixed(2),'info');
 }
 
 async function rstMgt(){
   await fetch('/api/martingale/reset', {method:'POST'});
-  document.getElementById('amt').value = '0.35';
-  document.getElementById('amtDigit').value = '0.35';
+  document.getElementById('amt').value = '0.35'; document.getElementById('amtDigit').value = '0.35';
   toast('🔄 Martingale resetado','info');
 }
 
 async function clearHistory(){
   await fetch('/api/clear_history', {method:'POST'});
-  toast('🗑️ Histórico limpo','info');
-  loadHistory();
+  toast('🗑️ Histórico limpo','info'); loadHistory();
 }
 
 function loadAffiliate(){
-  fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{
-    if(d.link) document.getElementById('refLink').value = d.link;
-  });
+  fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{ if(d.link) document.getElementById('refLink').value = d.link; });
   fetch('/api/affiliate/earnings').then(r=>r.json()).then(d=>{
     const el = document.getElementById('affiliateEarnings');
     if(d.error) { el.innerHTML = ''; return; }
-    el.innerHTML = `
-      <div style="margin-top:12px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-            <div style="font-size:10px;color:var(--muted)">GANHOS</div>
-            <div style="font-size:18px;font-weight:bold;color:var(--accent)">$${d.earnings?.toFixed(2) || '0.00'}</div>
-          </div>
-          <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-            <div style="font-size:10px;color:var(--muted)">REFERIDOS</div>
-            <div style="font-size:18px;font-weight:bold">${d.referred_count || 0}</div>
-          </div>
-        </div>
-      </div>`;
+    el.innerHTML = `<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">GANHOS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">$${d.earnings?.toFixed(2)||'0.00'}</div></div>
+      <div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">REFERIDOS</div><div style="font-size:16px;font-weight:bold">${d.referred_count||0}</div></div>
+    </div>`;
   });
 }
 
-function cpLink(){
-  const el = document.getElementById('refLink');
-  el.select();
-  document.execCommand('copy');
-  toast('📋 Link copiado!','win');
-}
+function cpLink(){ const el=document.getElementById('refLink'); el.select(); document.execCommand('copy'); toast('📋 Copiado!','win'); }
 
 function loadHistory(){
   fetch('/api/report').then(r=>r.json()).then(d=>{
     const sum = document.getElementById('histSummary2');
     const list = document.getElementById('histList2');
-    if(d.error) { sum.innerHTML=''; list.innerHTML=''; return; }
+    // Também atualiza o mini-histórico do dashboard
+    const miniList = document.getElementById('histList');
+    if(d.error) { if(sum) sum.innerHTML=''; if(list) list.innerHTML=''; if(miniList) miniList.innerHTML=''; return; }
     const r = d.resumo;
-    sum.innerHTML = `
-      <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-        <div style="font-size:10px;color:var(--muted)">TOTAL</div><div style="font-size:18px;font-weight:bold">${r.total_trades}</div></div>
-      <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-        <div style="font-size:10px;color:var(--muted)">HOJE</div><div style="font-size:18px;font-weight:bold">${r.trades_hoje}</div></div>
-      <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-        <div style="font-size:10px;color:var(--muted)">WINS</div><div style="font-size:18px;font-weight:bold;color:var(--accent)">${r.wins}</div></div>
-      <div style="background:#020617;padding:10px;border-radius:8px;text-align:center">
-        <div style="font-size:10px;color:var(--muted)">LOSSES</div><div style="font-size:18px;font-weight:bold;color:var(--danger)">${r.losses}</div></div>`;
-    list.innerHTML = d.historico.map(t=>`
-      <div style="padding:8px;background:#020617;border-radius:8px;margin-bottom:6px;font-size:12px">
+    if(sum) sum.innerHTML = `
+      <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${r.total_trades}</div></div>
+      <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${r.trades_hoje}</div></div>
+      <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WINS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${r.wins}</div></div>
+      <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">LOSSES</div><div style="font-size:16px;font-weight:bold;color:var(--danger)">${r.losses}</div></div>`;
+    
+    const html = d.historico.map(t=>{
+      const win = t.result === 'win'; const lose = t.result === 'loss';
+      const cor = win ? 'var(--accent)' : lose ? 'var(--danger)' : '#ffaa00';
+      const icon = win ? '✅' : lose ? '❌' : '⏳';
+      // Mostrar ÍMPAR/PAR para trades de dígito
+      let actionLabel = t.action || '';
+      if (t.is_digit) {
+        actionLabel = (t.action === 'BUY' || t.action === 'CALL') ? 'ÍMPAR 🎲' : 'PAR 🎲';
+      }
+      const profitText = t.profit ? `<div style="color:${t.profit>0?'var(--accent)':'var(--danger)'}">${t.profit>0?'+':''}$${t.profit.toFixed(2)}</div>` : '';
+      return `<div style="padding:6px;background:#020617;border-radius:6px;margin-bottom:4px;font-size:11px">
         <div style="display:flex;justify-content:space-between">
           <span style="color:var(--muted)">${t.time}</span>
-          <span style="font-weight:700;color:${t.result==='win'?'var(--accent)':(t.result==='loss'?'var(--danger)':'#ffaa00')}">
-            ${t.result==='win'?'✅':(t.result==='loss'?'❌':'⏳')} ${t.result.toUpperCase()}
-          </span>
+          <span style="font-weight:700;color:${cor}">${icon} ${t.result.toUpperCase()}</span>
         </div>
-        <div>${t.action} ${t.symbol} $${t.amount.toFixed(2)} ${t.is_digit?'🎲':''}</div>
-        ${t.profit ? `<div style="color:${t.profit>0?'var(--accent)':'var(--danger)'}">${t.profit>0?'+':''}$${t.profit.toFixed(2)}</div>` : ''}
-      </div>`).join('');
-  });
+        <div>${actionLabel} ${t.symbol} $${t.amount.toFixed(2)}</div>
+        ${profitText}
+      </div>`;
+    }).join('');
+    if(list) list.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+    if(miniList) miniList.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+  }).catch(()=>toast('❌ Erro histórico','loss'));
 }
 
 function loadAdminUsers(){
@@ -1121,151 +799,89 @@ function loadAdminUsers(){
     const el = document.getElementById('adminUserList');
     if(d.error){ el.innerHTML = '<p style="color:var(--danger)">'+d.error+'</p>'; return; }
     el.innerHTML = d.users.map(u=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#020617;border-radius:8px;margin-bottom:6px">
-        <div><div style="font-weight:600">${u.name || u.email}</div><div style="font-size:11px;color:var(--muted)">${u.email}</div></div>
-        <button class="bmr" style="padding:4px 12px;font-size:11px" onclick="toggleUser('${u.email}', ${!u.active})">
-          ${u.active ? 'Desativar' : 'Ativar'}
-        </button>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px;background:#020617;border-radius:6px;margin-bottom:4px">
+        <div><div style="font-weight:600;font-size:12px">${u.name||u.email}</div><div style="font-size:10px;color:var(--muted)">${u.email}</div></div>
+        <button class="bmr" style="padding:3px 10px;font-size:10px" onclick="toggleUser('${u.email}', ${!u.active})">${u.active?'Desativar':'Ativar'}</button>
       </div>`).join('');
   });
 }
-
-function toggleUser(email, enable){
-  fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,enable})})
-  .then(r=>r.json()).then(d=>{ toast(d.message,'info'); loadAdminUsers(); });
-}
-
+function toggleUser(email, enable){ fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,enable})}).then(r=>r.json()).then(d=>{ toast(d.message,'info'); loadAdminUsers(); }); }
 async function saveMarkup(){
   const pct = parseFloat(document.getElementById('markupInput').value);
   const r = await fetch('/api/admin/set-markup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({percentage:pct})});
   const d = await r.json();
-  document.getElementById('markupMsg').textContent = d.error ? d.error : `✅ Markup: ${pct}%`;
+  document.getElementById('markupMsg').textContent = d.error ? d.error : `✅ ${pct}%`;
   document.getElementById('markupMsg').style.color = d.error ? 'var(--danger)' : 'var(--accent)';
 }
-
 function showTab(t){
   document.getElementById('loginForm').style.display = t==='login'?'block':'none';
   document.getElementById('registerForm').style.display = t==='register'?'block':'none';
   document.getElementById('forgotForm').style.display = t==='forgot'?'block':'none';
   document.getElementById('authErr').textContent = '';
 }
-
 function doLogin(){
-  if(_loggingIn) return;
-  _loggingIn = true;
+  if(_loggingIn) return; _loggingIn = true;
   const email = document.getElementById('lEmail').value.trim().toLowerCase();
   const password = document.getElementById('lPass').value;
   fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
-  .then(r=>r.json()).then(d=>{
-    _loggingIn = false;
+  .then(r=>r.json()).then(d=>{ _loggingIn = false;
     if(d.error){ document.getElementById('authErr').textContent = d.error; return; }
-    sessionStorage.setItem('user', JSON.stringify(d.user));
-    document.getElementById('authModal').style.display='none';
-    document.body.classList.remove('modal-open');
+    document.getElementById('authModal').style.display='none'; document.body.classList.remove('modal-open');
     document.getElementById('mainContent').style.display='block';
     if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
-    initSyms(); loadAffiliate(); loadHistory();
-    initCandleChart();
-    setTimeout(loadCandles, 3000);
-    startPolling();
+    initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles, 3000); startPolling();
     if(d.user?.has_deriv_token) setTimeout(autoConnect, 1500);
   }).catch(()=>{ _loggingIn = false; document.getElementById('authErr').textContent = 'Erro de rede'; });
 }
-
 function doRegister(){
-  if(_registering) return;
-  _registering = true;
+  if(_registering) return; _registering = true;
   const name = document.getElementById('rName').value.trim();
   const email = document.getElementById('rEmail').value.trim().toLowerCase();
   const password = document.getElementById('rPass').value;
   const ref = document.getElementById('rRef').value.trim();
   if(!name || !email || password.length < 6){ _registering = false; document.getElementById('authErr').textContent = 'Dados inválidos'; return; }
   fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,password,referral_code:ref})})
-  .then(r=>r.json()).then(d=>{
-    _registering = false;
+  .then(r=>r.json()).then(d=>{ _registering = false;
     if(d.error){ document.getElementById('authErr').textContent = d.error; return; }
-    document.getElementById('authModal').style.display='none';
-    document.body.classList.remove('modal-open');
+    document.getElementById('authModal').style.display='none'; document.body.classList.remove('modal-open');
     document.getElementById('mainContent').style.display='block';
-    initSyms(); loadAffiliate(); loadHistory();
-    initCandleChart();
-    setTimeout(loadCandles, 3000);
-    startPolling();
-    toast('✅ Conta criada!','win',5000);
+    initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles, 3000); startPolling();
+    toast('✅ Conta criada!','win',4000);
   }).catch(()=>{ _registering = false; document.getElementById('authErr').textContent = 'Erro de rede'; });
 }
-
 function doReset(){
   const email = document.getElementById('fEmail').value.trim().toLowerCase();
   fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})
-  .then(r=>r.json()).then(d=>{
-    document.getElementById('fMsg').textContent = d.error ? d.error : '✅ Verifique o seu email';
-    document.getElementById('fMsg').style.color = d.error ? 'var(--danger)' : 'var(--accent)';
-  });
+  .then(r=>r.json()).then(d=>{ document.getElementById('fMsg').textContent = d.error ? d.error : '✅ Verifique o email'; document.getElementById('fMsg').style.color = d.error ? 'var(--danger)' : 'var(--accent)'; });
 }
-
-function doLogout() {
-  stopPolling();
-  if (resizeObserver) resizeObserver.disconnect();
-  fetch('/api/auth/logout', { method: 'POST' }).then(() => location.reload());
-}
-
+function doLogout() { stopPolling(); if (resizeObserver) resizeObserver.disconnect(); fetch('/api/auth/logout', { method: 'POST' }).then(() => location.reload()); }
 async function saveTokAcct(acctType){
   const tok = document.getElementById('tokIn').value.trim();
-  if(!tok){ toast('❌ Cole o token primeiro','loss'); return; }
+  if(!tok){ toast('❌ Cole o token','loss'); return; }
   try {
-    const r = await fetch('/api/auth/save_token', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({token:tok, account_type: acctType})
-    });
+    const r = await fetch('/api/auth/save_token', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:tok, account_type: acctType}) });
     const d = await r.json();
     if(d.error){ toast('❌ '+d.error,'loss'); return; }
     toast(`✅ Token ${acctType.toUpperCase()} guardado`,'win');
-    document.getElementById('tokIn').value = '';
-    
-    updateTokenDisplay();
+    document.getElementById('tokIn').value = ''; updateTokenDisplay();
   } catch(e) { toast('❌ Erro','loss'); }
 }
-
 function updateTokenDisplay() {
   fetch('/api/auth/status').then(r=>r.json()).then(d=>{
     if(d.authenticated && d.user) {
       const display = document.getElementById('tokenDisplay');
-      const dotDemo = document.getElementById('dotDemo');
-      const dotReal = document.getElementById('dotReal');
-      const statusDemo = document.getElementById('statusDemo');
-      const statusReal = document.getElementById('statusReal');
-      const activeDisplay = document.getElementById('activeAccountDisplay');
-      
+      const dotDemo = document.getElementById('dotDemo'); const dotReal = document.getElementById('dotReal');
+      const statusDemo = document.getElementById('statusDemo'); const statusReal = document.getElementById('statusReal');
       display.style.display = 'block';
-      
-      if(d.user.has_demo_token) {
-        dotDemo.className = 'token-dot ok' + (d.user.active_account === 'demo' ? ' active' : '');
-        statusDemo.textContent = 'Guardado' + (d.user.active_account === 'demo' ? ' (Activo)' : '');
-        statusDemo.style.color = 'var(--accent)';
-      } else {
-        dotDemo.className = 'token-dot missing';
-        statusDemo.textContent = 'Não guardado';
-        statusDemo.style.color = 'var(--muted)';
-      }
-      
-      if(d.user.has_real_token) {
-        dotReal.className = 'token-dot ok' + (d.user.active_account === 'real' ? ' active' : '');
-        statusReal.textContent = 'Guardado' + (d.user.active_account === 'real' ? ' (Activo)' : '');
-        statusReal.style.color = 'var(--accent)';
-      } else {
-        dotReal.className = 'token-dot missing';
-        statusReal.textContent = 'Não guardado';
-        statusReal.style.color = 'var(--muted)';
-      }
-      
-      activeDisplay.textContent = (d.user.active_account || 'demo').toUpperCase();
+      if(d.user.has_demo_token) { dotDemo.className = 'token-dot ok'+(d.user.active_account==='demo'?' active':''); statusDemo.textContent = 'Guardado'+(d.user.active_account==='demo'?' (Activo)':''); statusDemo.style.color = 'var(--accent)'; }
+      else { dotDemo.className = 'token-dot missing'; statusDemo.textContent = 'Não guardado'; statusDemo.style.color = 'var(--muted)'; }
+      if(d.user.has_real_token) { dotReal.className = 'token-dot ok'+(d.user.active_account==='real'?' active':''); statusReal.textContent = 'Guardado'+(d.user.active_account==='real'?' (Activo)':''); statusReal.style.color = 'var(--accent)'; }
+      else { dotReal.className = 'token-dot missing'; statusReal.textContent = 'Não guardado'; statusReal.style.color = 'var(--muted)'; }
+      document.getElementById('activeAccountDisplay').textContent = (d.user.active_account||'demo').toUpperCase();
     }
   });
 }
-
 function toggleMenu(){ document.getElementById('sideMenu').classList.toggle('open'); document.getElementById('overlay').classList.toggle('show'); }
-
 function showSec(s){
   document.querySelectorAll('#dashboard-section, #affiliate-section, #history-section, #payment-section, #settings-section, #admin-section').forEach(el=>el.classList.add('hidden'));
   document.getElementById(s+'-section').classList.remove('hidden');
@@ -1275,7 +891,6 @@ function showSec(s){
   if(s==='admin') loadAdminUsers();
   if(s==='settings') updateTokenDisplay();
 }
-
 function setModo(m){
   modo=m;
   document.getElementById('modeAtivos').classList.toggle('active', m==='ativos');
@@ -1288,49 +903,23 @@ function setModo(m){
   if(m==='hybrid') document.getElementById('pAtivos').classList.remove('hidden');
   document.getElementById('confBars').style.display = 'none';
 }
-
-// Carregar velas a cada 10 segundos
 setInterval(loadCandles, 10000);
-
 (function(){
   const p=new URLSearchParams(location.search);
-  if(p.get('connected')==='true'){
-    toast('✅ Deriv conectada!','win',5000);
-    startPolling();
-    setTimeout(()=>{
-      fetch('/api/status').then(r=>r.json()).then(data=>{
-        if(!data.bot?.authorized) autoConnect();
-      }).catch(()=>autoConnect());
-    },2000);
-    history.replaceState({},'',location.pathname);
-  }
+  if(p.get('connected')==='true'){ toast('✅ Deriv conectada!','win',4000); startPolling(); setTimeout(()=>{ fetch('/api/status').then(r=>r.json()).then(data=>{ if(!data.bot?.authorized) autoConnect(); }).catch(()=>autoConnect()); },2000); history.replaceState({},'',location.pathname); }
 })();
-
-(function(){
-  const p=new URLSearchParams(location.search);
-  const ref=p.get('ref');
-  if(ref){const el=document.getElementById('rRef');if(el)el.value=ref;}
-})();
-
+(function(){ const p=new URLSearchParams(location.search); const ref=p.get('ref'); if(ref){const el=document.getElementById('rRef');if(el)el.value=ref;} })();
 fetch('/api/auth/status').then(r=>r.json()).then(d=>{
   if(d.authenticated){
     if(d.user?.active_account) selectedAcct = d.user.active_account;
     document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
     document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
-    if(d.user?.name){
-      document.getElementById('userNameDisplay').textContent = '👤 ' + d.user.name;
-    }
-    document.getElementById('authModal').style.display='none';
-    document.body.classList.remove('modal-open');
+    if(d.user?.name) document.getElementById('userNameDisplay').textContent = '👤 ' + d.user.name;
+    document.getElementById('authModal').style.display='none'; document.body.classList.remove('modal-open');
     document.getElementById('mainContent').style.display='block';
-    if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';
-    initSyms();loadAffiliate();loadHistory();
-    initCandleChart();
-    setTimeout(loadCandles, 3000);
-    startPolling();
-    if(d.user?.has_deriv_token){
-      setTimeout(() => autoConnect(), 1500);
-    }
+    if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
+    initSyms();loadAffiliate();loadHistory(); initCandleChart(); setTimeout(loadCandles, 3000); startPolling();
+    if(d.user?.has_deriv_token){ setTimeout(() => autoConnect(), 1500); }
     updateTokenDisplay();
   }
 });
