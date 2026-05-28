@@ -127,11 +127,23 @@ def init_db():
         key TEXT PRIMARY KEY,
         value TEXT
     )''')
+    # Tabela para persistir estado do martingale
+    c.execute('''CREATE TABLE IF NOT EXISTS martingale_state (
+        user_id TEXT PRIMARY KEY,
+        active INTEGER DEFAULT 0,
+        step INTEGER DEFAULT 0,
+        original_amount REAL DEFAULT 0,
+        last_updated REAL
+    )''')
     # Migração: adicionar coluna daily_stats_json se não existir
     try:
         c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
     except sqlite3.OperationalError:
-        pass  # coluna já existe
+        pass
+
+    # Limpeza de tokens de reset expirados
+    c.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
+
     conn.commit()
     conn.close()
 
@@ -333,6 +345,10 @@ oauth_states_lock = threading.Lock()
 connecting_lock = threading.Lock()
 connecting_users = set()
 
+# Constantes para OAuth (definidas localmente para não depender de config.py)
+OAUTH_STATE_TTL = 600          # 10 minutos
+OAUTH_STATE_REUSE_WINDOW = 30  # 30 segundos
+
 def reset_bot_state(bot):
     bot.reset_stats()
     bot.reset_martingale()
@@ -364,8 +380,10 @@ def persist_trade(user_id, trade_data):
         conn.close()
 
 def _save_daily_stats_to_db(email, bot):
-    """Guarda as estatísticas diárias do bot diretamente na coluna daily_stats_json."""
+    """Guarda as estatísticas diárias apenas se estiverem 'dirty' (alteradas)."""
     if not email or not bot:
+        return
+    if not getattr(bot, '_daily_stats_dirty', False):
         return
     try:
         stats_json = json.dumps(bot.get_daily_stats_for_db())
@@ -374,10 +392,40 @@ def _save_daily_stats_to_db(email, bot):
             conn.execute('UPDATE users SET daily_stats_json = ? WHERE email = ?',
                          (stats_json, email))
             conn.commit()
+            bot._daily_stats_dirty = False
         finally:
             conn.close()
     except Exception as e:
         logger.error(f"Erro ao guardar daily_stats: {e}")
+
+def _load_martingale_state(user_id, bot):
+    """Carrega estado do martingale da BD."""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        row = conn.execute('SELECT active, step, original_amount FROM martingale_state WHERE user_id = ?', 
+                          (user_id,)).fetchone()
+        conn.close()
+        if row and row[0]:
+            bot.martingale['active'] = bool(row[0])
+            bot.martingale['step'] = row[1]
+            bot.martingale['original_amount'] = row[2]
+            logger.info(f"📈 Martingale carregado: passo {row[1]}")
+    except Exception as e:
+        logger.error(f"Erro ao carregar martingale: {e}")
+
+def _save_martingale_state(user_id, bot):
+    """Guarda estado do martingale na BD."""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.execute('''INSERT OR REPLACE INTO martingale_state 
+            (user_id, active, step, original_amount, last_updated)
+            VALUES (?,?,?,?,?)''',
+            (user_id, int(bot.martingale['active']), bot.martingale['step'],
+             bot.martingale['original_amount'], time.time()))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao guardar martingale: {e}")
 
 def create_session(user_id, user, force=False):
     with sessions_lock:
@@ -411,10 +459,12 @@ def create_session(user_id, user, force=False):
                 'profit': trade.get('profit', 0),
                 'result': result
             })
+            _save_martingale_state(user_id, bot)
         except Exception as e:
             logger.error(f"Callback de trade falhou: {e}")
 
-    def tick_callback(tick): bot.on_tick(tick)
+    def tick_callback(tick): 
+        bot.on_tick(tick)
 
     client = DerivWebSocketClient(config, on_tick_callback=tick_callback, on_result_callback=on_trade_result)
     client.set_trading_bot(bot)
@@ -422,12 +472,14 @@ def create_session(user_id, user, force=False):
     bot.client = client
     bot.digit_analyzer = analyzer
 
-    # Carregar estatísticas diárias salvas (se existirem)
     saved_daily = user.get('daily_stats')
     if saved_daily:
         bot.set_daily_stats_from_db(saved_daily)
     else:
         bot.reset_daily_stats()
+    bot._daily_stats_dirty = False
+
+    _load_martingale_state(user_id, bot)
 
     new_sess = {
         'client': client,
@@ -489,14 +541,12 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
 
-# Bug #7: Cookie seguro apenas em produção (HTTPS)
 is_production = os.environ.get('FLASK_ENV', 'production') == 'production'
 app.config['SESSION_COOKIE_SECURE'] = is_production
 app.config['SESSION_COOKIE_SAMESITE'] = 'None' if is_production else 'Lax'
 
 from config import config
 
-# Configuração de email (se disponível)
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.example.com')
 app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
 app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() == 'true'
@@ -559,13 +609,16 @@ def auth_status():
     if 'user_id' in session:
         user = UserStore.get(session.get('user_email'))
         if user:
+            tokens = user.get('tokens', {})
             return jsonify({
                 'authenticated': True,
                 'user': {
                     'id': user['id'], 'name': user['name'], 'email': user['email'],
                     'role': user.get('role'),
                     'has_deriv_token': bool(UserStore.get_active_token(user)),
-                    'active_account': user.get('active_account')
+                    'active_account': user.get('active_account'),
+                    'has_demo_token': bool(tokens.get('demo')),
+                    'has_real_token': bool(tokens.get('real'))
                 }
             })
     return jsonify({'authenticated': False})
@@ -591,7 +644,7 @@ def register():
         session['user_name'] = user['name']
         session['user_email'] = user['email']
         session['user_role'] = user.get('role', 'user')
-        logger.info(f"Registo e auto‑login: {email}")
+        logger.info(f"Registo e auto-login: {email}")
 
         return jsonify({
             'status': 'ok',
@@ -810,7 +863,6 @@ def status():
     bot_status['streaming'] = client.streaming if client else False
     analysis = analyzer.get_analysis()
 
-    # Persistir estatísticas diárias na BD
     _save_daily_stats_to_db(session.get('user_email'), bot)
 
     logger.debug(f"📊 STATUS: connected={bot_status.get('connected')}, authorized={bot_status.get('authorized')}, balance={bot_status.get('balance')}")
@@ -834,9 +886,9 @@ def status():
 @app.route('/api/daily-stats/sync', methods=['POST'])
 @require_auth
 def sync_daily_stats():
-    """Força a gravação imediata das daily_stats na BD."""
     sess = get_session(session['user_id'])
     if sess:
+        sess['trading_bot']._daily_stats_dirty = True
         _save_daily_stats_to_db(session.get('user_email'), sess['trading_bot'])
         return jsonify({'status': 'ok'})
     return jsonify({'error': 'Sem sessão'}), 400
@@ -861,6 +913,7 @@ def debug():
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
     })
 
+# ==================== OAUTH CALLBACK ====================
 @app.route('/oauth/callback')
 def oauth_callback():
     logger.info(f"OAuth callback params: {request.args}")
@@ -868,17 +921,42 @@ def oauth_callback():
     if not state_id:
         logger.error("State não enviado pela Deriv")
         return redirect('/?error=invalid_state')
+    
     with oauth_states_lock:
         if state_id not in oauth_states:
             logger.error("State inválido ou expirado")
             return redirect('/?error=invalid_state')
-        state_data = oauth_states.pop(state_id)
+            
+        state_data = oauth_states[state_id]
         now = time.time()
-        expired = [k for k, v in oauth_states.items() if now - v.get('created_at', 0) > 600]
+        
+        # Verificar TTL
+        if now - state_data.get('created_at', 0) > OAUTH_STATE_TTL:
+            oauth_states.pop(state_id, None)
+            logger.error("State expirado")
+            return redirect('/?error=invalid_state')
+        
+        # Permitir reutilização dentro da janela de reuse
+        if state_data.get('used', False):
+            if now - state_data.get('used_at', 0) > OAUTH_STATE_REUSE_WINDOW:
+                oauth_states.pop(state_id, None)
+                logger.error("State já usado e fora da janela de reutilização")
+                return redirect('/?error=invalid_state')
+            logger.info("State reutilizado (refresh dentro da janela)")
+        else:
+            state_data['used'] = True
+            state_data['used_at'] = now
+        
+        # Limpar states expirados
+        expired = [k for k, v in oauth_states.items() 
+                   if now - v.get('created_at', 0) > OAUTH_STATE_TTL or
+                   (v.get('used') and now - v.get('used_at', 0) > OAUTH_STATE_REUSE_WINDOW)]
         for k in expired:
             oauth_states.pop(k, None)
+    
     user_id = state_data['user_id']
     account_type_request = state_data['account_type']
+    
     conn = sqlite3.connect(DATABASE_PATH)
     try:
         row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
@@ -887,6 +965,7 @@ def oauth_callback():
         email = row[0]
     finally:
         conn.close()
+    
     accounts = []
     i = 1
     while request.args.get(f'token{i}'):
@@ -895,9 +974,11 @@ def oauth_callback():
             'acct': request.args.get(f'acct{i}', '')
         })
         i += 1
+    
     if not accounts:
         logger.error("Nenhum token recebido no OAuth")
         return redirect('/?error=oauth_failed')
+    
     for acc in accounts:
         acct = acc['acct']
         tok = acc['token']
@@ -910,6 +991,7 @@ def oauth_callback():
         if (account_type_request == 'demo' and acct.startswith('VR')) or \
            (account_type_request == 'real' and not acct.startswith('VR')):
             UserStore.set_active_account(email, account_type_request)
+    
     user = UserStore.get(email)
     session['user_id'] = user_id
     session['user_email'] = email
@@ -934,7 +1016,9 @@ def deriv_oauth_url():
         oauth_states[state_id] = {
             'user_id': session['user_id'],
             'account_type': request.args.get('account_type', 'demo'),
-            'created_at': time.time()
+            'created_at': time.time(),
+            'used': False,
+            'used_at': None
         }
     url = (
         f"https://oauth.deriv.com/oauth2/authorize"
@@ -1129,6 +1213,7 @@ def martingale_apply():
     bot = sess['trading_bot']
     ok, res = bot.apply_martingale_after_loss(la)
     if ok:
+        _save_martingale_state(session['user_id'], bot)
         return jsonify({'status': 'ok', 'martingale': res})
     return jsonify({'error': res}), 400
 
@@ -1138,6 +1223,7 @@ def martingale_reset():
     sess = get_session(session['user_id'])
     if sess:
         sess['trading_bot'].reset_martingale()
+        _save_martingale_state(session['user_id'], sess['trading_bot'])
     return jsonify({'status': 'ok'})
 
 @app.route('/api/clear_history', methods=['POST'])
@@ -1162,6 +1248,9 @@ def candles_data():
     sess = get_session(session['user_id'])
     if not sess:
         return jsonify({'candles': []})
+    granularity = request.args.get('granularity', 60, type=int)
+    symbol = sess['client'].current_symbol
+    sess['client'].request_candles(symbol, granularity=granularity, count=50)
     return jsonify({'candles': sess.get('candles', [])})
 
 # ==================== AFILIADOS / PAGAMENTOS ====================
