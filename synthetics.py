@@ -9,6 +9,16 @@ logger = logging.getLogger(__name__)
 
 
 class DigitAnalyzer:
+    """
+    Analisador de dígitos para contratos DIGITODD/DIGITEVEN.
+
+    CONVENÇÃO DE SINAIS:
+    - 'BUY'  = apostar em ÍMPAR (DIGITODD)  → último dígito será 1,3,5,7,9
+    - 'SELL' = apostar em PAR   (DIGITEVEN) → último dígito será 0,2,4,6,8
+
+    A lógica baseia-se em REVERSÃO: quando há excesso de ímpares, aposta-se em par (SELL).
+    """
+
     TICKS_PER_DIGIT = 10   # 1 dígito lento a cada 10 ticks ≈ 10 segundos
 
     def __init__(self, max_digits=500):
@@ -39,6 +49,7 @@ class DigitAnalyzer:
         }
 
     def _extract_last_digit(self, price):
+        """Extrai o último dígito do preço."""
         try:
             s = str(Decimal(str(price)).normalize())
             if 'E' in s or 'e' in s:
@@ -54,29 +65,32 @@ class DigitAnalyzer:
                 return 0
 
     def _calculate_entropy(self, digits):
+        """Calcula a entropia de Shannon normalizada (0-1) usando log2(10)."""
         if not digits or len(digits) < 2:
             return 0.0
-        
+
         total = len(digits)
         frequencies = {}
         for d in digits:
             frequencies[d] = frequencies.get(d, 0) + 1
-        
+
         entropy = 0.0
         for count in frequencies.values():
             if count > 0:
                 prob = count / total
                 entropy -= prob * math.log2(prob)
-        
-        max_entropy = math.log2(min(10, len(frequencies) + 1))
+
+        # Correção: máximo teórico é log2(10) para 10 dígitos possíveis
+        max_entropy = math.log2(10)
         if max_entropy > 0:
             normalized = entropy / max_entropy
         else:
             normalized = 0.0
-        
+
         return min(normalized, 1.0)
 
     def add_tick(self, price):
+        """Processa um novo tick e analisa o dígito quando completa um ciclo."""
         try:
             digit  = self._extract_last_digit(price)
             parity = 'IMPAR' if digit % 2 != 0 else 'PAR'
@@ -123,7 +137,7 @@ class DigitAnalyzer:
 
     def _analyse(self, snap):
         total  = len(snap)
-        window = snap[-20:]
+        window = snap[-50:]   # análise alargada para 50 dígitos
         w      = len(window)
         odd_c  = sum(1 for d in window if d % 2 != 0)
         even_c = w - odd_c
@@ -135,94 +149,134 @@ class DigitAnalyzer:
 
         entropy = self._calculate_entropy(snap[-50:])
 
+        # Filtro de rajada: se nos últimos 10 dígitos houver 7 ou mais iguais, anula sinal
+        last10 = snap[-10:] if len(snap) >= 10 else snap
+        if len(last10) == 10:
+            odd_in_10 = sum(1 for d in last10 if d % 2 != 0)
+            if odd_in_10 >= 7 or odd_in_10 <= 3:
+                self._set_no_signal(snap, odd_pct, even_pct, rec_par,
+                                    streak=streak, streak_parity=sp,
+                                    reason='Rajada anómala nos últimos 10 dígitos',
+                                    sequences=seq_info, entropy=entropy)
+                return
+
         candidates = []
 
-        if w < 3:
+        if w < 5:
             self._set_no_signal(snap, odd_pct, even_pct, rec_par,
                                 streak=streak, streak_parity=sp,
-                                reason=f'Aguardando ({total}/3 mínimo)...',
+                                reason=f'Aguardando ({total}/5 mínimo)...',
                                 sequences=seq_info, entropy=entropy)
             return
 
-        # 1. Streak consecutivo
-        if streak >= 3:
-            base_conf = min(60 + (streak - 3) * 8, 92)
+        # 1. Streak consecutivo (>=4)
+        if streak >= 4:
+            base_conf = min(65 + (streak - 4) * 10, 90)
             conf = self._apply_entropy_penalty(base_conf, entropy)
-            if sp == 'PAR':
-                candidates.append((conf, 'BUY', 'streak', f'🔥 {streak} PARES seguidos → aposte ÍMPAR ({conf:.0f}%)'))
-            else:
-                candidates.append((conf, 'SELL', 'streak', f'🔥 {streak} ÍMPARES seguidos → aposte PAR ({conf:.0f}%)'))
-
-        # 2. Dominância nos últimos 20
-        if w >= 10:
-            if odd_pct >= 70:
-                base_conf = min(55 + int((odd_pct - 70) * 1.5), 85)
-                conf = self._apply_entropy_penalty(base_conf, entropy)
-                candidates.append((conf, 'SELL', 'dominance', f'📊 {odd_pct}% ÍMPARES → reversão PAR ({conf:.0f}%)'))
-            elif even_pct >= 70:
-                base_conf = min(55 + int((even_pct - 70) * 1.5), 85)
-                conf = self._apply_entropy_penalty(base_conf, entropy)
-                candidates.append((conf, 'BUY', 'dominance', f'📊 {even_pct}% PARES → reversão ÍMPAR ({conf:.0f}%)'))
-
-        # 3. Alternância
-        if w >= 6:
-            alt = self._calc_alternating(window)
-            if alt >= 5:
-                base_conf = min(55 + (alt - 5) * 5, 80)
-                conf = self._apply_entropy_penalty(base_conf, entropy)
-                if window[-1] % 2 != 0:
-                    candidates.append((conf, 'SELL', 'alternating', f'🔄 Alternância {alt} → PAR ({conf:.0f}%)'))
+            if conf >= 55:
+                if sp == 'PAR':
+                    candidates.append((conf, 'BUY', 'streak', f'🔥 {streak} PARES seguidos → aposte ÍMPAR ({conf:.0f}%)'))
                 else:
-                    candidates.append((conf, 'BUY', 'alternating', f'🔄 Alternância {alt} → ÍMPAR ({conf:.0f}%)'))
+                    candidates.append((conf, 'SELL', 'streak', f'🔥 {streak} ÍMPARES seguidos → aposte PAR ({conf:.0f}%)'))
 
-        # 4. Desequilíbrio moderado
-        if w >= 15 and not candidates:
-            base_conf = 55
-            conf = self._apply_entropy_penalty(base_conf, entropy)
-            if odd_pct >= 62:
-                candidates.append((conf, 'SELL', 'imbalance', f'⚠️ {odd_pct}% ÍMPAR → possível PAR'))
-            elif even_pct >= 62:
-                candidates.append((conf, 'BUY', 'imbalance', f'⚠️ {even_pct}% PAR → possível ÍMPAR'))
+        # 2. Dominância >=75%
+        if w >= 20:
+            if odd_pct >= 75:
+                base_conf = min(60 + int((odd_pct - 75) * 1.8), 85)
+                conf = self._apply_entropy_penalty(base_conf, entropy)
+                if conf >= 55:
+                    candidates.append((conf, 'SELL', 'dominance', f'📊 {odd_pct}% ÍMPARES → reversão PAR ({conf:.0f}%)'))
+            elif even_pct >= 75:
+                base_conf = min(60 + int((even_pct - 75) * 1.8), 85)
+                conf = self._apply_entropy_penalty(base_conf, entropy)
+                if conf >= 55:
+                    candidates.append((conf, 'BUY', 'dominance', f'📊 {even_pct}% PARES → reversão ÍMPAR ({conf:.0f}%)'))
 
+        # 3. Alternância >=6
+        if w >= 10:
+            alt = self._calc_alternating(window)
+            if alt >= 6:
+                base_conf = min(55 + (alt - 6) * 7, 80)
+                conf = self._apply_entropy_penalty(base_conf, entropy)
+                if conf >= 55:
+                    if window[-1] % 2 != 0:
+                        candidates.append((conf, 'SELL', 'alternating', f'🔄 Alternância {alt} → PAR ({conf:.0f}%)'))
+                    else:
+                        candidates.append((conf, 'BUY', 'alternating', f'🔄 Alternância {alt} → ÍMPAR ({conf:.0f}%)'))
+
+        # 4. Desequilíbrio moderado (>=65% e streak >=2) — sempre considerado
+        if w >= 30:
+            if odd_pct >= 65 and streak >= 2:
+                base_conf = 60
+                conf = self._apply_entropy_penalty(base_conf, entropy)
+                if conf >= 55:
+                    candidates.append((conf, 'SELL', 'imbalance', f'⚠️ {odd_pct}% ÍMPAR + streak {streak} → possível PAR'))
+            elif even_pct >= 65 and streak >= 2:
+                base_conf = 60
+                conf = self._apply_entropy_penalty(base_conf, entropy)
+                if conf >= 55:
+                    candidates.append((conf, 'BUY', 'imbalance', f'⚠️ {even_pct}% PAR + streak {streak} → possível ÍMPAR'))
+
+        # Consolidação com exigência de pelo menos 2 padrões concordantes
         with self._lock:
-            if candidates:
-                best = max(candidates, key=lambda x: x[0])
-                conf, action, ptype, reason = best
-                
-                entropy_verdict = self._get_entropy_verdict(entropy)
-                
-                self.last_analysis.update({
-                    'streak': streak, 'streak_parity': sp,
-                    'recommended_action': action if conf >= 55 else None,
-                    'confidence': conf if conf >= 55 else 0,
-                    'pattern_type': ptype if conf >= 55 else None,
-                    'alert': 'SINAL ATIVO' if conf >= 60 else ('AVISO' if conf >= 55 else None),
-                    'reason': reason,
-                    'recent_parity': rec_par,
-                    'odd_pct': odd_pct, 'even_pct': even_pct,
-                    'total_digits': total,
-                    'all_signals': [{'type':c[2],'action':c[1],'confidence':c[0],'reason':c[3]} for c in candidates],
-                    'digit_counter': self._digit_counter,
-                    'sequences': seq_info,
-                    'entropy': round(entropy, 3),
-                    'entropy_verdict': entropy_verdict
-                })
+            if len(candidates) >= 2:
+                best_two = sorted(candidates, key=lambda x: x[0], reverse=True)[:2]
+                if best_two[0][1] == best_two[1][1]:
+                    conf = (best_two[0][0] + best_two[1][0]) / 2
+                    action = best_two[0][1]
+                    ptype = f"{best_two[0][2]}+{best_two[1][2]}"
+                    reason = f"🤝 Consenso: {best_two[0][3]} | {best_two[1][3]}"
+                else:
+                    self._set_no_signal(snap, odd_pct, even_pct, rec_par,
+                                        streak=streak, streak_parity=sp,
+                                        reason='Padrões discordantes',
+                                        sequences=seq_info, entropy=entropy)
+                    return
+            elif len(candidates) == 1:
+                best = candidates[0]
+                if best[0] >= 65:
+                    conf, action, ptype, reason = best
+                else:
+                    self._set_no_signal(snap, odd_pct, even_pct, rec_par,
+                                        streak=streak, streak_parity=sp,
+                                        reason=f'Confiança insuficiente ({best[0]:.0f}%)',
+                                        sequences=seq_info, entropy=entropy)
+                    return
             else:
                 self._set_no_signal(snap, odd_pct, even_pct, rec_par,
                                     streak=streak, streak_parity=sp,
-                                    reason=f'Equilíbrio: {odd_pct}% ímpar / {even_pct}% par. Streak: {streak}.',
+                                    reason='Nenhum padrão significativo',
                                     sequences=seq_info, entropy=entropy)
+                return
+
+            entropy_verdict = self._get_entropy_verdict(entropy)
+            self.last_analysis.update({
+                'streak': streak, 'streak_parity': sp,
+                'recommended_action': action,
+                'confidence': round(conf, 1),
+                'pattern_type': ptype,
+                'alert': 'SINAL ATIVO' if conf >= 60 else 'AVISO',
+                'reason': reason,
+                'recent_parity': rec_par,
+                'odd_pct': odd_pct, 'even_pct': even_pct,
+                'total_digits': total,
+                'all_signals': [{'type':c[2],'action':c[1],'confidence':c[0],'reason':c[3]} for c in candidates],
+                'digit_counter': self._digit_counter,
+                'sequences': seq_info,
+                'entropy': round(entropy, 3),
+                'entropy_verdict': entropy_verdict
+            })
 
     def _apply_entropy_penalty(self, base_confidence, entropy):
+        """Penalização agressiva da entropia."""
         if entropy > 0.95:
-            penalty = 0.25
-            logger.info(f"🎲 Entropia alta ({entropy:.3f}) → penalização de {penalty*100:.0f}%")
+            return 0.0
         elif entropy > 0.85:
-            penalty = 0.15
-            logger.info(f"🎲 Entropia elevada ({entropy:.3f}) → penalização de {penalty*100:.0f}%")
+            penalty = 0.35
+        elif entropy > 0.75:
+            penalty = 0.20
         else:
             penalty = 0.0
-        
         return base_confidence * (1 - penalty)
 
     def _get_entropy_verdict(self, entropy):
@@ -284,7 +338,8 @@ class DigitAnalyzer:
             return tr if tr > 0 else self.TICKS_PER_DIGIT
 
     def get_digit_counter(self):
-        return self._digit_counter
+        with self._lock:
+            return self._digit_counter
 
     def get_current_digit(self):
         return self.current_digit
