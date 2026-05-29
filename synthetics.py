@@ -21,7 +21,7 @@ class DigitAnalyzer:
 
     TICKS_PER_DIGIT = 10   # 1 dígito lento a cada 10 ticks ≈ 10 segundos
 
-    def __init__(self, max_digits=500):
+    def __init__(self, max_digits=1000):
         self.slow_digits   = deque(maxlen=max_digits)
         self.current_digit  = None
         self.current_parity = '---'
@@ -137,7 +137,7 @@ class DigitAnalyzer:
 
     def _analyse(self, snap):
         total  = len(snap)
-        window = snap[-50:]   # análise alargada para 50 dígitos
+        window = snap[-100:]   # janela alargada para 100 dígitos (mais estável que 50)
         w      = len(window)
         odd_c  = sum(1 for d in window if d % 2 != 0)
         even_c = w - odd_c
@@ -147,7 +147,7 @@ class DigitAnalyzer:
         streak, sp = self._calc_streak(snap)
         seq_info = self._find_sequences(snap)
 
-        entropy = self._calculate_entropy(snap[-50:])
+        entropy = self._calculate_entropy(snap[-100:])
 
         # Filtro de rajada: se nos últimos 10 dígitos houver 7 ou mais iguais, anula sinal
         last10 = snap[-10:] if len(snap) >= 10 else snap
@@ -377,4 +377,4 @@ class DigitAnalyzer:
 
 
 # Singleton de retrocompatibilidade
-digit_analyzer = DigitAnalyzer(max_digits=500)
+digit_analyzer = DigitAnalyzer(max_digits=1000)
