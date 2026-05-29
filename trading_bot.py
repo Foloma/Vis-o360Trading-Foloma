@@ -61,6 +61,11 @@ class TradingBot:
         # Controlo de atualização do sinal por dígito lento
         self._last_digit_counter = -1
 
+        # Callbacks de sinal (definidos pelo app.py)
+        self.on_signal_callback = None
+        self.on_signal_result_callback = None
+        self._last_signal_id = None
+
     def start(self, client):
         self.client = client
         self.daily_stats['start_balance'] = self.balance
@@ -108,7 +113,10 @@ class TradingBot:
     def on_tick(self, tick):
         self.current_price = tick['price']
         self.current_symbol = tick['symbol']
-        self.indicators.add_price(self.current_price, self.current_symbol)
+        # Passa também high/low se disponíveis; caso contrário, o indicador usa o próprio preço
+        high = tick.get('high', None)
+        low = tick.get('low', None)
+        self.indicators.add_price(self.current_price, self.current_symbol, high, low)
 
         if 'R_' in self.current_symbol and self.digit_analyzer:
             self.digit_analyzer.add_tick(self.current_price)
@@ -124,14 +132,12 @@ class TradingBot:
         self.check_risk_limits()
         self.check_take_profit()
 
-        # Atualiza o sinal apenas quando há um novo dígito lento (ou se não houver analisador de dígitos)
         if self._should_update_signal():
             self._update_signal()
 
     def _should_update_signal(self):
-        """Determina se o sinal deve ser recalculado neste tick."""
         if not self.digit_analyzer:
-            return True  # sem analisador de dígitos, atualiza a cada tick
+            return True
         
         current_counter = self.digit_analyzer.get_digit_counter()
         if current_counter != self._last_digit_counter:
@@ -148,11 +154,9 @@ class TradingBot:
          self._cached_digit_action) = self._calculate_signal_impl()
 
     def calculate_signal(self):
-        """Retorna o sinal cacheado (compatível com app.py: 2 valores)."""
         return self._cached_signal, self._cached_confidence
 
     def get_cached_signal_details(self):
-        """Retorna todos os detalhes do sinal cacheado."""
         return (self._cached_signal, self._cached_confidence,
                 self._cached_tech_confidence, self._cached_digit_confidence,
                 self._cached_digit_action)
@@ -165,23 +169,39 @@ class TradingBot:
         if not self.last_analysis:
             return 'NEUTRAL', 0, 0, 0, None
 
+        # Obter regime de mercado
+        regime = self.last_analysis.get('adx', {}).get('regime', 'UNKNOWN')
+        adx_value = self.last_analysis.get('adx', {}).get('score', 0)
+
         tech_signal, tech_conf = self._calculate_pure_technical(prices)
         logger.info(
             f"🔍 [{self.current_symbol}] TÉCNICO PURO: {tech_signal} ({tech_conf:.1f}%) "
-            f"| Preços: {len(prices)}"
+            f"| Preços: {len(prices)} | Regime: {regime} (ADX {adx_value:.1f})"
         )
+
+        # Bloqueio por regime de mercado (modo Ativos / Híbrido)
+        if tech_signal != 'NEUTRAL':
+            if regime in ('RANGING', 'VOLATILE'):
+                logger.info(f"⛔ Sinal {tech_signal} bloqueado – regime {regime} não adequado para CALL/PUT")
+                return 'NEUTRAL', 0, tech_conf, 0, None
+            elif regime == 'VOLATILE':
+                tech_conf *= 0.9  # reduz confiança em 10% se volátil
 
         if tech_signal != 'NEUTRAL' and not self._check_consensus(self.last_analysis, tech_signal):
             logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=2 indicadores)")
             return 'NEUTRAL', 0, tech_conf, 0, None
 
         if not (self.current_symbol.startswith('R_') and self.digit_analyzer):
+            # Notificar callback de sinal se o sinal for válido (apenas técnico)
+            if tech_signal != 'NEUTRAL' and tech_conf >= config.RISK_LIMITS.get('min_confidence', 55):
+                self._notify_signal(tech_signal, tech_conf, tech_conf, 0, None)
             return tech_signal, tech_conf, tech_conf, 0, None
 
         dig_action, dig_conf = self._get_digit_signal()
-        # Fallback alinhado com config.py: 55
         if not dig_action or dig_conf < config.RISK_LIMITS.get('min_confidence_digits', 55):
             logger.info(f"🎲 [{self.current_symbol}] Dígito sem sinal válido: {dig_action} ({dig_conf:.1f}%)")
+            if tech_signal != 'NEUTRAL' and tech_conf >= config.RISK_LIMITS.get('min_confidence', 55):
+                self._notify_signal(tech_signal, tech_conf, tech_conf, dig_conf, dig_action)
             return tech_signal, tech_conf, tech_conf, dig_conf, dig_action
 
         logger.info(f"🎲 [{self.current_symbol}] DÍGITO: {dig_action} ({dig_conf:.1f}%)")
@@ -203,10 +223,27 @@ class TradingBot:
 
         if confidence >= config.RISK_LIMITS.get('min_confidence', 55):
             logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – VÁLIDO")
+            # Notificar callback de sinal
+            self._notify_signal(signal, confidence, tech_conf, dig_conf, dig_action)
         else:
             logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – ABAIXO DO LIMIAR")
 
         return signal, min(confidence, 100), tech_conf, dig_conf, dig_action
+
+    def _notify_signal(self, signal, confidence, tech_conf, dig_conf, dig_action):
+        """Dispara o callback de sinal (se definido) para registo na BD."""
+        if self.on_signal_callback:
+            try:
+                self.on_signal_callback({
+                    'signal': signal,
+                    'confidence': confidence,
+                    'tech_confidence': tech_conf,
+                    'digit_confidence': dig_conf,
+                    'digit_action': dig_action,
+                    'symbol': self.current_symbol
+                })
+            except Exception as e:
+                logger.error(f"Erro no callback de sinal: {e}")
 
     def reset_daily_stats(self):
         self.daily_stats = {
@@ -303,7 +340,7 @@ class TradingBot:
             aligned += 1
         elif signal == 'SELL' and ('sobrecomprado' in bb_desc or 'acima' in bb_desc):
             aligned += 1
-        return aligned >= 2   # era 3, agora 2
+        return aligned >= 2
 
     def _calculate_pure_technical(self, prices):
         if len(prices) < 20 or not self.last_analysis:
@@ -507,6 +544,18 @@ class TradingBot:
             self.update_stats()
             if self.client:
                 self.client.get_balance()
+            
+            # Notificar resultado do sinal associado (Fase 0)
+            if self.on_signal_result_callback and self._last_signal_id:
+                try:
+                    self.on_signal_result_callback(
+                        self._last_signal_id,
+                        'win' if is_win else 'loss',
+                        profit
+                    )
+                    self._last_signal_id = None
+                except Exception as e:
+                    logger.error(f"Erro no callback de resultado: {e}")
         except Exception as e:
             logger.error(f"Erro ao processar resultado: {e}")
 
