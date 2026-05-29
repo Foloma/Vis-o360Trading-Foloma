@@ -6,31 +6,36 @@ from collections import deque
 class TechnicalIndicators:
     def __init__(self, max_length=200):
         self.prices_by_symbol = {}
+        self.highs_by_symbol = {}
+        self.lows_by_symbol = {}
         self.max_length = max_length
         self._lock = threading.RLock()
 
         # Caches incrementais para MACD (por símbolo)
         self._ema_fast_cache = {}
         self._ema_slow_cache = {}
-        self._macd_line_history = {}    # deque dos últimos valores de MACD line
-        self._macd_initialized = set()  # símbolos cujas EMAs já foram inicializadas
+        self._macd_line_history = {}
+        self._macd_initialized = set()
 
-        # Parâmetros do MACD
         self.fast = 12
         self.slow = 26
         self.signal_period = 9
 
-    def add_price(self, price, symbol='R_100'):
+    def add_price(self, price, symbol='R_100', high=None, low=None):
         with self._lock:
             if symbol not in self.prices_by_symbol:
                 self.prices_by_symbol[symbol] = deque(maxlen=self.max_length)
+                self.highs_by_symbol[symbol] = deque(maxlen=self.max_length)
+                self.lows_by_symbol[symbol] = deque(maxlen=self.max_length)
                 self._macd_line_history[symbol] = deque(maxlen=self.signal_period + 5)
 
             self.prices_by_symbol[symbol].append(price)
+            # Para ATR usamos o próprio preço se high/low não forem fornecidos
+            self.highs_by_symbol[symbol].append(high if high is not None else price)
+            self.lows_by_symbol[symbol].append(low if low is not None else price)
             self._update_macd_cache(symbol)
 
     def _update_macd_cache(self, symbol):
-        """Atualiza incrementalmente as EMAs e a linha MACD para o símbolo."""
         prices = self.prices_by_symbol[symbol]
         if len(prices) < self.slow:
             return
@@ -38,7 +43,6 @@ class TechnicalIndicators:
         k_fast = 2.0 / (self.fast + 1)
         k_slow = 2.0 / (self.slow + 1)
 
-        # Inicialização das EMAs quando atingimos o número mínimo de preços
         if symbol not in self._macd_initialized and len(prices) >= self.slow:
             ema_fast = sum(list(prices)[:self.fast]) / self.fast
             for p in list(prices)[self.fast:]:
@@ -54,7 +58,6 @@ class TechnicalIndicators:
             self._macd_initialized.add(symbol)
             return
 
-        # Atualização incremental
         if symbol in self._macd_initialized:
             last_price = prices[-1]
             ema_fast = last_price * k_fast + self._ema_fast_cache[symbol] * (1 - k_fast)
@@ -74,7 +77,6 @@ class TechnicalIndicators:
         return sum(data[-period:]) / period
 
     def _ema(self, data, period):
-        # Mantido para compatibilidade; o MACD usa o cache incremental.
         if len(data) < period:
             return None
         k = 2.0 / (period + 1)
@@ -104,10 +106,6 @@ class TechnicalIndicators:
         return 100 - (100 / (1 + rs))
 
     def _macd(self, data, fast=12, slow=26, signal=9, symbol=None):
-        """
-        Retorna (macd_line, signal_line, histogram) usando caches incrementais.
-        Requer symbol para identificar o cache correto.
-        """
         if symbol is None or symbol not in self._macd_initialized:
             return None, None, None
 
@@ -117,7 +115,6 @@ class TechnicalIndicators:
 
         macd_line = macd_history[-1]
 
-        # Cálculo da signal line como EMA dos últimos valores do MACD
         if len(macd_history) >= signal:
             values = list(macd_history)[-signal:]
             k_signal = 2.0 / (signal + 1)
@@ -131,10 +128,6 @@ class TechnicalIndicators:
             return macd_line, None, None
 
     def _bollinger_bands(self, data, period=20, std_dev=None):
-        """
-        Calcula Bollinger Bands. Se std_dev não for fornecido,
-        ajusta automaticamente com base na volatilidade recente.
-        """
         if len(data) < period:
             return None, None, None
         prices = list(data)[-period:]
@@ -142,12 +135,11 @@ class TechnicalIndicators:
         variance = sum((p - sma) ** 2 for p in prices) / period
         std = math.sqrt(variance)
 
-        # Ajuste adaptativo do desvio padrão
         if std_dev is None:
             avg_price = sma
             volatility = std / avg_price if avg_price > 0 else 0
             if volatility > 0.001:
-                std_dev = 2.5   # mais volatilidade → bandas mais largas
+                std_dev = 2.5
             else:
                 std_dev = 2.0
         upper = sma + std_dev * std
@@ -182,6 +174,111 @@ class TechnicalIndicators:
             return None
         return sum(data[-period:]) / period
 
+    # ---------- NOVOS MÉTODOS (FASE 1) ----------
+
+    def _atr(self, symbol='R_100', period=14):
+        """Average True Range - volatilidade do mercado."""
+        highs = list(self.highs_by_symbol.get(symbol, deque()))
+        lows = list(self.lows_by_symbol.get(symbol, deque()))
+        prices = self.get_prices(symbol)
+
+        if len(highs) < period + 1 or len(lows) < period + 1 or len(prices) < period + 1:
+            return None
+
+        tr_values = []
+        for i in range(-period, 0):
+            high = highs[i]
+            low = lows[i]
+            prev_close = prices[i - 1]
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            tr_values.append(tr)
+
+        # Usa EMA para suavizar o ATR
+        avg_tr = sum(tr_values[:period]) / period
+        k = 2.0 / (period + 1)
+        for tr in tr_values[period:]:
+            avg_tr = tr * k + avg_tr * (1 - k)
+
+        return avg_tr
+
+    def _adx(self, symbol='R_100', period=14):
+        """Average Directional Index - força da tendência."""
+        highs = list(self.highs_by_symbol.get(symbol, deque()))
+        lows = list(self.lows_by_symbol.get(symbol, deque()))
+        prices = self.get_prices(symbol)
+
+        if len(highs) < period * 2 or len(lows) < period * 2 or len(prices) < period * 2:
+            return None
+
+        dm_plus = []
+        dm_minus = []
+        tr_vals = []
+
+        for i in range(-period * 2, 0):
+            high = highs[i]
+            low = lows[i]
+            prev_high = highs[i - 1]
+            prev_low = lows[i - 1]
+            prev_close = prices[i - 1]
+
+            up_move = high - prev_high
+            down_move = prev_low - low
+
+            dm_plus.append(up_move if (up_move > down_move and up_move > 0) else 0.0)
+            dm_minus.append(down_move if (down_move > up_move and down_move > 0) else 0.0)
+
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            tr_vals.append(tr)
+
+        # Calcular ATR como EMA para obter o suavizado
+        avg_tr = sum(tr_vals[:period]) / period
+        k = 2.0 / (period + 1)
+        for tr in tr_vals[period:]:
+            avg_tr = tr * k + avg_tr * (1 - k)
+
+        # Calcular DI+ e DI-
+        sum_dm_plus = sum(dm_plus[:period])
+        sum_dm_minus = sum(dm_minus[:period])
+
+        for j in range(period, len(dm_plus)):
+            sum_dm_plus = dm_plus[j] * k + sum_dm_plus * (1 - k)
+            sum_dm_minus = dm_minus[j] * k + sum_dm_minus * (1 - k)
+
+        di_plus = (sum_dm_plus / avg_tr * 100) if avg_tr > 0 else 0
+        di_minus = (sum_dm_minus / avg_tr * 100) if avg_tr > 0 else 0
+
+        # ADX
+        dx = abs(di_plus - di_minus) / (di_plus + di_minus) * 100 if (di_plus + di_minus) > 0 else 0
+
+        # Nota: para simplificar, retornamos apenas o último valor calculado
+        return dx
+
+    def get_market_regime(self, symbol='R_100'):
+        """
+        Classifica o regime do mercado:
+        - TRENDING: ADX >= 20 (tendência definida)
+        - RANGING: ADX < 20 e volatilidade baixa
+        - VOLATILE: ADX < 20 mas ATR alto (> 0.05% do preço)
+        """
+        adx = self._adx(symbol)
+        atr = self._atr(symbol)
+        prices = self.get_prices(symbol)
+
+        if adx is None or atr is None or len(prices) < 20:
+            return 'UNKNOWN', 0.0
+
+        current_price = prices[-1]
+        atr_pct = (atr / current_price * 100) if current_price > 0 else 0
+
+        if adx >= 20:
+            return 'TRENDING', adx
+        elif atr_pct > 0.05:
+            return 'VOLATILE', adx
+        else:
+            return 'RANGING', adx
+
+    # ---------- FIM DOS NOVOS MÉTODOS ----------
+
     def get_all_indicators(self, symbol='R_100'):
         prices = self.get_prices(symbol)
         n = len(prices)
@@ -193,6 +290,8 @@ class TechnicalIndicators:
                 'macd':       {'score': 0,  'desc': '---'},
                 'bollinger':  {'score': 0,  'desc': '---'},
                 'stochastic': {'score': 50, 'desc': '---'},
+                'adx':        {'score': 0,  'desc': '---', 'regime': 'UNKNOWN'},
+                'atr':        {'value': 0},
                 'sma200': None, 'sma9': None, 'sma21': None,
                 'sma50': None,  'ema12': None, 'ema26': None
             }
@@ -206,7 +305,7 @@ class TechnicalIndicators:
         ema12  = self._ema(data, 12)  if n >= 12  else None
         ema26  = self._ema(data, 26)  if n >= 26  else None
 
-        # ===== TENDÊNCIA =====
+        # TENDÊNCIA
         if sma9 is not None and sma21 is not None:
             if sma9 > sma21:
                 trend_desc, trend_score = 'ALTA', 80
@@ -217,7 +316,7 @@ class TechnicalIndicators:
         else:
             trend_desc, trend_score = '---', 0
 
-        # ===== RSI =====
+        # RSI
         rsi = self._rsi(data)
         if rsi is not None:
             rsi_score = rsi
@@ -234,7 +333,7 @@ class TechnicalIndicators:
         else:
             rsi_score, rsi_desc = 50, '---'
 
-        # ===== MACD =====
+        # MACD
         macd_line, signal_line, histogram = self._macd(data, symbol=symbol)
         if macd_line is not None and histogram is not None:
             if histogram > 0:
@@ -253,7 +352,7 @@ class TechnicalIndicators:
         else:
             macd_desc, macd_score = '---', 0
 
-        # ===== BOLLINGER =====
+        # BOLLINGER
         upper, middle, lower = self._bollinger_bands(data)
         if upper is not None:
             last_price = data[-1]
@@ -271,7 +370,7 @@ class TechnicalIndicators:
         else:
             bb_desc, bb_score = '---', 0
 
-        # ===== ESTOCÁSTICO =====
+        # ESTOCÁSTICO
         stoch_k, stoch_d = self._stochastic(data)
         if stoch_k is not None:
             stoch_score = stoch_k
@@ -288,12 +387,32 @@ class TechnicalIndicators:
         else:
             stoch_score, stoch_desc = 50, '---'
 
+        # ADX + REGIME
+        adx = self._adx(symbol)
+        regime, adx_value = self.get_market_regime(symbol)
+        atr = self._atr(symbol)
+
+        if adx is not None:
+            if adx >= 25:
+                adx_desc = 'TENDÊNCIA FORTE'
+            elif adx >= 20:
+                adx_desc = 'TENDÊNCIA'
+            elif adx >= 15:
+                adx_desc = 'FRACO'
+            else:
+                adx_desc = 'SEM TENDÊNCIA'
+            adx_score = adx
+        else:
+            adx_desc, adx_score = '---', 0
+
         return {
             'trend':      {'score': trend_score, 'desc': trend_desc},
             'rsi':        {'score': rsi_score,   'desc': rsi_desc},
             'macd':       {'score': macd_score,  'desc': macd_desc},
             'bollinger':  {'score': bb_score,    'desc': bb_desc},
             'stochastic': {'score': stoch_score, 'desc': stoch_desc},
+            'adx':        {'score': adx_score,   'desc': adx_desc, 'regime': regime},
+            'atr':        {'value': atr if atr else 0},
             'sma200': sma200,
             'sma9':   sma9,
             'sma21':  sma21,
@@ -303,16 +422,16 @@ class TechnicalIndicators:
         }
 
     def reset_macd_cache(self):
-        """Limpa todos os caches do MACD (usado após gaps de reconexão)."""
         self._ema_fast_cache.clear()
         self._ema_slow_cache.clear()
         self._macd_line_history.clear()
         self._macd_initialized.clear()
 
     def reset_all(self):
-        """Limpa histórico de preços e todos os caches (MACD, EMAs, etc.)."""
         with self._lock:
             self.prices_by_symbol.clear()
+            self.highs_by_symbol.clear()
+            self.lows_by_symbol.clear()
             self._ema_fast_cache.clear()
             self._ema_slow_cache.clear()
             self._macd_line_history.clear()
