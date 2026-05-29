@@ -1,5 +1,5 @@
 import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid
-from datetime import datetime
+from datetime import datetime, date
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, abort
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -127,7 +127,6 @@ def init_db():
         key TEXT PRIMARY KEY,
         value TEXT
     )''')
-    # Tabela para persistir estado do martingale
     c.execute('''CREATE TABLE IF NOT EXISTS martingale_state (
         user_id TEXT PRIMARY KEY,
         active INTEGER DEFAULT 0,
@@ -135,15 +134,27 @@ def init_db():
         original_amount REAL DEFAULT 0,
         last_updated REAL
     )''')
-    # Migração: adicionar coluna daily_stats_json se não existir
+    # NOVA TABELA: sinais emitidos pelo bot (Fase 0)
+    c.execute('''CREATE TABLE IF NOT EXISTS signals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        timestamp REAL NOT NULL,
+        symbol TEXT,
+        signal TEXT,
+        confidence REAL,
+        tech_confidence REAL,
+        digit_confidence REAL,
+        digit_action TEXT,
+        regime TEXT DEFAULT 'UNKNOWN',
+        executed INTEGER DEFAULT 0,
+        result TEXT,
+        profit REAL
+    )''')
     try:
         c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
     except sqlite3.OperationalError:
         pass
-
-    # Limpeza de tokens de reset expirados
     c.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
-
     conn.commit()
     conn.close()
 
@@ -345,9 +356,8 @@ oauth_states_lock = threading.Lock()
 connecting_lock = threading.Lock()
 connecting_users = set()
 
-# Constantes para OAuth (definidas localmente para não depender de config.py)
-OAUTH_STATE_TTL = 600          # 10 minutos
-OAUTH_STATE_REUSE_WINDOW = 30  # 30 segundos
+OAUTH_STATE_TTL = 600
+OAUTH_STATE_REUSE_WINDOW = 30
 
 def reset_bot_state(bot):
     bot.reset_stats()
@@ -380,7 +390,6 @@ def persist_trade(user_id, trade_data):
         conn.close()
 
 def _save_daily_stats_to_db(email, bot):
-    """Guarda as estatísticas diárias apenas se estiverem 'dirty' (alteradas)."""
     if not email or not bot:
         return
     if not getattr(bot, '_daily_stats_dirty', False):
@@ -399,7 +408,6 @@ def _save_daily_stats_to_db(email, bot):
         logger.error(f"Erro ao guardar daily_stats: {e}")
 
 def _load_martingale_state(user_id, bot):
-    """Carrega estado do martingale da BD."""
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         row = conn.execute('SELECT active, step, original_amount FROM martingale_state WHERE user_id = ?', 
@@ -414,7 +422,6 @@ def _load_martingale_state(user_id, bot):
         logger.error(f"Erro ao carregar martingale: {e}")
 
 def _save_martingale_state(user_id, bot):
-    """Guarda estado do martingale na BD."""
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         conn.execute('''INSERT OR REPLACE INTO martingale_state 
@@ -444,7 +451,7 @@ def create_session(user_id, user, force=False):
     from synthetics import DigitAnalyzer
 
     bot = TradingBot()
-    analyzer = DigitAnalyzer(max_digits=500)
+    analyzer = DigitAnalyzer(max_digits=1000)
 
     def on_trade_result(trade):
         try:
@@ -480,6 +487,42 @@ def create_session(user_id, user, force=False):
     bot._daily_stats_dirty = False
 
     _load_martingale_state(user_id, bot)
+
+    # CALLBACKS DE SINAL (Fase 0)
+    def on_signal(signal_data):
+        try:
+            conn = sqlite3.connect(DATABASE_PATH)
+            conn.execute('''INSERT INTO signals 
+                (user_id, timestamp, symbol, signal, confidence, tech_confidence, digit_confidence, digit_action, regime)
+                VALUES (?,?,?,?,?,?,?,?,?)''',
+                (user_id, time.time(), signal_data.get('symbol', bot.current_symbol),
+                 signal_data['signal'], signal_data['confidence'],
+                 signal_data.get('tech_confidence', 0), signal_data.get('digit_confidence', 0),
+                 signal_data.get('digit_action'), 'UNKNOWN'))
+            conn.commit()
+            signal_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.close()
+            bot._last_signal_id = signal_id
+            logger.info(f"📡 Sinal registado na BD: ID={signal_id}, {signal_data['signal']} ({signal_data['confidence']:.1f}%)")
+        except Exception as e:
+            logger.error(f"Erro ao registar sinal: {e}")
+
+    def on_signal_result(signal_id, result, profit):
+        if not signal_id:
+            return
+        try:
+            conn = sqlite3.connect(DATABASE_PATH)
+            conn.execute('UPDATE signals SET executed=1, result=?, profit=? WHERE id=?',
+                         (result, profit, signal_id))
+            conn.commit()
+            conn.close()
+            logger.info(f"📡 Sinal ID={signal_id} atualizado: {result}, profit={profit}")
+        except Exception as e:
+            logger.error(f"Erro ao atualizar sinal: {e}")
+
+    bot.on_signal_callback = on_signal
+    bot.on_signal_result_callback = on_signal_result
+    bot._last_signal_id = None
 
     new_sess = {
         'client': client,
@@ -913,7 +956,6 @@ def debug():
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
     })
 
-# ==================== OAUTH CALLBACK ====================
 @app.route('/oauth/callback')
 def oauth_callback():
     logger.info(f"OAuth callback params: {request.args}")
@@ -930,13 +972,11 @@ def oauth_callback():
         state_data = oauth_states[state_id]
         now = time.time()
         
-        # Verificar TTL
         if now - state_data.get('created_at', 0) > OAUTH_STATE_TTL:
             oauth_states.pop(state_id, None)
             logger.error("State expirado")
             return redirect('/?error=invalid_state')
         
-        # Permitir reutilização dentro da janela de reuse
         if state_data.get('used', False):
             if now - state_data.get('used_at', 0) > OAUTH_STATE_REUSE_WINDOW:
                 oauth_states.pop(state_id, None)
@@ -947,7 +987,6 @@ def oauth_callback():
             state_data['used'] = True
             state_data['used_at'] = now
         
-        # Limpar states expirados
         expired = [k for k, v in oauth_states.items() 
                    if now - v.get('created_at', 0) > OAUTH_STATE_TTL or
                    (v.get('used') and now - v.get('used_at', 0) > OAUTH_STATE_REUSE_WINDOW)]
@@ -1052,7 +1091,7 @@ def trade():
             return jsonify({'error': 'Valor inválido'}), 400
 
         sig, conf = bot.calculate_signal()
-        if conf < config.RISK_LIMITS.get('min_confidence', 60):
+        if conf < config.RISK_LIMITS.get('min_confidence', 55):
             return jsonify({'error': f'Confiança insuficiente: {conf:.1f}%'}), 400
 
         ok = sess['client'].place_trade('CALL' if action == 'BUY' else 'PUT', amt, False)
@@ -1252,6 +1291,32 @@ def candles_data():
     symbol = sess['client'].current_symbol
     sess['client'].request_candles(symbol, granularity=granularity, count=50)
     return jsonify({'candles': sess.get('candles', [])})
+
+# ==================== PLACAR DE SINAIS (FASE 0) ====================
+@app.route('/api/signals/scoreboard')
+@require_auth
+def signals_scoreboard():
+    user_id = session['user_id']
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        total = conn.execute('SELECT COUNT(*) FROM signals WHERE user_id=? AND timestamp>=?',
+                             (user_id, today_start)).fetchone()[0]
+        wins = conn.execute('SELECT COUNT(*) FROM signals WHERE user_id=? AND timestamp>=? AND result="win"',
+                            (user_id, today_start)).fetchone()[0]
+        losses = conn.execute('SELECT COUNT(*) FROM signals WHERE user_id=? AND timestamp>=? AND result="loss"',
+                              (user_id, today_start)).fetchone()[0]
+        pending = total - wins - losses
+    finally:
+        conn.close()
+    win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
+    return jsonify({
+        'today_signals': total,
+        'would_have_won': wins,
+        'would_have_lost': losses,
+        'pending': pending,
+        'simulated_win_rate': round(win_rate, 1)
+    })
 
 # ==================== AFILIADOS / PAGAMENTOS ====================
 def credit_affiliate_commission(user_email, amount):
