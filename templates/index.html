@@ -119,6 +119,10 @@
     .score-item { background: #020617; padding: 6px; border-radius: 6px; text-align: center; }
     .score-label { font-size: 8px; color: var(--muted); text-transform: uppercase; }
     .score-value { font-size: 18px; font-weight: 700; }
+    .regime-badge { font-size: 10px; padding: 3px 8px; border-radius: 10px; font-weight: 700; display: inline-block; }
+    .regime-trending { background: #00f0b520; color: var(--accent); }
+    .regime-ranging { background: #64748b20; color: var(--muted); }
+    .regime-volatile { background: #ffaa0020; color: var(--warning); }
   </style>
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -174,6 +178,7 @@
       <tr><td><strong>Barras Técnico / Dígitos / Final</strong></td><td>Origem do sinal. Se discordam, não há sinal.</td></tr>
       <tr><td><strong>Gráfico</strong></td><td>Contexto visual. Use para confirmar, não como critério único.</td></tr>
       <tr><td><strong>RSI, MACD, TREND, BB, ADX</strong></td><td>Indicadores técnicos. ADX mede força da tendência.</td></tr>
+      <tr><td><strong>Regime (TRENDING/RANGING/VOLATILE)</strong></td><td>Condição do mercado. TRENDING = ideal para CALL/PUT. RANGING = evitar.</td></tr>
       <tr><td><strong>Entropia (Dígitos)</strong></td><td>Aleatoriedade. "BEM DEFINIDO" = padrão. "ALEATÓRIO" = não operar.</td></tr>
       <tr><td><strong>Placar de Sinais</strong></td><td>Sinais emitidos hoje e quantos teriam ganho se tivesse operado.</td></tr>
     </table>
@@ -239,7 +244,7 @@
       <div id="conSt" style="text-align:center;font-size:10px;color:#ffaa00"></div>
     </div>
 
-    <!-- PLACAR DE SINAIS (FASE 0) -->
+    <!-- PLACAR DE SINAIS -->
     <div class="card" id="signalScoreboard" style="display:none">
       <div class="card-title">📡 PLACAR DE SINAIS HOJE</div>
       <div class="scoreboard">
@@ -283,6 +288,8 @@
           <div class="ind"><span class="label">TREND</span><span class="value" id="trS">-</span></div>
           <div class="ind"><span class="label">BB</span><span class="value" id="bbS">-</span></div>
         </div>
+        <!-- Regime do mercado -->
+        <div id="regimeDisplay" style="text-align:center;margin-top:4px;font-size:10px;color:var(--muted);"></div>
       </div>
 
       <div id="pDigitos" class="hidden">
@@ -471,7 +478,7 @@ function scrollToSection(id) {
 
 function initSyms(){
   let h='';
-  for(const[k,v] of Object.entries(syms)) h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}', this)">${v}</button>`;
+  for(const[k,v]of Object.entries(syms)) h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}', this)">${v}</button>`;
   document.getElementById('symSel').innerHTML=h;
 }
 function chgSym(s, el){
@@ -655,6 +662,19 @@ function updateAll(){
     document.getElementById('mcS').textContent=bot.analysis?.macd?.desc||'---';
     document.getElementById('trS').textContent=bot.analysis?.trend?.desc||'---';
     document.getElementById('bbS').textContent=bot.analysis?.bollinger?.desc||'---';
+
+    // Mostrar regime
+    const regime = bot.analysis?.adx?.regime || 'UNKNOWN';
+    const regimeEl = document.getElementById('regimeDisplay');
+    if (regimeEl) {
+      let regimeClass = '';
+      let regimeLabel = regime;
+      if (regime === 'TRENDING') { regimeClass = 'regime-trending'; regimeLabel = '📈 TRENDING'; }
+      else if (regime === 'RANGING') { regimeClass = 'regime-ranging'; regimeLabel = '📊 RANGING'; }
+      else if (regime === 'VOLATILE') { regimeClass = 'regime-volatile'; regimeLabel = '🌪️ VOLATILE'; }
+      regimeEl.innerHTML = `<span class="regime-badge ${regimeClass}">${regimeLabel}</span>`;
+    }
+
     updateConfBars(techConf, digitConf, confidence);
 
     if(data.digits) {
@@ -678,7 +698,7 @@ function updateAll(){
 
     updateHistSummary(bot);
     checkTradeResults(bot);
-    updateScoreboard();
+    // updateScoreboard() movida para setInterval de 30s
     if (!candleChart) initCandleChart();
 
     if (modo === 'hybrid' && data.digits && bot.signal) {
@@ -964,7 +984,11 @@ function setModo(m){
   if(m==='hybrid') document.getElementById('pAtivos').classList.remove('hidden');
   document.getElementById('confBars').style.display = 'none';
 }
-setInterval(loadCandles, 10000);
+setInterval(() => { if (isConnected) loadCandles(); }, 10000);
+// Placar de sinais atualizado a cada 30 segundos
+setInterval(updateScoreboard, 30000);
+updateScoreboard(); // primeira chamada imediata
+
 (function(){
   const p=new URLSearchParams(location.search);
   if(p.get('connected')==='true'){ toast('✅ Deriv conectada!','win',4000); startPolling(); setTimeout(()=>{ fetch('/api/status').then(r=>r.json()).then(data=>{ if(!data.bot?.authorized) autoConnect(); }).catch(()=>autoConnect()); },2000); history.replaceState({},'',location.pathname); }
