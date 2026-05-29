@@ -80,11 +80,10 @@
     @keyframes su { from { transform: translateX(-50%) translateY(12px); opacity: 0 } to { transform: translateX(-50%) translateY(0); opacity: 1 } }
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 1100; display: flex; align-items: center; justify-content: center; }
     .mbox { background: var(--card); padding: 20px; border-radius: 14px; width: 90%; max-width: 340px; }
-    .guide-modal { background: var(--card); padding: 20px; border-radius: 14px; width: 95%; max-width: 500px; max-height: 80vh; overflow-y: auto; position: relative; }
-    .guide-modal h2 { color: var(--accent); margin-bottom: 12px; text-align: center; font-size: 15px; }
-    .guide-modal h3 { color: var(--accent); margin: 12px 0 6px; font-size: 13px; }
+    .guide-modal { background: var(--card); padding: 20px; border-radius: 14px; width: 95%; max-width: 600px; max-height: 80vh; overflow-y: auto; position: relative; font-size: 12px; }
+    .guide-modal h2 { color: var(--accent); margin-bottom: 12px; text-align: center; font-size: 16px; }
+    .guide-modal h3 { color: var(--accent); margin: 16px 0 8px; font-size: 13px; }
     .guide-modal p, .guide-modal li { font-size: 11px; color: var(--text); line-height: 1.5; margin-bottom: 4px; }
-    .guide-modal ul { padding-left: 14px; margin-bottom: 6px; }
     .guide-modal table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 10px; }
     .guide-modal th, .guide-modal td { border: 1px solid var(--border); padding: 6px; text-align: left; }
     .guide-modal th { background: #020617; color: var(--accent); }
@@ -114,6 +113,12 @@
     .trade-row button { flex: 0; white-space: nowrap; padding: 8px 12px; }
     .inline-actions { display: flex; gap: 4px; margin-top: 6px; }
     .inline-actions button { padding: 5px 8px; font-size: 11px; border-radius: 6px; }
+    .guide-nav { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+    .guide-nav button { font-size: 10px; padding: 4px 8px; border-radius: 10px; }
+    .scoreboard { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-bottom: 6px; }
+    .score-item { background: #020617; padding: 6px; border-radius: 6px; text-align: center; }
+    .score-label { font-size: 8px; color: var(--muted); text-transform: uppercase; }
+    .score-value { font-size: 18px; font-weight: 700; }
   </style>
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -146,51 +151,82 @@
   <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
 </audio>
 
-<!-- Guia de Utilização -->
+<!-- Modal do Guia de Utilização -->
 <div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
   <div class="guide-modal" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeGuide()">✕</button>
-    <h2>🚀 Guia Rápido — Foloma Visão 360</h2>
-    <h3>Modos de Trading</h3>
+    <h2>📖 Guia da Plataforma</h2>
+    <div class="guide-nav">
+      <button class="tf-btn active" onclick="scrollToSection('g1')">Elementos</button>
+      <button class="tf-btn" onclick="scrollToSection('g2')">Decisão</button>
+      <button class="tf-btn" onclick="scrollToSection('g3')">Modos</button>
+      <button class="tf-btn" onclick="scrollToSection('g4')">Risco</button>
+      <button class="tf-btn" onclick="scrollToSection('g5')">Gráfico</button>
+      <button class="tf-btn" onclick="scrollToSection('g6')">Resultados</button>
+      <button class="tf-btn" onclick="scrollToSection('g7')">Erros</button>
+    </div>
+    <h3 id="g1" style="color:var(--accent);">1. O que cada elemento significa</h3>
     <table>
-      <tr><th>Modo</th><th>Contrato</th><th>Ideal</th></tr>
-      <tr><td>📈 Ativos</td><td>CALL/PUT 5 ticks</td><td>Análise técnica</td></tr>
-      <tr><td>🎲 Dígitos</td><td>ÍMPAR/PAR 10 ticks</td><td>Iniciantes</td></tr>
-      <tr><td>🔗 Híbrido</td><td>Ativos + Dígitos</td><td>Conservadores</td></tr>
+      <tr><th>Elemento</th><th>Significado</th></tr>
+      <tr><td><strong>Preço actual</strong></td><td>Cotação em tempo real do índice sintético.</td></tr>
+      <tr><td><strong>Sinal BUY / SELL</strong></td><td>Combinação de indicadores técnicos (30%) + dígitos (70%). Só aparece com confiança ≥ 55%.</td></tr>
+      <tr><td><strong>Confiança %</strong></td><td>Grau de alinhamento dos padrões. <strong>Não é garantia de ganho.</strong></td></tr>
+      <tr><td><strong>Barras Técnico / Dígitos / Final</strong></td><td>Origem do sinal. Se discordam, não há sinal.</td></tr>
+      <tr><td><strong>Gráfico</strong></td><td>Contexto visual. Use para confirmar, não como critério único.</td></tr>
+      <tr><td><strong>RSI, MACD, TREND, BB, ADX</strong></td><td>Indicadores técnicos. ADX mede força da tendência.</td></tr>
+      <tr><td><strong>Entropia (Dígitos)</strong></td><td>Aleatoriedade. "BEM DEFINIDO" = padrão. "ALEATÓRIO" = não operar.</td></tr>
+      <tr><td><strong>Placar de Sinais</strong></td><td>Sinais emitidos hoje e quantos teriam ganho se tivesse operado.</td></tr>
     </table>
-    <h3>Regras de Ouro</h3>
-    <p>🔴 Só opera quando BUY/SELL. Botões cinzentos = protecção (<strong>confiança &lt; 55%</strong>).</p>
-    <p>✅ Entrar: sinal ativo, 2+ indicadores alinhados. Nos dígitos: 4+ repetições → apostar oposto.</p>
-    <p>❌ Não entrar: NEUTRO, botões cinzentos, entropia elevada, 2 perdas seguidas.</p>
-    <h3>Gestão de Valor</h3>
+
+    <h3 id="g2" style="color:var(--accent);">2. Checklist: entro ou não entro?</h3>
+    <div style="background:#020617;border-radius:8px;padding:12px;border:1px solid var(--accent);">
+      <p><strong>1. O sinal está BUY ou SELL?</strong><br>→ NÃO = <span style="color:var(--danger)">NÃO OPERAR</span>.</p>
+      <p><strong>2. Confiança ≥ 65%?</strong><br>→ NÃO (55-64%) = risco maior, valor mínimo<br>→ SIM (65%+) = sinal sólido</p>
+      <p><strong>3. [Dígitos] Entropia "BEM DEFINIDO" ou "PREVISÍVEL"?</strong><br>→ NÃO = <span style="color:var(--danger)">NÃO OPERAR</span></p>
+      <p><strong>4. [Ativos] Regime do mercado é TRENDING?</strong><br>→ NÃO (RANGING/VOLATILE) = <span style="color:var(--danger)">NÃO OPERAR</span></p>
+      <p><strong>5. Já tive 2 perdas seguidas?</strong><br>→ SIM = pausa 15 minutos</p>
+      <p><strong>6. Stop-loss diário (5%) atingido?</strong><br>→ SIM = <span style="color:var(--danger)">PARAR até amanhã</span></p>
+    </div>
+
+    <h3 id="g3" style="color:var(--accent);">3. Como usar cada modo</h3>
+    <p><strong>📈 Ativos:</strong> CALL/PUT 5 ticks. Ideal com regime TRENDING, RSI extremo e MACD confirmando.</p>
+    <p><strong>🎲 Dígitos:</strong> ÍMPAR/PAR 10 ticks. Exige entropia favorável + 2 padrões concordantes.</p>
+    <p><strong>🔗 Híbrido:</strong> Só opera com convergência total. Menos sinais, maior qualidade.</p>
+
+    <h3 id="g4" style="color:var(--accent);">4. Gestão de Risco</h3>
     <table>
-      <tr><td>$20</td><td>$0.40</td></tr>
-      <tr><td>$35</td><td>$0.70</td></tr>
-      <tr><td>$50</td><td>$1.00</td></tr>
-      <tr><td>$100</td><td>$2.00</td></tr>
-      <tr><td>$500</td><td>$10.00</td></tr>
-      <tr><td>$1000</td><td>$20.00</td></tr>
+      <tr><th>Saldo</th><th>Valor/trade</th><th>Stop diário</th><th>Meta diária</th></tr>
+      <tr><td>$20</td><td>$0.35</td><td>$1.00</td><td>$2.00</td></tr>
+      <tr><td>$50</td><td>$0.70</td><td>$2.50</td><td>$5.00</td></tr>
+      <tr><td>$100</td><td>$1.50</td><td>$5.00</td><td>$10.00</td></tr>
+      <tr><td>$500</td><td>$5.00</td><td>$25.00</td><td>$50.00</td></tr>
     </table>
-    <p>💵 Começa em <strong>$0.35</strong>. Meta diária: <strong>10% da banca</strong>.</p>
-    <h3>Martingale</h3>
-    <p>Perda $0.35 → ✕ → $0.70. Ganhou: RESET. Máx. <strong>1 nível</strong>.</p>
-    <h3>Stop‑Loss</h3>
-    <p>Limite diário: <strong>5%</strong>. "🛑 Stop‑loss" = PARAR TUDO até amanhã.</p>
-    <h3>Dígitos</h3>
-    <p>🟢 ÍMPAR | 🔴 PAR. Exige <strong>2 padrões concordantes</strong>. "ALEATÓRIO" = não opere.</p>
-    <h3>Erros Fatais</h3>
-    <p>❌ Valores altos para recuperar → ✅ $0.35 consistente</p>
-    <p>❌ Ignorar stop‑loss → ✅ Parar quando bloqueia</p>
-    <p>❌ Martingale em cascata → ✅ Máx. 1 nível</p>
-    <p>❌ Operar cansado → ✅ Só concentrado</p>
-    <p style="color:var(--accent);font-weight:bold;margin-top:8px">O objetivo é consistência, não riqueza rápida.</p>
+    <p><strong>Martingale:</strong> máx. 1 nível. Nunca sem sinal ativo.</p>
+
+    <h3 id="g5" style="color:var(--accent);">5. O que o gráfico diz (e não diz)</h3>
+    <p><span style="color:var(--accent)">✅ Serve para:</span> confirmar tendência, ver coerência MACD/TREND, detectar movimentos bruscos.</p>
+    <p><span style="color:var(--danger)">❌ Não serve para:</span> prever o próximo movimento, substituir indicadores, justificar entrada contra o sinal.</p>
+
+    <h3 id="g6" style="color:var(--accent);">6. Honestidade sobre os resultados</h3>
+    <p style="background:#020617;padding:10px;border-radius:8px;">
+      A Foloma Visão 360 identifica padrões estatísticos em mercados sintéticos. Estes padrões têm tendência de repetição, mas <strong>não são determinísticos</strong> — o mercado é parcialmente aleatório. Dias negativos acontecem mesmo seguindo todas as regras. O objectivo é dar <strong>vantagem estatística a longo prazo</strong>, não garantir ganhos em cada trade.
+    </p>
+
+    <h3 id="g7" style="color:var(--accent);">7. Erros que destroem contas</h3>
+    <table>
+      <tr><th>❌ Erro</th><th>✅ Correto</th></tr>
+      <tr><td>Entrar com NEUTRO "porque parece"</td><td>Sem sinal = sem entrada.</td></tr>
+      <tr><td>Martingale de 3+ níveis</td><td>$0.35→$0.70→$1.40→$2.80 = conta destruída</td></tr>
+      <tr><td>Continuar após stop‑loss 5%</td><td>Um dia mau não justifica destruir a semana</td></tr>
+      <tr><td>Ignorar entropia "ALEATÓRIO"</td><td>É aposta pura, não análise</td></tr>
+      <tr><td>Mudar de modo durante perdas</td><td>Indisciplina esconde o problema real</td></tr>
+    </table>
   </div>
 </div>
 
 <div class="container" id="mainContent" style="display:none">
-  <!-- DASHBOARD -->
   <div id="dashboard-section">
-    <!-- STATUS + CONEXÃO -->
+    <!-- STATUS -->
     <div class="card">
       <div class="card-title">📡 STATUS <span class="balance"><span id="bal">0.00</span> <span id="cur">USD</span></span></div>
       <div class="status" style="margin-bottom:6px">
@@ -203,7 +239,17 @@
       <div id="conSt" style="text-align:center;font-size:10px;color:#ffaa00"></div>
     </div>
 
-    <!-- MODO + SÍMBOLO + GRÁFICO (tudo junto) -->
+    <!-- PLACAR DE SINAIS (FASE 0) -->
+    <div class="card" id="signalScoreboard" style="display:none">
+      <div class="card-title">📡 PLACAR DE SINAIS HOJE</div>
+      <div class="scoreboard">
+        <div class="score-item"><div class="score-label">EMITIDOS</div><div class="score-value" id="sigTotal">0</div></div>
+        <div class="score-item"><div class="score-label">TERIAM GANHO</div><div class="score-value" style="color:var(--accent)" id="sigWins">0</div></div>
+        <div class="score-item"><div class="score-label">WIN RATE</div><div class="score-value" style="color:var(--accent)" id="sigWinRate">-</div></div>
+      </div>
+    </div>
+
+    <!-- MODO + SÍMBOLO + GRÁFICO -->
     <div class="card">
       <div class="card-title">🎮 MODO</div>
       <div class="mode-sel">
@@ -212,7 +258,6 @@
         <button id="modeHybrid" class="mode-btn" onclick="setModo('hybrid')">🔗 HÍBRIDO</button>
       </div>
 
-      <!-- Símbolos + Preço -->
       <div id="pAtivos">
         <div class="sym-row" id="symSel" style="margin-bottom:6px"></div>
         <div class="price-box">
@@ -240,7 +285,6 @@
         </div>
       </div>
 
-      <!-- Dígitos -->
       <div id="pDigitos" class="hidden">
         <div class="dig-main">
           <div class="tbar-wrap"><div class="tbar" id="tBar" style="width:100%"></div></div>
@@ -268,7 +312,7 @@
       </div>
     </div>
 
-    <!-- TRADE (compacto, logo abaixo do gráfico) -->
+    <!-- TRADE -->
     <div class="card" id="pTrade">
       <div class="trade-row">
         <input type="number" id="amt" value="0.35" step="0.01" min="0.35" max="100">
@@ -284,13 +328,13 @@
       <div class="ms">Martingale: <span id="mgtAct">INATIVO</span> | Próx: <span id="mgtNxt">$0.35</span></div>
     </div>
 
-    <!-- Alerta Híbrido -->
+    <!-- ALERTA HÍBRIDO -->
     <div id="hybridAlert" class="card hidden" style="background:#ffaa0010; border-color:#ffaa00">
       <div class="card-title">🔔 SINAL HÍBRIDO</div>
       <div id="hybridMsg" style="font-weight:bold; text-align:center;font-size:12px">Aguardando convergência...</div>
     </div>
 
-    <!-- Histórico -->
+    <!-- HISTÓRICO -->
     <div class="card">
       <div class="card-title">📋 HISTÓRICO <div><button class="bmr" style="font-size:10px;padding:3px 6px;margin-right:3px" onclick="loadHistory()">🔄</button><button class="bmr" style="font-size:10px;padding:3px 6px;color:var(--danger)" onclick="clearHistory()">🗑️</button></div></div>
       <div id="histSummary" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px"></div>
@@ -298,7 +342,6 @@
     </div>
   </div>
 
-  <!-- OUTRAS SECÇÕES (inalteradas, apenas compactadas) -->
   <div id="affiliate-section" class="hidden">
     <div class="card">
       <div class="card-title">🔗 SEU LINK</div>
@@ -362,7 +405,6 @@
   </div>
 </div>
 
-<!-- MODAL AUTENTICAÇÃO -->
 <div id="authModal" class="modal" onclick="if(event.target===this)closeAuthModal()">
   <div class="mbox" onclick="event.stopPropagation()">
     <h2 style="color:var(--accent);text-align:center;margin-bottom:12px">FOLOMA VISÃO 360</h2>
@@ -420,6 +462,13 @@ function openGuide() { document.getElementById('guideModal').style.display='flex
 function closeGuide() { document.getElementById('guideModal').style.display='none'; document.body.classList.remove('modal-open'); }
 function closeAuthModal() { document.getElementById('authModal').style.display='none'; document.body.classList.remove('modal-open'); }
 
+function scrollToSection(id) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.querySelectorAll('.guide-nav .tf-btn').forEach(b => b.classList.remove('active'));
+  if (event && event.target) event.target.classList.add('active');
+}
+
 function initSyms(){
   let h='';
   for(const[k,v] of Object.entries(syms)) h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}', this)">${v}</button>`;
@@ -433,7 +482,7 @@ function chgSym(s, el){
 }
 
 document.addEventListener('click', (e) => {
-  if (e.target.classList.contains('tf-btn')) {
+  if (e.target.classList.contains('tf-btn') && !e.target.closest('.guide-nav')) {
     document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));
     e.target.classList.add('active');
     currentGranularity = parseInt(e.target.dataset.tf);
@@ -543,6 +592,20 @@ async function loadCandles() {
   } catch(e) { console.error('Erro ao carregar velas:', e); }
 }
 
+function updateScoreboard() {
+  fetch('/api/signals/scoreboard')
+    .then(r=>r.json())
+    .then(d=>{
+      if (d.today_signals > 0) {
+        document.getElementById('signalScoreboard').style.display = 'block';
+        document.getElementById('sigTotal').textContent = d.today_signals;
+        document.getElementById('sigWins').textContent = d.would_have_won;
+        document.getElementById('sigWinRate').textContent = d.simulated_win_rate + '%';
+      }
+    })
+    .catch(()=>{});
+}
+
 function updateAll(){
   fetch('/api/status').then(r=>r.json()).then(data=>{
     if(data.error) return;
@@ -573,7 +636,6 @@ function updateAll(){
     const btnBuy = document.querySelector('#pTrade .btn-buy');
     const btnSell = document.querySelector('#pTrade .btn-sell');
     const btnHybrid = document.getElementById('btnHybrid');
-    // Limiar alinhado com config.py: 55%
     if (confidence < 55 || bot.stop_loss_active) {
       sigBadge.textContent = bot.stop_loss_active ? 'STOP' : 'NEUTRO';
       sigBadge.className = 'signal neutral';
@@ -616,6 +678,7 @@ function updateAll(){
 
     updateHistSummary(bot);
     checkTradeResults(bot);
+    updateScoreboard();
     if (!candleChart) initCandleChart();
 
     if (modo === 'hybrid' && data.digits && bot.signal) {
@@ -760,7 +823,6 @@ function loadHistory(){
   fetch('/api/report').then(r=>r.json()).then(d=>{
     const sum = document.getElementById('histSummary2');
     const list = document.getElementById('histList2');
-    // Também atualiza o mini-histórico do dashboard
     const miniList = document.getElementById('histList');
     if(d.error) { if(sum) sum.innerHTML=''; if(list) list.innerHTML=''; if(miniList) miniList.innerHTML=''; return; }
     const r = d.resumo;
@@ -774,7 +836,6 @@ function loadHistory(){
       const win = t.result === 'win'; const lose = t.result === 'loss';
       const cor = win ? 'var(--accent)' : lose ? 'var(--danger)' : '#ffaa00';
       const icon = win ? '✅' : lose ? '❌' : '⏳';
-      // Mostrar ÍMPAR/PAR para trades de dígito
       let actionLabel = t.action || '';
       if (t.is_digit) {
         actionLabel = (t.action === 'BUY' || t.action === 'CALL') ? 'ÍMPAR 🎲' : 'PAR 🎲';
