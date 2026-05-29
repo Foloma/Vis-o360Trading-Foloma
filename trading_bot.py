@@ -185,8 +185,9 @@ class TradingBot:
                 tech_conf *= 0.9
                 logger.info(f"⚠️ Sinal {tech_signal} penalizado – mercado volátil, confiança reduzida para {tech_conf:.1f}%")
 
+        # Consenso mínimo de 3 indicadores (revertido)
         if tech_signal != 'NEUTRAL' and not self._check_consensus(self.last_analysis, tech_signal):
-            logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=2 indicadores)")
+            logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=3 indicadores)")
             return 'NEUTRAL', 0, tech_conf, 0, None
 
         if not (self.current_symbol.startswith('R_') and self.digit_analyzer):
@@ -335,7 +336,7 @@ class TradingBot:
             aligned += 1
         elif signal == 'SELL' and ('sobrecomprado' in bb_desc or 'acima' in bb_desc):
             aligned += 1
-        return aligned >= 2
+        return aligned >= 3   # revertido para 3
 
     def _calculate_pure_technical(self, prices):
         if len(prices) < 20 or not self.last_analysis:
