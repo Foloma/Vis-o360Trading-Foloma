@@ -113,10 +113,7 @@ class TradingBot:
     def on_tick(self, tick):
         self.current_price = tick['price']
         self.current_symbol = tick['symbol']
-        # Passa também high/low se disponíveis; caso contrário, o indicador usa o próprio preço
-        high = tick.get('high', None)
-        low = tick.get('low', None)
-        self.indicators.add_price(self.current_price, self.current_symbol, high, low)
+        self.indicators.add_price(self.current_price, self.current_symbol)
 
         if 'R_' in self.current_symbol and self.digit_analyzer:
             self.digit_analyzer.add_tick(self.current_price)
@@ -179,20 +176,20 @@ class TradingBot:
             f"| Preços: {len(prices)} | Regime: {regime} (ADX {adx_value:.1f})"
         )
 
-        # Bloqueio por regime de mercado (modo Ativos / Híbrido)
+        # CORREÇÃO: bloqueio apenas em RANGING, penalização em VOLATILE
         if tech_signal != 'NEUTRAL':
-            if regime in ('RANGING', 'VOLATILE'):
-                logger.info(f"⛔ Sinal {tech_signal} bloqueado – regime {regime} não adequado para CALL/PUT")
+            if regime == 'RANGING':
+                logger.info(f"⛔ Sinal {tech_signal} bloqueado – mercado lateral (RANGING)")
                 return 'NEUTRAL', 0, tech_conf, 0, None
             elif regime == 'VOLATILE':
-                tech_conf *= 0.9  # reduz confiança em 10% se volátil
+                tech_conf *= 0.9
+                logger.info(f"⚠️ Sinal {tech_signal} penalizado – mercado volátil, confiança reduzida para {tech_conf:.1f}%")
 
         if tech_signal != 'NEUTRAL' and not self._check_consensus(self.last_analysis, tech_signal):
             logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=2 indicadores)")
             return 'NEUTRAL', 0, tech_conf, 0, None
 
         if not (self.current_symbol.startswith('R_') and self.digit_analyzer):
-            # Notificar callback de sinal se o sinal for válido (apenas técnico)
             if tech_signal != 'NEUTRAL' and tech_conf >= config.RISK_LIMITS.get('min_confidence', 55):
                 self._notify_signal(tech_signal, tech_conf, tech_conf, 0, None)
             return tech_signal, tech_conf, tech_conf, 0, None
@@ -223,7 +220,6 @@ class TradingBot:
 
         if confidence >= config.RISK_LIMITS.get('min_confidence', 55):
             logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – VÁLIDO")
-            # Notificar callback de sinal
             self._notify_signal(signal, confidence, tech_conf, dig_conf, dig_action)
         else:
             logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – ABAIXO DO LIMIAR")
@@ -231,7 +227,6 @@ class TradingBot:
         return signal, min(confidence, 100), tech_conf, dig_conf, dig_action
 
     def _notify_signal(self, signal, confidence, tech_conf, dig_conf, dig_action):
-        """Dispara o callback de sinal (se definido) para registo na BD."""
         if self.on_signal_callback:
             try:
                 self.on_signal_callback({
@@ -545,7 +540,6 @@ class TradingBot:
             if self.client:
                 self.client.get_balance()
             
-            # Notificar resultado do sinal associado (Fase 0)
             if self.on_signal_result_callback and self._last_signal_id:
                 try:
                     self.on_signal_result_callback(
