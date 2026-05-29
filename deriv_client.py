@@ -382,7 +382,8 @@ class DerivWebSocketClient:
             if is_digit:
                 duration = self.config.DIGIT_CONTRACT_DURATION
                 duration_unit = 't'
-                if contract_type == 'BUY':
+                # CORREÇÃO: CALL → DIGITODD (ímpar), PUT → DIGITEVEN (par)
+                if contract_type == 'CALL':
                     contract_type_full = 'DIGITODD'
                 else:
                     contract_type_full = 'DIGITEVEN'
@@ -566,7 +567,6 @@ class DerivWebSocketClient:
                 self.on_candles_callback(candles)
 
     def get_cached_candles(self, max_age=None):
-        """Retorna candles do cache se ainda forem válidos (max_age em segundos)."""
         if max_age is None:
             max_age = config.CANDLE_CACHE_TTL
         with self._candles_cache_lock:
