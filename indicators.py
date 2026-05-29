@@ -30,9 +30,19 @@ class TechnicalIndicators:
                 self._macd_line_history[symbol] = deque(maxlen=self.signal_period + 5)
 
             self.prices_by_symbol[symbol].append(price)
-            # Para ATR usamos o próprio preço se high/low não forem fornecidos
-            self.highs_by_symbol[symbol].append(high if high is not None else price)
-            self.lows_by_symbol[symbol].append(low if low is not None else price)
+
+            # Construir high/low sintéticos a partir dos últimos 5 preços
+            if high is None or low is None:
+                recent = list(self.prices_by_symbol[symbol])
+                if len(recent) >= 5:
+                    high = max(recent[-5:])
+                    low = min(recent[-5:])
+                else:
+                    high = price
+                    low = price
+
+            self.highs_by_symbol[symbol].append(high)
+            self.lows_by_symbol[symbol].append(low)
             self._update_macd_cache(symbol)
 
     def _update_macd_cache(self, symbol):
@@ -174,10 +184,9 @@ class TechnicalIndicators:
             return None
         return sum(data[-period:]) / period
 
-    # ---------- NOVOS MÉTODOS (FASE 1) ----------
+    # ---------- ATR, ADX, REGIME ----------
 
     def _atr(self, symbol='R_100', period=14):
-        """Average True Range - volatilidade do mercado."""
         highs = list(self.highs_by_symbol.get(symbol, deque()))
         lows = list(self.lows_by_symbol.get(symbol, deque()))
         prices = self.get_prices(symbol)
@@ -193,7 +202,6 @@ class TechnicalIndicators:
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             tr_values.append(tr)
 
-        # Usa EMA para suavizar o ATR
         avg_tr = sum(tr_values[:period]) / period
         k = 2.0 / (period + 1)
         for tr in tr_values[period:]:
@@ -202,7 +210,6 @@ class TechnicalIndicators:
         return avg_tr
 
     def _adx(self, symbol='R_100', period=14):
-        """Average Directional Index - força da tendência."""
         highs = list(self.highs_by_symbol.get(symbol, deque()))
         lows = list(self.lows_by_symbol.get(symbol, deque()))
         prices = self.get_prices(symbol)
@@ -230,13 +237,11 @@ class TechnicalIndicators:
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             tr_vals.append(tr)
 
-        # Calcular ATR como EMA para obter o suavizado
         avg_tr = sum(tr_vals[:period]) / period
         k = 2.0 / (period + 1)
         for tr in tr_vals[period:]:
             avg_tr = tr * k + avg_tr * (1 - k)
 
-        # Calcular DI+ e DI-
         sum_dm_plus = sum(dm_plus[:period])
         sum_dm_minus = sum(dm_minus[:period])
 
@@ -247,19 +252,11 @@ class TechnicalIndicators:
         di_plus = (sum_dm_plus / avg_tr * 100) if avg_tr > 0 else 0
         di_minus = (sum_dm_minus / avg_tr * 100) if avg_tr > 0 else 0
 
-        # ADX
         dx = abs(di_plus - di_minus) / (di_plus + di_minus) * 100 if (di_plus + di_minus) > 0 else 0
 
-        # Nota: para simplificar, retornamos apenas o último valor calculado
         return dx
 
     def get_market_regime(self, symbol='R_100'):
-        """
-        Classifica o regime do mercado:
-        - TRENDING: ADX >= 20 (tendência definida)
-        - RANGING: ADX < 20 e volatilidade baixa
-        - VOLATILE: ADX < 20 mas ATR alto (> 0.05% do preço)
-        """
         adx = self._adx(symbol)
         atr = self._atr(symbol)
         prices = self.get_prices(symbol)
