@@ -14,8 +14,8 @@ class DerivWebSocketClient:
     ST_CONNECTED    = 'CONNECTED'
     ST_STREAMING    = 'STREAMING'
 
-    def __init__(self, config, on_tick_callback=None, on_result_callback=None):
-        self.config = config
+    def __init__(self, config_obj, on_tick_callback=None, on_result_callback=None):
+        self.config = config_obj
         self.ws = None
         self.connected = False
         self.authorized = False
@@ -60,7 +60,6 @@ class DerivWebSocketClient:
         self._had_gap = False
         self._first_connect = True
         
-        # Cache de candles
         self._candles_cache = {}
         self._candles_cache_lock = threading.Lock()
 
@@ -111,7 +110,6 @@ class DerivWebSocketClient:
                     if hasattr(self.trading_bot, 'reset_price_history'):
                         self.trading_bot.reset_price_history()
                     else:
-                        logger.warning("método reset_price_history não encontrado – a usar reset_stats como fallback")
                         self.trading_bot.reset_stats()
                 self._had_gap = False
                 self._first_connect = False
@@ -355,7 +353,15 @@ class DerivWebSocketClient:
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
-            
+
+        # 🔬 INVERSÃO DE SINAL PARA DIAGNÓSTICO
+        if config.INVERT_SIGNAL:
+            if not is_digit:
+                contract_type = 'PUT' if contract_type == 'CALL' else 'CALL'
+            else:
+                contract_type = 'PUT' if contract_type == 'CALL' else 'CALL'
+            logger.warning(f"🔃 SINAL INVERTIDO: {contract_type}")
+
         if is_digit:
             time.sleep(0.5)
             
@@ -378,11 +384,15 @@ class DerivWebSocketClient:
                         logger.warning("Trade pendente"); return False
                         
             self._last_trade_time = time.time()
+
+            # 🔬 Guardar preço de entrada para diagnóstico
+            entry_price = None
+            if self.trading_bot:
+                entry_price = self.trading_bot.current_price
             
             if is_digit:
                 duration = self.config.DIGIT_CONTRACT_DURATION
                 duration_unit = 't'
-                # CORREÇÃO: CALL → DIGITODD (ímpar), PUT → DIGITEVEN (par)
                 if contract_type == 'CALL':
                     contract_type_full = 'DIGITODD'
                 else:
@@ -400,7 +410,8 @@ class DerivWebSocketClient:
                     'is_digit': is_digit,
                     'timestamp': time.time(),
                     'status': 'waiting_proposal',
-                    'req_id': req_id
+                    'req_id': req_id,
+                    'entry_price': entry_price
                 }
             self.pending_trade_time = time.time()
             
@@ -462,9 +473,10 @@ class DerivWebSocketClient:
             if self.pending_trade:
                 amt, action = self.pending_trade.get('amount', 0), self.pending_trade.get('contract_type', '')
                 is_digit = self.pending_trade.get('is_digit', False)
+                entry_price = self.pending_trade.get('entry_price')
                 
                 if self.trading_bot:
-                    self.trading_bot.register_trade({
+                    trade_data = {
                         'contract_id': cid,
                         'symbol': self.current_symbol,
                         'action': action,
@@ -472,8 +484,13 @@ class DerivWebSocketClient:
                         'price': bp,
                         'result': 'pending',
                         'confidence': 70,
-                        'is_digit': is_digit
-                    })
+                        'is_digit': is_digit,
+                        'entry_price': entry_price
+                    }
+                    self.trading_bot.register_trade(trade_data)
+                    # Guardar preço de entrada no bot para diagnóstico
+                    if entry_price:
+                        self.trading_bot._last_entry_price = entry_price
                 self.active_trades[cid] = {
                     'contract_id': cid,
                     'amount': amt,
@@ -481,7 +498,8 @@ class DerivWebSocketClient:
                     'timestamp': time.time(),
                     'action': action,
                     'is_digit': is_digit,
-                    'symbol': self.current_symbol
+                    'symbol': self.current_symbol,
+                    'entry_price': entry_price
                 }
                 self._subscribe_contract(cid)
                 self.pending_trade = None
@@ -508,8 +526,16 @@ class DerivWebSocketClient:
         is_win = profit > 0
         trade_info = self.active_trades.get(cid, {})
         is_digit = trade_info.get('is_digit', False)
+        entry_price = trade_info.get('entry_price')
         
         logger.info(f"📊 RESULTADO [{cid}]: {'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f}")
+
+        # 🔬 DIAGNÓSTICO: registar preços e direção
+        if config.DIAGNOSTIC_MODE and entry_price:
+            price_moved = sp - entry_price if not is_digit else None
+            direction = 'subiu' if (price_moved and price_moved > 0) else ('desceu' if price_moved else 'inalterado')
+            logger.warning(f"🔬 DIAG: Entrada=${entry_price:.4f} Saída=${sp:.4f} Movimento={direction} "
+                           f"Sinal={trade_info.get('action')} Resultado={'GANHO' if is_win else 'PERDA'}")
         
         if self.trading_bot:
             self.trading_bot.on_trade_result({
@@ -518,7 +544,8 @@ class DerivWebSocketClient:
                 'sell_price': sp,
                 'profit': profit,
                 'amount': amt,
-                'is_win': is_win
+                'is_win': is_win,
+                'entry_price': entry_price
             })
         if self.on_result_callback:
             self.on_result_callback({
