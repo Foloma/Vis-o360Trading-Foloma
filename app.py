@@ -1,7 +1,7 @@
 import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid
 from datetime import datetime, date
 from functools import wraps
-from flask import Flask, render_template, jsonify, request, session, redirect, abort
+from flask import Flask, render_template, jsonify, request, session, redirect, abort, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 import urllib.parse
 
@@ -134,7 +134,6 @@ def init_db():
         original_amount REAL DEFAULT 0,
         last_updated REAL
     )''')
-    # NOVA TABELA: sinais emitidos pelo bot (Fase 0)
     c.execute('''CREATE TABLE IF NOT EXISTS signals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
@@ -488,7 +487,6 @@ def create_session(user_id, user, force=False):
 
     _load_martingale_state(user_id, bot)
 
-    # CALLBACKS DE SINAL (Fase 0)
     def on_signal(signal_data):
         try:
             conn = sqlite3.connect(DATABASE_PATH)
@@ -956,89 +954,7 @@ def debug():
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
     })
 
-@app.route('/oauth/callback')
-def oauth_callback():
-    logger.info(f"OAuth callback params: {request.args}")
-    state_id = request.args.get('state')
-    if not state_id:
-        logger.error("State não enviado pela Deriv")
-        return redirect('/?error=invalid_state')
-    
-    with oauth_states_lock:
-        if state_id not in oauth_states:
-            logger.error("State inválido ou expirado")
-            return redirect('/?error=invalid_state')
-            
-        state_data = oauth_states[state_id]
-        now = time.time()
-        
-        if now - state_data.get('created_at', 0) > OAUTH_STATE_TTL:
-            oauth_states.pop(state_id, None)
-            logger.error("State expirado")
-            return redirect('/?error=invalid_state')
-        
-        if state_data.get('used', False):
-            if now - state_data.get('used_at', 0) > OAUTH_STATE_REUSE_WINDOW:
-                oauth_states.pop(state_id, None)
-                logger.error("State já usado e fora da janela de reutilização")
-                return redirect('/?error=invalid_state')
-            logger.info("State reutilizado (refresh dentro da janela)")
-        else:
-            state_data['used'] = True
-            state_data['used_at'] = now
-        
-        expired = [k for k, v in oauth_states.items() 
-                   if now - v.get('created_at', 0) > OAUTH_STATE_TTL or
-                   (v.get('used') and now - v.get('used_at', 0) > OAUTH_STATE_REUSE_WINDOW)]
-        for k in expired:
-            oauth_states.pop(k, None)
-    
-    user_id = state_data['user_id']
-    account_type_request = state_data['account_type']
-    
-    conn = sqlite3.connect(DATABASE_PATH)
-    try:
-        row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
-        if not row:
-            return redirect('/?error=user_not_found')
-        email = row[0]
-    finally:
-        conn.close()
-    
-    accounts = []
-    i = 1
-    while request.args.get(f'token{i}'):
-        accounts.append({
-            'token': request.args.get(f'token{i}'),
-            'acct': request.args.get(f'acct{i}', '')
-        })
-        i += 1
-    
-    if not accounts:
-        logger.error("Nenhum token recebido no OAuth")
-        return redirect('/?error=oauth_failed')
-    
-    for acc in accounts:
-        acct = acc['acct']
-        tok = acc['token']
-        if not tok:
-            continue
-        if acct.startswith('VR'):
-            UserStore.add_token(email, 'demo', tok)
-        else:
-            UserStore.add_token(email, 'real', tok)
-        if (account_type_request == 'demo' and acct.startswith('VR')) or \
-           (account_type_request == 'real' and not acct.startswith('VR')):
-            UserStore.set_active_account(email, account_type_request)
-    
-    user = UserStore.get(email)
-    session['user_id'] = user_id
-    session['user_email'] = email
-    session['user_name'] = user['name']
-    session['user_role'] = user.get('role', 'user')
-    session.permanent = True
-    create_session(user_id, user, force=True)
-    return redirect('/?connected=true')
+# ==================== OAUTH (CORRIGIDO) ====================
 
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
@@ -1063,11 +979,138 @@ def deriv_oauth_url():
         f"https://oauth.deriv.com/oauth2/authorize"
         f"?app_id={app_id}"
         f"&redirect_uri={encoded_redirect}"
+        f"&response_type=token"
         f"&state={state_id}"
         f"&l=PT"
     )
     logger.info(f"URL OAuth gerado: {url}")
     return jsonify({'url': url})
+
+@app.route('/oauth/callback')
+def oauth_callback():
+    """
+    A Deriv redireciona para cá com o token no fragmento (#access_token=...).
+    O servidor não vê o fragmento, por isso devolvemos uma página HTML que
+    extrai o hash e envia os tokens para o backend via POST.
+    """
+    state_id = request.args.get('state')
+    if not state_id:
+        return redirect('/?error=invalid_state')
+
+    # Construir uma página que extrai o hash e submete para a API
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>OAuth Callback</title>
+</head>
+<body>
+    <p>A processar autenticação...</p>
+    <script>
+        (function() {{
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            const accessToken = params.get('access_token');
+            if (!accessToken) {{
+                window.location.href = '/?error=no_token';
+                return;
+            }}
+            // Construir a lista de tokens (podem vir vários)
+            const tokens = [];
+            for (let i = 1; params.get('token' + i); i++) {{
+                tokens.push({{
+                    token: params.get('token' + i),
+                    acct: params.get('acct' + i) || ''
+                }});
+            }}
+            // Se não houver tokens múltiplos, usar o access_token diretamente
+            if (tokens.length === 0 && accessToken) {{
+                tokens.push({{ token: accessToken, acct: '' }});
+            }}
+            // Enviar para o backend
+            fetch('/api/auth/process-oauth', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{
+                    state: '{state_id}',
+                    tokens: tokens
+                }})
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                if (data.status === 'ok') {{
+                    window.location.href = '/?connected=true';
+                }} else {{
+                    window.location.href = '/?error=' + (data.error || 'oauth_failed');
+                }}
+            }})
+            .catch(() => {{
+                window.location.href = '/?error=request_failed';
+            }});
+        }})();
+    </script>
+</body>
+</html>"""
+    return make_response(html)
+
+@app.route('/api/auth/process-oauth', methods=['POST'])
+def process_oauth():
+    """Recebe os tokens extraídos do hash pelo callback e guarda na BD."""
+    data = request.json
+    state_id = data.get('state')
+    tokens = data.get('tokens', [])
+
+    if not state_id or not tokens:
+        return jsonify({'error': 'Dados incompletos'}), 400
+
+    with oauth_states_lock:
+        state_data = oauth_states.pop(state_id, None)
+
+    if not state_data:
+        # Pode ser uma re-submissão; tentamos recuperar o user_id da sessão
+        if 'user_id' not in session:
+            return jsonify({'error': 'Sessão expirada'}), 401
+        user_id = session['user_id']
+    else:
+        user_id = state_data['user_id']
+
+    # Obter email
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'Utilizador não encontrado'}), 404
+        email = row[0]
+    finally:
+        conn.close()
+
+    account_type_request = state_data.get('account_type', 'demo') if state_data else 'demo'
+
+    for acc in tokens:
+        tok = acc.get('token')
+        acct = acc.get('acct', '')
+        if not tok:
+            continue
+        if acct.startswith('VR'):
+            UserStore.add_token(email, 'demo', tok)
+        else:
+            UserStore.add_token(email, 'real', tok)
+        if (account_type_request == 'demo' and acct.startswith('VR')) or \
+           (account_type_request == 'real' and not acct.startswith('VR')):
+            UserStore.set_active_account(email, account_type_request)
+
+    # Atualizar sessão
+    user = UserStore.get(email)
+    session['user_id'] = user_id
+    session['user_email'] = email
+    session['user_name'] = user['name']
+    session['user_role'] = user.get('role', 'user')
+    session.permanent = True
+
+    # Forçar criação de sessão websocket
+    create_session(user_id, user, force=True)
+
+    return jsonify({'status': 'ok'})
 
 # ==================== TRADING ====================
 
@@ -1292,7 +1335,7 @@ def candles_data():
     sess['client'].request_candles(symbol, granularity=granularity, count=50)
     return jsonify({'candles': sess.get('candles', [])})
 
-# ==================== PLACAR DE SINAIS (FASE 0) ====================
+# ==================== PLACAR DE SINAIS ====================
 @app.route('/api/signals/scoreboard')
 @require_auth
 def signals_scoreboard():
