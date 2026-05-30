@@ -159,7 +159,79 @@
   <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
 </audio>
 
-<!-- Modal do Guia de Utilização (mantido igual, omitido por brevidade) -->
+<!-- Modal do Guia de Utilização -->
+<div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
+  <div class="guide-modal" onclick="event.stopPropagation()">
+    <button class="close-btn" onclick="closeGuide()">✕</button>
+    <h2>📖 Guia da Plataforma</h2>
+    <div class="guide-nav">
+      <button class="tf-btn active" onclick="scrollToSection('g1')">Elementos</button>
+      <button class="tf-btn" onclick="scrollToSection('g2')">Decisão</button>
+      <button class="tf-btn" onclick="scrollToSection('g3')">Modos</button>
+      <button class="tf-btn" onclick="scrollToSection('g4')">Risco</button>
+      <button class="tf-btn" onclick="scrollToSection('g5')">Gráfico</button>
+      <button class="tf-btn" onclick="scrollToSection('g6')">Resultados</button>
+      <button class="tf-btn" onclick="scrollToSection('g7')">Erros</button>
+    </div>
+    <h3 id="g1" style="color:var(--accent);">1. O que cada elemento significa</h3>
+    <table>
+      <tr><th>Elemento</th><th>Significado</th></tr>
+      <tr><td><strong>Preço actual</strong></td><td>Cotação em tempo real do índice sintético.</td></tr>
+      <tr><td><strong>Sinal BUY / SELL</strong></td><td>Combinação de indicadores técnicos (30%) + dígitos (70%). Só aparece com confiança ≥ 55%.</td></tr>
+      <tr><td><strong>Confiança %</strong></td><td>Grau de alinhamento dos padrões. <strong>Não é garantia de ganho.</strong></td></tr>
+      <tr><td><strong>Barras Técnico / Dígitos / Final</strong></td><td>Origem do sinal. Se discordam, não há sinal.</td></tr>
+      <tr><td><strong>Gráfico</strong></td><td>Contexto visual. Use para confirmar, não como critério único.</td></tr>
+      <tr><td><strong>RSI, MACD, TREND, BB, ADX</strong></td><td>Indicadores técnicos. ADX mede força da tendência.</td></tr>
+      <tr><td><strong>Regime (TRENDING/RANGING/VOLATILE)</strong></td><td>Condição do mercado. TRENDING = ideal para CALL/PUT. RANGING = evitar.</td></tr>
+      <tr><td><strong>Entropia (Dígitos)</strong></td><td>Aleatoriedade. "BEM DEFINIDO" = padrão. "ALEATÓRIO" = não operar.</td></tr>
+      <tr><td><strong>Placar de Sinais</strong></td><td>Sinais emitidos hoje e quantos teriam ganho se tivesse operado.</td></tr>
+    </table>
+
+    <h3 id="g2" style="color:var(--accent);">2. Checklist: entro ou não entro?</h3>
+    <div style="background:#020617;border-radius:8px;padding:12px;border:1px solid var(--accent);">
+      <p><strong>1. O sinal está BUY ou SELL?</strong><br>→ NÃO = <span style="color:var(--danger)">NÃO OPERAR</span>.</p>
+      <p><strong>2. Confiança ≥ 65%?</strong><br>→ NÃO (55-64%) = risco maior, valor mínimo<br>→ SIM (65%+) = sinal sólido</p>
+      <p><strong>3. [Dígitos] Entropia "BEM DEFINIDO" ou "PREVISÍVEL"?</strong><br>→ NÃO = <span style="color:var(--danger)">NÃO OPERAR</span></p>
+      <p><strong>4. [Ativos] Regime do mercado é TRENDING?</strong><br>→ NÃO (RANGING/VOLATILE) = <span style="color:var(--danger)">NÃO OPERAR</span></p>
+      <p><strong>5. Já tive 2 perdas seguidas?</strong><br>→ SIM = pausa 15 minutos</p>
+      <p><strong>6. Stop-loss diário (5%) atingido?</strong><br>→ SIM = <span style="color:var(--danger)">PARAR até amanhã</span></p>
+    </div>
+
+    <h3 id="g3" style="color:var(--accent);">3. Como usar cada modo</h3>
+    <p><strong>📈 Ativos:</strong> CALL/PUT 5 ticks. Ideal com regime TRENDING, RSI extremo e MACD confirmando.</p>
+    <p><strong>🎲 Dígitos:</strong> ÍMPAR/PAR 10 ticks. Exige entropia favorável + 2 padrões concordantes.</p>
+    <p><strong>🔗 Híbrido:</strong> Só opera com convergência total. Menos sinais, maior qualidade.</p>
+
+    <h3 id="g4" style="color:var(--accent);">4. Gestão de Risco</h3>
+    <table>
+      <tr><th>Saldo</th><th>Valor/trade</th><th>Stop diário</th><th>Meta diária</th></tr>
+      <tr><td>$20</td><td>$0.35</td><td>$1.00</td><td>$2.00</td></tr>
+      <tr><td>$50</td><td>$0.70</td><td>$2.50</td><td>$5.00</td></tr>
+      <tr><td>$100</td><td>$1.50</td><td>$5.00</td><td>$10.00</td></tr>
+      <tr><td>$500</td><td>$5.00</td><td>$25.00</td><td>$50.00</td></tr>
+    </table>
+    <p><strong>Martingale:</strong> máx. 1 nível. Nunca sem sinal ativo.</p>
+
+    <h3 id="g5" style="color:var(--accent);">5. O que o gráfico diz (e não diz)</h3>
+    <p><span style="color:var(--accent)">✅ Serve para:</span> confirmar tendência, ver coerência MACD/TREND, detectar movimentos bruscos.</p>
+    <p><span style="color:var(--danger)">❌ Não serve para:</span> prever o próximo movimento, substituir indicadores, justificar entrada contra o sinal.</p>
+
+    <h3 id="g6" style="color:var(--accent);">6. Honestidade sobre os resultados</h3>
+    <p style="background:#020617;padding:10px;border-radius:8px;">
+      A Foloma Visão 360 identifica padrões estatísticos em mercados sintéticos. Estes padrões têm tendência de repetição, mas <strong>não são determinísticos</strong> — o mercado é parcialmente aleatório. Dias negativos acontecem mesmo seguindo todas as regras. O objectivo é dar <strong>vantagem estatística a longo prazo</strong>, não garantir ganhos em cada trade.
+    </p>
+
+    <h3 id="g7" style="color:var(--accent);">7. Erros que destroem contas</h3>
+    <table>
+      <tr><th>❌ Erro</th><th>✅ Correto</th></tr>
+      <tr><td>Entrar com NEUTRO "porque parece"</td><td>Sem sinal = sem entrada.</td></tr>
+      <tr><td>Martingale de 3+ níveis</td><td>$0.35→$0.70→$1.40→$2.80 = conta destruída</td></tr>
+      <tr><td>Continuar após stop‑loss 5%</td><td>Um dia mau não justifica destruir a semana</td></tr>
+      <tr><td>Ignorar entropia "ALEATÓRIO"</td><td>É aposta pura, não análise</td></tr>
+      <tr><td>Mudar de modo durante perdas</td><td>Indisciplina esconde o problema real</td></tr>
+    </table>
+  </div>
+</div>
 
 <div class="container" id="mainContent" style="display:none">
   <div id="dashboard-section">
@@ -228,11 +300,92 @@
     </div>
   </div>
 
-  <!-- Outras secções (affiliate, history, payment, settings, admin) mantidas iguais às versões anteriores -->
+  <div id="affiliate-section" class="hidden">
+    <div class="card">
+      <div class="card-title">🔗 SEU LINK</div>
+      <div class="lc"><input type="text" id="refLink" readonly><button class="bmr" onclick="cpLink()">📋</button></div>
+      <div id="affiliateEarnings"></div>
+    </div>
+  </div>
+  <div id="history-section" class="hidden">
+    <div class="card">
+      <div class="card-title">📊 RESUMO</div>
+      <div id="histSummary2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px"></div>
+      <div class="card-title">📋 OPERAÇÕES</div>
+      <div id="histList2"></div>
+    </div>
+  </div>
+  <div id="payment-section" class="hidden">
+    <div class="card">
+      <div class="card-title">💰 DEPÓSITO</div>
+      <a href="/go/airtm" target="_blank" class="btn-buy" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#000">💳 Depositar via AirTM</a>
+    </div>
+    <div class="card">
+      <div class="card-title">🏦 SAQUE</div>
+      <a href="https://app.deriv.com/cashier/withdrawal" target="_blank" class="btn-sell" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#fff">🏧 Sacar via Deriv</a>
+    </div>
+  </div>
+  <div id="settings-section" class="hidden">
+    <div class="card">
+      <div class="card-title">🚀 CRIAR CONTA DERIV</div>
+      <a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" class="btn-buy" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#000">🚀 Criar Conta</a>
+    </div>
+    <div class="card">
+      <div class="card-title">🔐 TOKEN DERIV</div>
+      <input type="password" id="tokIn" placeholder="Cole o token">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="bmr" style="flex:1" onclick="saveTokAcct('demo')">💾 DEMO</button>
+        <button class="bmr" style="flex:1" onclick="saveTokAcct('real')">💾 REAL</button>
+      </div>
+      <div class="token-display" id="tokenDisplay" style="display:none">
+        <div class="token-row"><span><span class="token-dot" id="dotDemo"></span> Demo</span><span id="statusDemo" style="color:var(--muted)">---</span></div>
+        <div class="token-row"><span><span class="token-dot" id="dotReal"></span> Real</span><span id="statusReal" style="color:var(--muted)">---</span></div>
+        <div class="token-row"><span style="color:var(--accent);font-weight:600">Activa:</span><span id="activeAccountDisplay" style="color:var(--accent);font-weight:700">DEMO</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">📖 GUIA</div>
+      <button class="btn-buy" style="width:100%" onclick="openGuide()">📖 Ver Guia</button>
+    </div>
+  </div>
+  <div id="admin-section" class="hidden">
+    <div class="card">
+      <div class="card-title">👑 ADMIN</div>
+      <div id="adminUserList"></div>
+      <button class="bmr" style="width:100%;margin-top:8px" onclick="loadAdminUsers()">🔄 Actualizar</button>
+    </div>
+    <div class="card">
+      <div class="card-title">💸 COMISSÃO (%)</div>
+      <input type="number" id="markupInput" value="0.5" step="0.1" min="0" max="3">
+      <button class="btn-buy" style="width:100%;margin-top:6px" onclick="saveMarkup()">GUARDAR</button>
+      <div id="markupMsg" style="text-align:center;margin-top:4px;font-size:11px"></div>
+    </div>
+  </div>
 </div>
 
 <div id="authModal" class="modal" onclick="if(event.target===this)closeAuthModal()">
-  <!-- modal de autenticação inalterado -->
+  <div class="mbox" onclick="event.stopPropagation()">
+    <h2 style="color:var(--accent);text-align:center;margin-bottom:12px">FOLOMA VISÃO 360</h2>
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button class="bmr" style="flex:1" onclick="showTab('login')">ENTRAR</button>
+      <button class="bmr" style="flex:1" onclick="showTab('register')">REGISTAR</button>
+      <button class="bmr" style="flex:1" onclick="showTab('forgot')">RECUPERAR</button>
+    </div>
+    <div id="loginForm">
+      <input type="email" id="lEmail" placeholder="Email"><input type="password" id="lPass" placeholder="Senha" style="margin-top:6px">
+      <button class="btn-buy" onclick="doLogin()" style="margin-top:6px">ENTRAR</button>
+    </div>
+    <div id="registerForm" style="display:none">
+      <input type="text" id="rName" placeholder="Nome"><input type="email" id="rEmail" placeholder="Email" style="margin-top:6px">
+      <input type="password" id="rPass" placeholder="Senha (min 6)" style="margin-top:6px"><input type="text" id="rRef" placeholder="Código de indicação" style="margin-top:6px">
+      <button class="btn-buy" onclick="doRegister()" style="margin-top:6px">CRIAR CONTA</button>
+    </div>
+    <div id="forgotForm" style="display:none">
+      <input type="email" id="fEmail" placeholder="Email"><button class="btn-buy" onclick="doReset()" style="margin-top:6px">ENVIAR LINK</button>
+      <div id="fMsg" style="text-align:center;margin-top:6px;font-size:11px"></div>
+    </div>
+    <div id="authErr" style="text-align:center;margin-top:6px;color:var(--danger);font-size:11px"></div>
+  </div>
 </div>
 
 <script>
@@ -241,6 +394,12 @@ let selectedAcct='demo', curSym='R_100', modo='digitos';
 let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
 let isConnected = false;
+let isConnecting = false;
+let lastHybridState = null;
+let _loggingIn = false;
+let _registering = false;
+let lastTradeCount = 0;
+let currentGranularity = 60;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 
 let candleChart = null, candleSeries = null, resizeObserver = null;
@@ -255,6 +414,17 @@ function playBeep() {
   if(audio) { audio.currentTime = 0; audio.play().catch(()=>{}); }
 }
 
+function openGuide() { document.getElementById('guideModal').style.display='flex'; document.body.classList.add('modal-open'); }
+function closeGuide() { document.getElementById('guideModal').style.display='none'; document.body.classList.remove('modal-open'); }
+function closeAuthModal() { document.getElementById('authModal').style.display='none'; document.body.classList.remove('modal-open'); }
+
+function scrollToSection(id) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.querySelectorAll('.guide-nav .tf-btn').forEach(b => b.classList.remove('active'));
+  if (event && event.target) event.target.classList.add('active');
+}
+
 function initSyms(){
   let h='';
   for(const[k,v] of Object.entries(syms)) h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}', this)">${v}</button>`;
@@ -266,6 +436,15 @@ function chgSym(s, el){
   document.querySelectorAll('.sym-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
 }
+
+document.addEventListener('click', (e) => {
+  if (e.target.classList.contains('tf-btn') && !e.target.closest('.guide-nav')) {
+    document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));
+    e.target.classList.add('active');
+    currentGranularity = parseInt(e.target.dataset.tf);
+    loadCandles();
+  }
+});
 
 function startPolling(){ if(_updateInterval) return; scheduleNextPoll(); }
 function stopPolling() { if (_updateInterval) { clearTimeout(_updateInterval); _updateInterval = null; } }
@@ -301,6 +480,49 @@ function updateScoreboard() {
     .catch(()=>{});
 }
 
+async function autoConnect() {
+  try {
+    const r = await fetch('/api/auth/auto-connect');
+    const d = await r.json();
+    if (d.status === 'already_connected') { document.getElementById('conSt').textContent = '✅ Conectado'; isConnected = true; }
+    else if (d.status === 'connecting') { document.getElementById('conSt').textContent = '🔄 Auto-conectando...'; toast('🔄 Auto-conectando...', 'info'); setTimeout(updateAll, 3000); }
+  } catch(e) {}
+}
+
+function initCandleChart() {
+  const container = document.getElementById('priceChart');
+  if (!container || candleChart) return;
+  candleChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth, height: 120,
+    layout: { background: { color: '#020617' }, textColor: '#e2e8f0' },
+    grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#1e293b' },
+    timeScale: { borderColor: '#1e293b', timeVisible: true }
+  });
+  candleSeries = candleChart.addCandlestickSeries({
+    upColor: '#00f0b5', downColor: '#ff4d4d',
+    borderUpColor: '#00f0b5', borderDownColor: '#ff4d4d',
+    wickUpColor: '#00f0b5', wickDownColor: '#ff4d4d'
+  });
+  if (window.ResizeObserver) {
+    resizeObserver = new ResizeObserver(() => { if (candleChart && container) candleChart.applyOptions({ width: container.clientWidth }); });
+    resizeObserver.observe(container);
+  }
+}
+
+async function loadCandles() {
+  if (!candleChart) return;
+  try {
+    const r = await fetch(`/api/candles/data?granularity=${currentGranularity}`);
+    const d = await r.json();
+    if (!d.candles || d.candles.length === 0) return;
+    const formatted = d.candles.map(c => ({ time: c.epoch, open: parseFloat(c.open), high: parseFloat(c.high), low: parseFloat(c.low), close: parseFloat(c.close) })).sort((a, b) => a.time - b.time);
+    candleSeries.setData(formatted);
+    candleChart.timeScale().fitContent();
+  } catch(e) { console.error('Erro ao carregar velas:', e); }
+}
+
 function updateAll(){
   fetch('/api/status').then(r=>r.json()).then(data=>{
     if(data.error) return;
@@ -325,11 +547,18 @@ function updateAll(){
       const blockerMsg = document.getElementById('digitBlockerMsg');
       if (tr !== undefined && tr < 3) { btnOdd.disabled = true; btnEven.disabled = true; blockerMsg.textContent = `⏳ Aguarde ${tr} tick(s)...`; }
       else { btnOdd.disabled = false; btnEven.disabled = false; blockerMsg.textContent = ''; }
-      // Atualizar frequências
       if(data.digits.digit_frequencies) {
         updateFreqGrid(data.digits.digit_frequencies, data.digits.least_frequent_digit);
       }
     }
+
+    fetch('/api/martingale/status').then(r=>r.json()).then(m=>{
+      const act = m.active ? `ATIVO (passo ${m.step})` : 'INATIVO';
+      const nxt = '$' + (m.next_amount||0.35).toFixed(2);
+      const dAct = document.getElementById('mgtActDig'); if(dAct) dAct.textContent = act;
+      const dNxt = document.getElementById('mgtNxtDig'); if(dNxt) dNxt.textContent = nxt;
+      if(m.active){ const ad = document.getElementById('amtDigit'); if(ad) ad.value = (m.next_amount||0.35).toFixed(2); }
+    }).catch(()=>{});
 
     updateHistSummary(bot);
     if (!candleChart) initCandleChart();
@@ -337,7 +566,27 @@ function updateAll(){
 }
 
 function updateDigits(digits){
-  // ... (código existente de atualização de dígitos, omitido por brevidade mas mantido igual)
+  if(!digits)return;
+  const tpd=digits.ticks_per_digit||10, tr=Math.max(0,Math.round(digits.ticks_remaining||tpd));
+  document.getElementById('tBar').style.width=Math.min(100,(tr/tpd)*100)+'%';
+  document.getElementById('cdown').textContent=`⏱ ${tr} tick${tr!==1?'s':''}`;
+  const recent=digits.recent||[], counter=digits.digit_counter||0;
+  if(recent.length>0 && (recent.length!==lastDigitCount || counter!==lastDigitCounter)){
+    lastDigitCount=recent.length;lastDigitCounter=counter;
+    const newest=recent[recent.length-1], isOdd=newest%2!==0;
+    const bd=document.getElementById('bigD'), bp=document.getElementById('bigP');
+    bd.textContent=newest;bd.className='big-d '+(isOdd?'odd':'even');
+    bp.textContent=isOdd?'ÍMPAR':'PAR';bp.className='big-p '+(isOdd?'odd':'even');
+    let html='';recent.forEach((d)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
+    document.getElementById('histRow').innerHTML=html;
+    const scroll = document.getElementById('histScroll'); scroll.scrollLeft = scroll.scrollWidth;
+  }
+  const analysis = digits.analysis;
+  if (analysis) {
+    document.getElementById('seqInfo').textContent = (analysis.sequences?.descricao) || '';
+    if (analysis.entropy !== undefined) document.getElementById('entropyInfo').textContent = `Entropia: ${analysis.entropy.toFixed(2)} (${analysis.entropy_verdict||'---'})`;
+    else document.getElementById('entropyInfo').textContent = '';
+  }
 }
 
 function updateFreqGrid(freqs, leastDigit) {
@@ -354,6 +603,57 @@ function updateFreqGrid(freqs, leastDigit) {
     </div>`;
   }
   grid.innerHTML = html;
+}
+
+async function conectar(){
+  const tok = document.getElementById('tokIn').value.trim();
+  if(!tok){ toast('❌ Token obrigatório','loss'); return; }
+  try {
+    const r = await fetch('/api/auth/save_token', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:tok, account_type: selectedAcct}) });
+    const d = await r.json();
+    if(d.error){ toast('❌ '+d.error,'loss'); return; }
+    toast('✅ Token guardado','win');
+    document.getElementById('conSt').textContent = '🔄 A conectar...';
+    setTimeout(() => { fetch('/api/connect', {method:'POST'}).then(r=>r.json()).then(d=>{ if(d.status==='connecting') toast('🔄 Conectando...','info'); }); }, 500);
+  } catch(e) { toast('❌ Erro de rede','loss'); }
+}
+
+async function connectWithDeriv(){
+  try {
+    const r = await fetch('/api/auth/deriv_oauth_url');
+    const d = await r.json();
+    if(d.error){ toast('❌ '+d.error,'loss'); return; }
+    window.location.href = d.url;
+  } catch(e) { toast('❌ Erro OAuth','loss'); }
+}
+
+async function disconnectWebSocket(){
+  try {
+    await fetch('/api/disconnect', {method:'POST'});
+    toast('🔌 Desconectado','info'); isConnected = false;
+    document.getElementById('sDot').className = 'dot'; document.getElementById('connStatus').textContent = 'Desconectado';
+    document.getElementById('connectOAuthBtn').disabled = false; document.getElementById('connectTokenBtn').disabled = false;
+  } catch(e) { toast('❌ Erro','loss'); }
+}
+
+async function selAcct(a){
+  selectedAcct = a;
+  document.getElementById('btnDemo').classList.toggle('active', a==='demo');
+  document.getElementById('btnReal').classList.toggle('active', a==='real');
+  try {
+    const r = await fetch('/api/auth/switch-account', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({account_type: a}) });
+    const d = await r.json();
+    if(d.error){ toast('❌ '+d.error,'loss'); return; }
+    toast(`✅ Conta ${a.toUpperCase()} activa`,'win');
+    document.getElementById('conSt').textContent = '🔄 A trocar conta...';
+  } catch(e) { toast('❌ Erro','loss'); }
+}
+
+function tradeDigit(pred){
+  const amt = parseFloat(document.getElementById('amtDigit').value) || 0.35;
+  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred, amount:amt})})
+  .then(r=>r.json()).then(d=>{ if(d.error) toast('❌ '+d.error,'loss'); else { toast('⏳ Aposta enviada!','info'); setTimeout(loadHistory, 13000); } })
+  .catch(()=>toast('❌ Erro de rede','loss'));
 }
 
 async function tradeDiffer() {
@@ -374,8 +674,211 @@ async function tradeDiffer() {
   } catch(e) { toast('❌ Erro de rede','loss'); }
 }
 
-// Restantes funções (conectar, trade, martingale, etc.) mantidas das versões anteriores
-// ...
+async function mgtMultiply(fieldId){
+  const input = document.getElementById(fieldId);
+  const currentAmount = parseFloat(input.value) || 0.35;
+  const r = await fetch('/api/martingale/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({last_amount: currentAmount}) });
+  const d = await r.json();
+  if(d.error) { toast('❌ '+d.error,'loss'); }
+  else {
+    const nextAmount = d.martingale.next_amount;
+    document.getElementById('amtDigit').value = nextAmount.toFixed(2);
+    toast('📈 '+d.martingale.message,'info');
+  }
+}
+
+async function mgtDivide(fieldId){
+  const input = document.getElementById(fieldId);
+  const currentAmount = parseFloat(input.value) || 0.35;
+  const nextAmount = Math.max(0.35, currentAmount / 2);
+  input.value = nextAmount.toFixed(2);
+  toast('📉 $'+nextAmount.toFixed(2),'info');
+}
+
+async function rstMgt(){
+  await fetch('/api/martingale/reset', {method:'POST'});
+  document.getElementById('amtDigit').value = '0.35';
+  toast('🔄 Martingale resetado','info');
+}
+
+async function clearHistory(){
+  await fetch('/api/clear_history', {method:'POST'});
+  toast('🗑️ Histórico limpo','info'); loadHistory();
+}
+
+function loadAffiliate(){
+  fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{ if(d.link) document.getElementById('refLink').value = d.link; });
+  fetch('/api/affiliate/earnings').then(r=>r.json()).then(d=>{
+    const el = document.getElementById('affiliateEarnings');
+    if(d.error) { el.innerHTML = ''; return; }
+    el.innerHTML = `<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">GANHOS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">$${d.earnings?.toFixed(2)||'0.00'}</div></div>
+      <div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">REFERIDOS</div><div style="font-size:16px;font-weight:bold">${d.referred_count||0}</div></div>
+    </div>`;
+  });
+}
+
+function cpLink(){ const el=document.getElementById('refLink'); el.select(); document.execCommand('copy'); toast('📋 Copiado!','win'); }
+
+function loadHistory(){
+  fetch('/api/report').then(r=>r.json()).then(d=>{
+    const sum = document.getElementById('histSummary2');
+    const list = document.getElementById('histList2');
+    const miniList = document.getElementById('histList');
+    if(d.error) { if(sum) sum.innerHTML=''; if(list) list.innerHTML=''; if(miniList) miniList.innerHTML=''; return; }
+    const r = d.resumo;
+    if(sum) sum.innerHTML = `
+      <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${r.total_trades}</div></div>
+      <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${r.trades_hoje}</div></div>
+      <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WINS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${r.wins}</div></div>
+      <div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">LOSSES</div><div style="font-size:16px;font-weight:bold;color:var(--danger)">${r.losses}</div></div>`;
+    
+    const html = d.historico.map(t=>{
+      const win = t.result === 'win'; const lose = t.result === 'loss';
+      const cor = win ? 'var(--accent)' : lose ? 'var(--danger)' : '#ffaa00';
+      const icon = win ? '✅' : lose ? '❌' : '⏳';
+      let actionLabel = t.action || '';
+      if (t.is_digit) {
+        actionLabel = (t.action === 'BUY' || t.action === 'CALL') ? 'ÍMPAR 🎲' : 'PAR 🎲';
+      }
+      const profitText = t.profit ? `<div style="color:${t.profit>0?'var(--accent)':'var(--danger)'}">${t.profit>0?'+':''}$${t.profit.toFixed(2)}</div>` : '';
+      return `<div style="padding:6px;background:#020617;border-radius:6px;margin-bottom:4px;font-size:11px">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--muted)">${t.time}</span>
+          <span style="font-weight:700;color:${cor}">${icon} ${t.result.toUpperCase()}</span>
+        </div>
+        <div>${actionLabel} ${t.symbol} $${t.amount.toFixed(2)}</div>
+        ${profitText}
+      </div>`;
+    }).join('');
+    if(list) list.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+    if(miniList) miniList.innerHTML = html || '<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+  }).catch(()=>toast('❌ Erro histórico','loss'));
+}
+
+function loadAdminUsers(){
+  fetch('/api/admin/users').then(r=>r.json()).then(d=>{
+    const el = document.getElementById('adminUserList');
+    if(d.error){ el.innerHTML = '<p style="color:var(--danger)">'+d.error+'</p>'; return; }
+    el.innerHTML = d.users.map(u=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px;background:#020617;border-radius:6px;margin-bottom:4px">
+        <div><div style="font-weight:600;font-size:12px">${u.name||u.email}</div><div style="font-size:10px;color:var(--muted)">${u.email}</div></div>
+        <button class="bmr" style="padding:3px 10px;font-size:10px" onclick="toggleUser('${u.email}', ${!u.active})">${u.active?'Desativar':'Ativar'}</button>
+      </div>`).join('');
+  });
+}
+function toggleUser(email, enable){ fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,enable})}).then(r=>r.json()).then(d=>{ toast(d.message,'info'); loadAdminUsers(); }); }
+async function saveMarkup(){
+  const pct = parseFloat(document.getElementById('markupInput').value);
+  const r = await fetch('/api/admin/set-markup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({percentage:pct})});
+  const d = await r.json();
+  document.getElementById('markupMsg').textContent = d.error ? d.error : `✅ ${pct}%`;
+  document.getElementById('markupMsg').style.color = d.error ? 'var(--danger)' : 'var(--accent)';
+}
+function showTab(t){
+  document.getElementById('loginForm').style.display = t==='login'?'block':'none';
+  document.getElementById('registerForm').style.display = t==='register'?'block':'none';
+  document.getElementById('forgotForm').style.display = t==='forgot'?'block':'none';
+  document.getElementById('authErr').textContent = '';
+}
+function doLogin(){
+  if(_loggingIn) return; _loggingIn = true;
+  const email = document.getElementById('lEmail').value.trim().toLowerCase();
+  const password = document.getElementById('lPass').value;
+  fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})})
+  .then(r=>r.json()).then(d=>{ _loggingIn = false;
+    if(d.error){ document.getElementById('authErr').textContent = d.error; return; }
+    document.getElementById('authModal').style.display='none'; document.body.classList.remove('modal-open');
+    document.getElementById('mainContent').style.display='block';
+    if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
+    initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles, 3000); startPolling();
+    if(d.user?.has_deriv_token) setTimeout(autoConnect, 1500);
+  }).catch(()=>{ _loggingIn = false; document.getElementById('authErr').textContent = 'Erro de rede'; });
+}
+function doRegister(){
+  if(_registering) return; _registering = true;
+  const name = document.getElementById('rName').value.trim();
+  const email = document.getElementById('rEmail').value.trim().toLowerCase();
+  const password = document.getElementById('rPass').value;
+  const ref = document.getElementById('rRef').value.trim();
+  if(!name || !email || password.length < 6){ _registering = false; document.getElementById('authErr').textContent = 'Dados inválidos'; return; }
+  fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,password,referral_code:ref})})
+  .then(r=>r.json()).then(d=>{ _registering = false;
+    if(d.error){ document.getElementById('authErr').textContent = d.error; return; }
+    document.getElementById('authModal').style.display='none'; document.body.classList.remove('modal-open');
+    document.getElementById('mainContent').style.display='block';
+    initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles, 3000); startPolling();
+    toast('✅ Conta criada!','win',4000);
+  }).catch(()=>{ _registering = false; document.getElementById('authErr').textContent = 'Erro de rede'; });
+}
+function doReset(){
+  const email = document.getElementById('fEmail').value.trim().toLowerCase();
+  fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})
+  .then(r=>r.json()).then(d=>{ document.getElementById('fMsg').textContent = d.error ? d.error : '✅ Verifique o email'; document.getElementById('fMsg').style.color = d.error ? 'var(--danger)' : 'var(--accent)'; });
+}
+function doLogout() { stopPolling(); if (resizeObserver) resizeObserver.disconnect(); fetch('/api/auth/logout', { method: 'POST' }).then(() => location.reload()); }
+async function saveTokAcct(acctType){
+  const tok = document.getElementById('tokIn').value.trim();
+  if(!tok){ toast('❌ Cole o token','loss'); return; }
+  try {
+    const r = await fetch('/api/auth/save_token', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:tok, account_type: acctType}) });
+    const d = await r.json();
+    if(d.error){ toast('❌ '+d.error,'loss'); return; }
+    toast(`✅ Token ${acctType.toUpperCase()} guardado`,'win');
+    document.getElementById('tokIn').value = ''; updateTokenDisplay();
+  } catch(e) { toast('❌ Erro','loss'); }
+}
+function updateTokenDisplay() {
+  fetch('/api/auth/status').then(r=>r.json()).then(d=>{
+    if(d.authenticated && d.user) {
+      const display = document.getElementById('tokenDisplay');
+      const dotDemo = document.getElementById('dotDemo'); const dotReal = document.getElementById('dotReal');
+      const statusDemo = document.getElementById('statusDemo'); const statusReal = document.getElementById('statusReal');
+      display.style.display = 'block';
+      if(d.user.has_demo_token) { dotDemo.className = 'token-dot ok'+(d.user.active_account==='demo'?' active':''); statusDemo.textContent = 'Guardado'+(d.user.active_account==='demo'?' (Activo)':''); statusDemo.style.color = 'var(--accent)'; }
+      else { dotDemo.className = 'token-dot missing'; statusDemo.textContent = 'Não guardado'; statusDemo.style.color = 'var(--muted)'; }
+      if(d.user.has_real_token) { dotReal.className = 'token-dot ok'+(d.user.active_account==='real'?' active':''); statusReal.textContent = 'Guardado'+(d.user.active_account==='real'?' (Activo)':''); statusReal.style.color = 'var(--accent)'; }
+      else { dotReal.className = 'token-dot missing'; statusReal.textContent = 'Não guardado'; statusReal.style.color = 'var(--muted)'; }
+      document.getElementById('activeAccountDisplay').textContent = (d.user.active_account||'demo').toUpperCase();
+    }
+  });
+}
+function toggleMenu(){ document.getElementById('sideMenu').classList.toggle('open'); document.getElementById('overlay').classList.toggle('show'); }
+function showSec(s){
+  document.querySelectorAll('#dashboard-section, #affiliate-section, #history-section, #payment-section, #settings-section, #admin-section').forEach(el=>el.classList.add('hidden'));
+  document.getElementById(s+'-section').classList.remove('hidden');
+  toggleMenu();
+  if(s==='history') loadHistory();
+  if(s==='affiliate') loadAffiliate();
+  if(s==='admin') loadAdminUsers();
+  if(s==='settings') updateTokenDisplay();
+}
+
+// Velas apenas quando conectado
+setInterval(() => { if (isConnected) loadCandles(); }, 10000);
+// Placar de sinais a cada 30s
+setInterval(updateScoreboard, 30000);
+updateScoreboard();
+
+(function(){
+  const p=new URLSearchParams(location.search);
+  if(p.get('connected')==='true'){ toast('✅ Deriv conectada!','win',4000); startPolling(); setTimeout(()=>{ fetch('/api/status').then(r=>r.json()).then(data=>{ if(!data.bot?.authorized) autoConnect(); }).catch(()=>autoConnect()); },2000); history.replaceState({},'',location.pathname); }
+})();
+(function(){ const p=new URLSearchParams(location.search); const ref=p.get('ref'); if(ref){const el=document.getElementById('rRef');if(el)el.value=ref;} })();
+fetch('/api/auth/status').then(r=>r.json()).then(d=>{
+  if(d.authenticated){
+    if(d.user?.active_account) selectedAcct = d.user.active_account;
+    document.getElementById('btnDemo').classList.toggle('active', selectedAcct === 'demo');
+    document.getElementById('btnReal').classList.toggle('active', selectedAcct === 'real');
+    if(d.user?.name) document.getElementById('userNameDisplay').textContent = '👤 ' + d.user.name;
+    document.getElementById('authModal').style.display='none'; document.body.classList.remove('modal-open');
+    document.getElementById('mainContent').style.display='block';
+    if(d.user?.role==='admin') document.getElementById('adminMI').style.display='block';
+    initSyms();loadAffiliate();loadHistory(); initCandleChart(); setTimeout(loadCandles, 3000); startPolling();
+    if(d.user?.has_deriv_token){ setTimeout(() => autoConnect(), 1500); }
+    updateTokenDisplay();
+  }
+});
 </script>
 </body>
 </html>
