@@ -429,6 +429,8 @@ class DerivWebSocketClient:
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
 
+        time.sleep(0.5)
+
         with self._trade_lock:
             if not self.streaming:
                 logger.warning("🚫 Sem streaming"); return False
@@ -642,7 +644,7 @@ class DerivWebSocketClient:
                     'data': candles,
                     'timestamp': time.time()
                 }
-            # 🔥 Passar high/low das últimas 20 velas para o trading_bot
+            # Passar high/low das últimas 20 velas para o trading_bot
             if self.trading_bot and hasattr(self.trading_bot, 'feed_candle_data'):
                 for candle in candles[-20:]:
                     high = float(candle.get('high', 0))
