@@ -903,10 +903,12 @@ def status():
     bot_status = bot.get_status()
     bot_status['streaming'] = client.streaming if client else False
     analysis = analyzer.get_analysis()
+    # Adicionar frequências de dígitos individuais
+    digit_frequencies = analyzer.get_digit_frequencies()
+    least_frequent = analyzer.get_least_frequent_digit()
 
     _save_daily_stats_to_db(session.get('user_email'), bot)
 
-    logger.debug(f"📊 STATUS: connected={bot_status.get('connected')}, authorized={bot_status.get('authorized')}, balance={bot_status.get('balance')}")
     return jsonify({
         'bot': bot_status,
         'digits': {
@@ -918,7 +920,9 @@ def status():
             'total': len(analyzer.get_recent_digits()),
             'ticks_remaining': analyzer.get_ticks_remaining(),
             'digit_counter': analyzer.get_digit_counter(),
-            'ticks_per_digit': analyzer.TICKS_PER_DIGIT
+            'ticks_per_digit': analyzer.TICKS_PER_DIGIT,
+            'digit_frequencies': digit_frequencies,
+            'least_frequent_digit': least_frequent
         },
         'symbols': config.AVAILABLE_SYMBOLS,
         'loginid': client.loginid if client else None
@@ -954,7 +958,90 @@ def debug():
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
     })
 
-# ==================== OAUTH (CORRIGIDO) ====================
+@app.route('/oauth/callback')
+def oauth_callback():
+    state_id = request.args.get('state')
+    if not state_id:
+        return redirect('/?error=invalid_state')
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>OAuth Callback</title></head>
+<body>
+    <p>A processar autenticação...</p>
+    <script>
+        (function() {{
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            const accessToken = params.get('access_token');
+            if (!accessToken) {{ window.location.href = '/?error=no_token'; return; }}
+            const tokens = [];
+            for (let i = 1; params.get('token' + i); i++) {{
+                tokens.push({{ token: params.get('token' + i), acct: params.get('acct' + i) || '' }});
+            }}
+            if (tokens.length === 0 && accessToken) {{
+                tokens.push({{ token: accessToken, acct: '' }});
+            }}
+            fetch('/api/auth/process-oauth', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ state: '{state_id}', tokens: tokens }})
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                if (data.status === 'ok') {{ window.location.href = '/?connected=true'; }}
+                else {{ window.location.href = '/?error=' + (data.error || 'oauth_failed'); }}
+            }})
+            .catch(() => {{ window.location.href = '/?error=request_failed'; }});
+        }})();
+    </script>
+</body>
+</html>"""
+    return make_response(html)
+
+@app.route('/api/auth/process-oauth', methods=['POST'])
+def process_oauth():
+    data = request.json
+    state_id = data.get('state')
+    tokens = data.get('tokens', [])
+    if not state_id or not tokens:
+        return jsonify({'error': 'Dados incompletos'}), 400
+    with oauth_states_lock:
+        state_data = oauth_states.pop(state_id, None)
+    if not state_data:
+        if 'user_id' not in session:
+            return jsonify({'error': 'Sessão expirada'}), 401
+        user_id = session['user_id']
+    else:
+        user_id = state_data['user_id']
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
+        if not row:
+            return jsonify({'error': 'Utilizador não encontrado'}), 404
+        email = row[0]
+    finally:
+        conn.close()
+    account_type_request = state_data.get('account_type', 'demo') if state_data else 'demo'
+    for acc in tokens:
+        tok = acc.get('token')
+        acct = acc.get('acct', '')
+        if not tok:
+            continue
+        if acct.startswith('VR'):
+            UserStore.add_token(email, 'demo', tok)
+        else:
+            UserStore.add_token(email, 'real', tok)
+        if (account_type_request == 'demo' and acct.startswith('VR')) or \
+           (account_type_request == 'real' and not acct.startswith('VR')):
+            UserStore.set_active_account(email, account_type_request)
+    user = UserStore.get(email)
+    session['user_id'] = user_id
+    session['user_email'] = email
+    session['user_name'] = user['name']
+    session['user_role'] = user.get('role', 'user')
+    session.permanent = True
+    create_session(user_id, user, force=True)
+    return jsonify({'status': 'ok'})
 
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
@@ -986,132 +1073,6 @@ def deriv_oauth_url():
     logger.info(f"URL OAuth gerado: {url}")
     return jsonify({'url': url})
 
-@app.route('/oauth/callback')
-def oauth_callback():
-    """
-    A Deriv redireciona para cá com o token no fragmento (#access_token=...).
-    O servidor não vê o fragmento, por isso devolvemos uma página HTML que
-    extrai o hash e envia os tokens para o backend via POST.
-    """
-    state_id = request.args.get('state')
-    if not state_id:
-        return redirect('/?error=invalid_state')
-
-    # Construir uma página que extrai o hash e submete para a API
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>OAuth Callback</title>
-</head>
-<body>
-    <p>A processar autenticação...</p>
-    <script>
-        (function() {{
-            const hash = window.location.hash.substring(1);
-            const params = new URLSearchParams(hash);
-            const accessToken = params.get('access_token');
-            if (!accessToken) {{
-                window.location.href = '/?error=no_token';
-                return;
-            }}
-            // Construir a lista de tokens (podem vir vários)
-            const tokens = [];
-            for (let i = 1; params.get('token' + i); i++) {{
-                tokens.push({{
-                    token: params.get('token' + i),
-                    acct: params.get('acct' + i) || ''
-                }});
-            }}
-            // Se não houver tokens múltiplos, usar o access_token diretamente
-            if (tokens.length === 0 && accessToken) {{
-                tokens.push({{ token: accessToken, acct: '' }});
-            }}
-            // Enviar para o backend
-            fetch('/api/auth/process-oauth', {{
-                method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }},
-                body: JSON.stringify({{
-                    state: '{state_id}',
-                    tokens: tokens
-                }})
-            }})
-            .then(response => response.json())
-            .then(data => {{
-                if (data.status === 'ok') {{
-                    window.location.href = '/?connected=true';
-                }} else {{
-                    window.location.href = '/?error=' + (data.error || 'oauth_failed');
-                }}
-            }})
-            .catch(() => {{
-                window.location.href = '/?error=request_failed';
-            }});
-        }})();
-    </script>
-</body>
-</html>"""
-    return make_response(html)
-
-@app.route('/api/auth/process-oauth', methods=['POST'])
-def process_oauth():
-    """Recebe os tokens extraídos do hash pelo callback e guarda na BD."""
-    data = request.json
-    state_id = data.get('state')
-    tokens = data.get('tokens', [])
-
-    if not state_id or not tokens:
-        return jsonify({'error': 'Dados incompletos'}), 400
-
-    with oauth_states_lock:
-        state_data = oauth_states.pop(state_id, None)
-
-    if not state_data:
-        # Pode ser uma re-submissão; tentamos recuperar o user_id da sessão
-        if 'user_id' not in session:
-            return jsonify({'error': 'Sessão expirada'}), 401
-        user_id = session['user_id']
-    else:
-        user_id = state_data['user_id']
-
-    # Obter email
-    conn = sqlite3.connect(DATABASE_PATH)
-    try:
-        row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
-        if not row:
-            return jsonify({'error': 'Utilizador não encontrado'}), 404
-        email = row[0]
-    finally:
-        conn.close()
-
-    account_type_request = state_data.get('account_type', 'demo') if state_data else 'demo'
-
-    for acc in tokens:
-        tok = acc.get('token')
-        acct = acc.get('acct', '')
-        if not tok:
-            continue
-        if acct.startswith('VR'):
-            UserStore.add_token(email, 'demo', tok)
-        else:
-            UserStore.add_token(email, 'real', tok)
-        if (account_type_request == 'demo' and acct.startswith('VR')) or \
-           (account_type_request == 'real' and not acct.startswith('VR')):
-            UserStore.set_active_account(email, account_type_request)
-
-    # Atualizar sessão
-    user = UserStore.get(email)
-    session['user_id'] = user_id
-    session['user_email'] = email
-    session['user_name'] = user['name']
-    session['user_role'] = user.get('role', 'user')
-    session.permanent = True
-
-    # Forçar criação de sessão websocket
-    create_session(user_id, user, force=True)
-
-    return jsonify({'status': 'ok'})
-
 # ==================== TRADING ====================
 
 @app.route('/api/trade', methods=['POST'])
@@ -1133,15 +1094,8 @@ def trade():
         if amt < 0.35 or amt > 100:
             return jsonify({'error': 'Valor inválido'}), 400
 
-        sig, conf = bot.calculate_signal()
-        if conf < config.RISK_LIMITS.get('min_confidence', 55):
-            return jsonify({'error': f'Confiança insuficiente: {conf:.1f}%'}), 400
-
-        ok = sess['client'].place_trade('CALL' if action == 'BUY' else 'PUT', amt, False)
-        if ok:
-            credit_affiliate_commission(session['user_email'], amt)
-            return jsonify({'status': 'ok', 'message': f'Trade {action} enviado', 'confidence': conf})
-        return jsonify({'error': 'Falha no trade'}), 500
+        # Modo Ativos desativado — sempre bloqueia
+        return jsonify({'error': 'Modo Ativos temporariamente desativado. Use Dígitos ou Differ.'}), 400
     except Exception:
         logger.exception("Erro no trade")
         return jsonify({'error': 'Erro interno'}), 500
@@ -1178,9 +1132,11 @@ def trade_digit():
         logger.exception("Erro trade dígito")
         return jsonify({'error': 'Erro interno'}), 500
 
-@app.route('/api/trade/hybrid', methods=['POST'])
+# 🔥 ROTA CORRIGIDA: DIGITDIFFER
+@app.route('/api/trade/differ', methods=['POST'])
 @require_auth
-def trade_hybrid():
+@limit_if_available("10 per minute")
+def trade_differ():
     try:
         sess = get_session(session['user_id'])
         if not sess or not sess['client'].authorized:
@@ -1190,52 +1146,38 @@ def trade_hybrid():
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
         d = request.json
         amt = float(d.get('amount', 0.35))
-        bot = sess['trading_bot']
+        if amt < 0.35 or amt > 100:
+            return jsonify({'error': 'Valor inválido'}), 400
+
+        # Obter o dígito menos frequente calculado pelo analisador
         analyzer = sess['digit_analyzer']
-        if 'R_' not in bot.current_symbol:
-            return jsonify({'error': 'Híbrido apenas para índices R_'}), 400
-        sig, conf_a = bot.calculate_signal()
-        da = analyzer.get_analysis()
-        dr = da.get('recommended_action')
-        dc = da.get('confidence', 0)
-        if sig == 'BUY' and dr == 'BUY':
-            comb = min(conf_a, dc)
-            action = 'BUY'
-        elif sig == 'SELL' and dr == 'SELL':
-            comb = min(conf_a, dc)
-            action = 'SELL'
-        else:
-            return jsonify({'error': 'Sinais divergentes'}), 400
-        if comb < config.ADVANCED_STRATEGY.get('hybrid_min_confidence', 60):
-            return jsonify({'error': f'Confiança baixa ({comb:.1f}%)'}), 400
-        ok = sess['client'].place_trade('CALL' if action == 'BUY' else 'PUT', amt, False)
+        least = analyzer.get_least_frequent_digit()
+        if least is None:
+            return jsonify({'error': 'Ainda não há dados suficientes para DIFFER. Aguarde.'}), 400
+
+        # Usar SEMPRE o dígito calculado, nunca o enviado pelo utilizador
+        ok = sess['client'].place_differ_trade(least, amt)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
-            return jsonify({'status': 'ok', 'message': 'Híbrido confirmado', 'confidence': comb})
-        return jsonify({'error': 'Falha'}), 500
+            return jsonify({
+                'status': 'ok',
+                'message': f'🎯 DIGITDIFFER no dígito {least} por ${amt:.2f}',
+                'digit': least
+            })
+        return jsonify({'error': 'Falha no trade DIFFER'}), 500
     except Exception:
-        logger.exception("Erro trade híbrido")
+        logger.exception("Erro trade differ")
         return jsonify({'error': 'Erro interno'}), 500
+
+@app.route('/api/trade/hybrid', methods=['POST'])
+@require_auth
+def trade_hybrid():
+    return jsonify({'error': 'Modo Híbrido desativado. Use Dígitos ou Differ.'}), 400
 
 @app.route('/api/trade/manual', methods=['POST'])
 @require_auth
 def trade_manual():
-    try:
-        sess = get_session(session['user_id'])
-        if not sess or not sess['client'].authorized:
-            return jsonify({'error': 'Não conectado'}), 400
-        d = request.json
-        action = d.get('action')
-        amt = float(d.get('amount', 0.35))
-        if amt < 0.35 or amt > 100:
-            return jsonify({'error': 'Valor inválido'}), 400
-        ok = sess['client'].place_trade('CALL' if action == 'BUY' else 'PUT', amt, False)
-        if ok:
-            return jsonify({'status': 'ok', 'message': f'Trade manual {action}!'})
-        return jsonify({'error': 'Falha'}), 500
-    except Exception:
-        logger.exception("Erro trade manual")
-        return jsonify({'error': 'Erro interno'}), 500
+    return jsonify({'error': 'Modo Manual desativado. Use Dígitos ou Differ.'}), 400
 
 @app.route('/api/symbol/change', methods=['POST'])
 @require_auth
