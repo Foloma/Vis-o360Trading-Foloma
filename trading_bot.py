@@ -56,6 +56,9 @@ class TradingBot:
         self.on_signal_result_callback = None
         self._last_signal_id = None
 
+        # Cache do último sinal emitido (evita spam na BD)
+        self._last_emitted_signal = None
+
     def start(self, client):
         self.client = client
         self.daily_stats['start_balance'] = self.balance
@@ -122,7 +125,6 @@ class TradingBot:
         🔥 NOVO: Recebe dados de high/low das velas para alimentar
         os indicadores (ATR/ADX). Chamado pelo deriv_client quando as velas chegam.
         """
-        # Não precisamos disto em modo Dígitos, mas mantemos para futura reativação dos Ativos
         pass
 
     def calculate_signal(self):
@@ -138,7 +140,7 @@ class TradingBot:
         1. Entropia favorável (BEM DEFINIDO ou PREVISÍVEL)
         2. Confiança >= 60%
         
-        🔥 CORREÇÃO: Agora chama on_signal_callback para alimentar a tabela signals.
+        Só emite callback quando o sinal muda (evita spam na BD).
         """
         if not self.digit_analyzer:
             return None, 0
@@ -148,16 +150,18 @@ class TradingBot:
         conf = analysis.get('confidence', 0)
         entropy_verdict = analysis.get('entropy_verdict', '---')
 
-        # 1. Entropia favorável
+        # Reset se não há sinal válido
         if entropy_verdict not in ('BEM DEFINIDO', 'PREVISÍVEL'):
+            self._last_emitted_signal = None
             return None, 0
 
-        # 2. Confiança mínima
         if not action or conf < 60:
+            self._last_emitted_signal = None
             return None, 0
 
-        # Notificar backtesting (placar de sinais)
-        if self.on_signal_callback:
+        # Só notifica se o sinal for diferente do último emitido
+        if self.on_signal_callback and action != self._last_emitted_signal:
+            self._last_emitted_signal = action
             try:
                 self.on_signal_callback({
                     'signal': action,
@@ -188,7 +192,7 @@ class TradingBot:
             'symbol': self.current_symbol,
             'balance': self.balance,
             'currency': self.currency,
-            'signal': 'NEUTRAL',          # sempre NEUTRAL para modos Ativos/Híbrido
+            'signal': 'NEUTRAL',
             'confidence': 0,
             'tech_confidence': 0,
             'digit_confidence': digit_conf,
