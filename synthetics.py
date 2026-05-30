@@ -10,16 +10,15 @@ logger = logging.getLogger(__name__)
 
 class DigitAnalyzer:
     """
-    Analisador de dígitos para contratos DIGITODD/DIGITEVEN.
+    Analisador de dígitos para contratos DIGITODD/DIGITEVEN e DIGITDIFFER.
 
-    CONVENÇÃO DE SINAIS:
-    - 'BUY'  = apostar em ÍMPAR (DIGITODD)  → último dígito será 1,3,5,7,9
-    - 'SELL' = apostar em PAR   (DIGITEVEN) → último dígito será 0,2,4,6,8
-
-    A lógica baseia-se em REVERSÃO: quando há excesso de ímpares, aposta-se em par (SELL).
+    CONVENÇÃO:
+    - 'BUY'  / 'CALL'  = ÍMPAR (DIGITODD)
+    - 'SELL' / 'PUT'   = PAR   (DIGITEVEN)
+    - 'DIFFER'         = Aposta que um dígito específico NÃO sairá (DIGITDIFF)
     """
 
-    TICKS_PER_DIGIT = 10   # 1 dígito lento a cada 10 ticks ≈ 10 segundos
+    TICKS_PER_DIGIT = 10
 
     def __init__(self, max_digits=1000):
         self.slow_digits   = deque(maxlen=max_digits)
@@ -31,6 +30,10 @@ class DigitAnalyzer:
         self._digit_counter    = 0
 
         self._lock = threading.RLock()
+
+        # Rastreamento de frequência individual por dígito (0-9)
+        self._digit_window = deque(maxlen=100)
+        self._digit_counts = {i: 0 for i in range(10)}
 
         self.last_analysis = {
             'streak': 0, 'streak_parity': '---',
@@ -45,11 +48,12 @@ class DigitAnalyzer:
             'all_signals': [], 'digit_counter': 0,
             'sequences': None,
             'entropy': 0.0,
-            'entropy_verdict': '---'
+            'entropy_verdict': '---',
+            'least_frequent_digit': None,
+            'digit_frequencies': {i: 0 for i in range(10)}
         }
 
     def _extract_last_digit(self, price):
-        """Extrai o último dígito do preço."""
         try:
             s = str(Decimal(str(price)).normalize())
             if 'E' in s or 'e' in s:
@@ -65,32 +69,25 @@ class DigitAnalyzer:
                 return 0
 
     def _calculate_entropy(self, digits):
-        """Calcula a entropia de Shannon normalizada (0-1) usando log2(10)."""
         if not digits or len(digits) < 2:
             return 0.0
-
         total = len(digits)
         frequencies = {}
         for d in digits:
             frequencies[d] = frequencies.get(d, 0) + 1
-
         entropy = 0.0
         for count in frequencies.values():
             if count > 0:
                 prob = count / total
                 entropy -= prob * math.log2(prob)
-
-        # Correção: máximo teórico é log2(10) para 10 dígitos possíveis
         max_entropy = math.log2(10)
         if max_entropy > 0:
             normalized = entropy / max_entropy
         else:
             normalized = 0.0
-
         return min(normalized, 1.0)
 
     def add_tick(self, price):
-        """Processa um novo tick e analisa o dígito quando completa um ciclo."""
         try:
             digit  = self._extract_last_digit(price)
             parity = 'IMPAR' if digit % 2 != 0 else 'PAR'
@@ -113,6 +110,7 @@ class DigitAnalyzer:
                     self.slow_digits.append(digit)
                     snap = list(self.slow_digits)
                     self.last_analysis['digit_counter'] = self._digit_counter
+                    self._update_frequency(digit)
                     should_analyse = True
 
             if should_analyse:
@@ -124,20 +122,51 @@ class DigitAnalyzer:
             logger.error(f"Erro tick: {e}")
             return False, None
 
+    def _update_frequency(self, digit):
+        """Atualiza a contagem de frequência individual de dígitos (janela de 100)."""
+        with self._lock:
+            if len(self._digit_window) >= 100:
+                old = self._digit_window[0]
+                self._digit_counts[old] = max(0, self._digit_counts[old] - 1)
+            self._digit_window.append(digit)
+            self._digit_counts[digit] = self._digit_counts.get(digit, 0) + 1
+
+    def get_least_frequent_digit(self):
+        """
+        Retorna o dígito (0-9) que menos apareceu nos últimos 100 ticks.
+        Requer pelo menos 50 ticks acumulados para ser fiável.
+        """
+        with self._lock:
+            if len(self._digit_window) < 50:
+                return None
+            total = len(self._digit_window)
+            frequencies = {}
+            for d in list(self._digit_window):
+                frequencies[d] = frequencies.get(d, 0) + 1
+            if len(frequencies) < 10:
+                return None
+            least = min(frequencies.items(), key=lambda x: x[1])
+            expected = total / 10
+            if least[1] < expected * 0.6:
+                return least[0]
+            return None
+
+    def get_digit_frequencies(self):
+        """Retorna as frequências percentuais de cada dígito (0-9) para a UI."""
+        with self._lock:
+            total = len(self._digit_window) if len(self._digit_window) > 0 else 1
+            return {d: round(self._digit_counts[d] / total * 100, 1) for d in range(10)}
+
     def _find_sequences(self, digits):
         if not digits:
             return None
         streak, parity = self._calc_streak(digits)
         descricao = f"{streak} {parity}S consecutivos" if streak >= 2 else None
-        return {
-            'atual': streak,
-            'tipo': parity,
-            'descricao': descricao
-        }
+        return {'atual': streak, 'tipo': parity, 'descricao': descricao}
 
     def _analyse(self, snap):
         total  = len(snap)
-        window = snap[-100:]   # janela alargada para 100 dígitos (mais estável que 50)
+        window = snap[-100:]
         w      = len(window)
         odd_c  = sum(1 for d in window if d % 2 != 0)
         even_c = w - odd_c
@@ -146,10 +175,8 @@ class DigitAnalyzer:
         rec_par  = ['IMPAR' if d % 2 != 0 else 'PAR' for d in window]
         streak, sp = self._calc_streak(snap)
         seq_info = self._find_sequences(snap)
-
         entropy = self._calculate_entropy(snap[-100:])
 
-        # Filtro de rajada: se nos últimos 10 dígitos houver 7 ou mais iguais, anula sinal
         last10 = snap[-10:] if len(snap) >= 10 else snap
         if len(last10) == 10:
             odd_in_10 = sum(1 for d in last10 if d % 2 != 0)
@@ -169,7 +196,6 @@ class DigitAnalyzer:
                                 sequences=seq_info, entropy=entropy)
             return
 
-        # 1. Streak consecutivo (>=4)
         if streak >= 4:
             base_conf = min(65 + (streak - 4) * 10, 90)
             conf = self._apply_entropy_penalty(base_conf, entropy)
@@ -179,7 +205,6 @@ class DigitAnalyzer:
                 else:
                     candidates.append((conf, 'SELL', 'streak', f'🔥 {streak} ÍMPARES seguidos → aposte PAR ({conf:.0f}%)'))
 
-        # 2. Dominância >=75%
         if w >= 20:
             if odd_pct >= 75:
                 base_conf = min(60 + int((odd_pct - 75) * 1.8), 85)
@@ -192,7 +217,6 @@ class DigitAnalyzer:
                 if conf >= 55:
                     candidates.append((conf, 'BUY', 'dominance', f'📊 {even_pct}% PARES → reversão ÍMPAR ({conf:.0f}%)'))
 
-        # 3. Alternância >=6
         if w >= 10:
             alt = self._calc_alternating(window)
             if alt >= 6:
@@ -204,7 +228,6 @@ class DigitAnalyzer:
                     else:
                         candidates.append((conf, 'BUY', 'alternating', f'🔄 Alternância {alt} → ÍMPAR ({conf:.0f}%)'))
 
-        # 4. Desequilíbrio moderado (>=65% e streak >=2) — sempre considerado
         if w >= 30:
             if odd_pct >= 65 and streak >= 2:
                 base_conf = 60
@@ -217,7 +240,6 @@ class DigitAnalyzer:
                 if conf >= 55:
                     candidates.append((conf, 'BUY', 'imbalance', f'⚠️ {even_pct}% PAR + streak {streak} → possível ÍMPAR'))
 
-        # Consolidação com exigência de pelo menos 2 padrões concordantes
         with self._lock:
             if len(candidates) >= 2:
                 best_two = sorted(candidates, key=lambda x: x[0], reverse=True)[:2]
@@ -268,7 +290,6 @@ class DigitAnalyzer:
             })
 
     def _apply_entropy_penalty(self, base_confidence, entropy):
-        """Penalização agressiva da entropia."""
         if entropy > 0.95:
             return 0.0
         elif entropy > 0.85:
@@ -331,7 +352,6 @@ class DigitAnalyzer:
                 break
         return count
 
-    # API pública
     def get_ticks_remaining(self):
         with self._lock:
             tr = self.TICKS_PER_DIGIT - (self._tick_count % self.TICKS_PER_DIGIT)
@@ -376,5 +396,4 @@ class DigitAnalyzer:
                 'current_streak':streak,'streak_parity':sp,'recent':snap[-20:]}
 
 
-# Singleton de retrocompatibilidade
 digit_analyzer = DigitAnalyzer(max_digits=1000)
