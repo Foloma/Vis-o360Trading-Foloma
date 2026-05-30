@@ -698,7 +698,6 @@ function updateAll(){
 
     updateHistSummary(bot);
     checkTradeResults(bot);
-    // updateScoreboard() movida para setInterval de 30s
     if (!candleChart) initCandleChart();
 
     if (modo === 'hybrid' && data.digits && bot.signal) {
@@ -746,11 +745,13 @@ async function conectar(){
   } catch(e) { toast('❌ Erro de rede','loss'); }
 }
 
+// CORREÇÃO OAUTH: usar a nova rota que devolve a URL completa
 async function connectWithDeriv(){
   try {
     const r = await fetch('/api/auth/deriv_oauth_url');
     const d = await r.json();
     if(d.error){ toast('❌ '+d.error,'loss'); return; }
+    // Redirecionar para a URL de autorização completa
     window.location.href = d.url;
   } catch(e) { toast('❌ Erro OAuth','loss'); }
 }
@@ -984,10 +985,11 @@ function setModo(m){
   if(m==='hybrid') document.getElementById('pAtivos').classList.remove('hidden');
   document.getElementById('confBars').style.display = 'none';
 }
+// Guard isConnected no setInterval de velas
 setInterval(() => { if (isConnected) loadCandles(); }, 10000);
 // Placar de sinais atualizado a cada 30 segundos
 setInterval(updateScoreboard, 30000);
-updateScoreboard(); // primeira chamada imediata
+updateScoreboard();
 
 (function(){
   const p=new URLSearchParams(location.search);
