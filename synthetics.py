@@ -162,7 +162,11 @@ class DigitAnalyzer:
             return None
         streak, parity = self._calc_streak(digits)
         descricao = f"{streak} {parity}S consecutivos" if streak >= 2 else None
-        return {'atual': streak, 'tipo': parity, 'descricao': descricao}
+        return {
+            'atual': streak,
+            'tipo': parity,
+            'descricao': descricao
+        }
 
     def _analyse(self, snap):
         total  = len(snap)
@@ -175,8 +179,10 @@ class DigitAnalyzer:
         rec_par  = ['IMPAR' if d % 2 != 0 else 'PAR' for d in window]
         streak, sp = self._calc_streak(snap)
         seq_info = self._find_sequences(snap)
+
         entropy = self._calculate_entropy(snap[-100:])
 
+        # Filtro de rajada: se nos últimos 10 dígitos houver 7 ou mais iguais, anula sinal
         last10 = snap[-10:] if len(snap) >= 10 else snap
         if len(last10) == 10:
             odd_in_10 = sum(1 for d in last10 if d % 2 != 0)
@@ -196,6 +202,7 @@ class DigitAnalyzer:
                                 sequences=seq_info, entropy=entropy)
             return
 
+        # 1. Streak consecutivo (>=4)
         if streak >= 4:
             base_conf = min(65 + (streak - 4) * 10, 90)
             conf = self._apply_entropy_penalty(base_conf, entropy)
@@ -205,6 +212,7 @@ class DigitAnalyzer:
                 else:
                     candidates.append((conf, 'SELL', 'streak', f'🔥 {streak} ÍMPARES seguidos → aposte PAR ({conf:.0f}%)'))
 
+        # 2. Dominância >=75%
         if w >= 20:
             if odd_pct >= 75:
                 base_conf = min(60 + int((odd_pct - 75) * 1.8), 85)
@@ -217,6 +225,7 @@ class DigitAnalyzer:
                 if conf >= 55:
                     candidates.append((conf, 'BUY', 'dominance', f'📊 {even_pct}% PARES → reversão ÍMPAR ({conf:.0f}%)'))
 
+        # 3. Alternância >=6
         if w >= 10:
             alt = self._calc_alternating(window)
             if alt >= 6:
@@ -228,6 +237,7 @@ class DigitAnalyzer:
                     else:
                         candidates.append((conf, 'BUY', 'alternating', f'🔄 Alternância {alt} → ÍMPAR ({conf:.0f}%)'))
 
+        # 4. Desequilíbrio moderado (>=65% e streak >=2)
         if w >= 30:
             if odd_pct >= 65 and streak >= 2:
                 base_conf = 60
@@ -240,6 +250,7 @@ class DigitAnalyzer:
                 if conf >= 55:
                     candidates.append((conf, 'BUY', 'imbalance', f'⚠️ {even_pct}% PAR + streak {streak} → possível ÍMPAR'))
 
+        # Consolidação com exigência de pelo menos 2 padrões concordantes
         with self._lock:
             if len(candidates) >= 2:
                 best_two = sorted(candidates, key=lambda x: x[0], reverse=True)[:2]
@@ -352,6 +363,7 @@ class DigitAnalyzer:
                 break
         return count
 
+    # API pública
     def get_ticks_remaining(self):
         with self._lock:
             tr = self.TICKS_PER_DIGIT - (self._tick_count % self.TICKS_PER_DIGIT)
@@ -396,4 +408,5 @@ class DigitAnalyzer:
                 'current_streak':streak,'streak_parity':sp,'recent':snap[-20:]}
 
 
+# Singleton de retrocompatibilidade
 digit_analyzer = DigitAnalyzer(max_digits=1000)
