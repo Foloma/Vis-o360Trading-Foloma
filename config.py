@@ -20,9 +20,11 @@ class Config:
     MIN_STAKE = 0.35
     MAX_STAKE = 100
 
-    CONTRACT_DURATION = 5
+    # Contratos normais (CALL/PUT) – 10 ticks (aumentado para diagnóstico)
+    CONTRACT_DURATION = 10
     CONTRACT_DURATION_UNIT = 't'
 
+    # Contratos de DÍGITO – 10 ticks
     DIGIT_CONTRACT_DURATION = 10
     DIGIT_CONTRACT_DURATION_UNIT = 't'
 
@@ -36,8 +38,8 @@ class Config:
     RISK_LIMITS = {
         'max_daily_loss_percent': 5,
         'max_consecutive_losses': 2,
-        'min_confidence': 55,           # ← 60 → 55
-        'min_confidence_digits': 55,    # ← 60 → 55
+        'min_confidence': 60,
+        'min_confidence_digits': 60,
         'max_stake_percent': 5,
         'stop_loss_enabled': True,
         'take_profit_enabled': True,
@@ -46,7 +48,7 @@ class Config:
 
     ADVANCED_STRATEGY = {
         'momentum_threshold': 0.1,
-        'hybrid_min_confidence': 60,    # ← 65 → 60 (acompanha min_confidence)
+        'hybrid_min_confidence': 65,
         'hybrid_mode_enabled': True
     }
 
@@ -54,6 +56,10 @@ class Config:
     SYNTHETIC_DIGIT_WEIGHT = 0.7
 
     CANDLE_CACHE_TTL = 10
+
+    # 🔬 FLAGS DE DIAGNÓSTICO
+    INVERT_SIGNAL = False   # Se True, troca BUY↔SELL antes de enviar
+    DIAGNOSTIC_MODE = True  # Se True, regista preços de entrada/saída no log
 
 
 config = Config()
