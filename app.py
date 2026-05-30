@@ -903,7 +903,6 @@ def status():
     bot_status = bot.get_status()
     bot_status['streaming'] = client.streaming if client else False
     analysis = analyzer.get_analysis()
-    # Adicionar frequências de dígitos individuais
     digit_frequencies = analyzer.get_digit_frequencies()
     least_frequent = analyzer.get_least_frequent_digit()
 
@@ -1079,26 +1078,7 @@ def deriv_oauth_url():
 @require_auth
 @limit_if_available("20 per minute")
 def trade():
-    try:
-        sess = get_session(session['user_id'])
-        if not sess or not sess['client'].authorized:
-            return jsonify({'error': 'Não conectado'}), 400
-
-        bot = sess['trading_bot']
-        if bot.stop_loss_active:
-            return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
-
-        d = request.json
-        action = d.get('action')
-        amt = float(d.get('amount', 0.35))
-        if amt < 0.35 or amt > 100:
-            return jsonify({'error': 'Valor inválido'}), 400
-
-        # Modo Ativos desativado — sempre bloqueia
-        return jsonify({'error': 'Modo Ativos temporariamente desativado. Use Dígitos ou Differ.'}), 400
-    except Exception:
-        logger.exception("Erro no trade")
-        return jsonify({'error': 'Erro interno'}), 500
+    return jsonify({'error': 'Modo Ativos desativado. Use Dígitos ou Differ.'}), 400
 
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
@@ -1132,7 +1112,6 @@ def trade_digit():
         logger.exception("Erro trade dígito")
         return jsonify({'error': 'Erro interno'}), 500
 
-# 🔥 ROTA CORRIGIDA: DIGITDIFFER
 @app.route('/api/trade/differ', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1149,13 +1128,11 @@ def trade_differ():
         if amt < 0.35 or amt > 100:
             return jsonify({'error': 'Valor inválido'}), 400
 
-        # Obter o dígito menos frequente calculado pelo analisador
         analyzer = sess['digit_analyzer']
         least = analyzer.get_least_frequent_digit()
         if least is None:
             return jsonify({'error': 'Ainda não há dados suficientes para DIFFER. Aguarde.'}), 400
 
-        # Usar SEMPRE o dígito calculado, nunca o enviado pelo utilizador
         ok = sess['client'].place_differ_trade(least, amt)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
