@@ -957,6 +957,7 @@ def debug():
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
     })
 
+# ==================== OAUTH (CORRIGIDO) ====================
 @app.route('/oauth/callback')
 def oauth_callback():
     state_id = request.args.get('state')
@@ -972,7 +973,10 @@ def oauth_callback():
             const hash = window.location.hash.substring(1);
             const params = new URLSearchParams(hash);
             const accessToken = params.get('access_token');
-            if (!accessToken) {{ window.location.href = '/?error=no_token'; return; }}
+            if (!accessToken) {{
+                window.location.href = '/?error=no_token';
+                return;
+            }}
             const tokens = [];
             for (let i = 1; params.get('token' + i); i++) {{
                 tokens.push({{ token: params.get('token' + i), acct: params.get('acct' + i) || '' }});
@@ -987,10 +991,29 @@ def oauth_callback():
             }})
             .then(response => response.json())
             .then(data => {{
-                if (data.status === 'ok') {{ window.location.href = '/?connected=true'; }}
-                else {{ window.location.href = '/?error=' + (data.error || 'oauth_failed'); }}
+                if (data.status === 'ok') {{
+                    if (window.opener && !window.opener.closed) {{
+                        window.opener.location.href = '/?connected=true';
+                    }} else {{
+                        window.location.href = '/?connected=true';
+                    }}
+                }} else {{
+                    if (window.opener && !window.opener.closed) {{
+                        window.opener.location.href = '/?error=' + (data.error || 'oauth_failed');
+                    }} else {{
+                        window.location.href = '/?error=' + (data.error || 'oauth_failed');
+                    }}
+                }}
+                window.close();
             }})
-            .catch(() => {{ window.location.href = '/?error=request_failed'; }});
+            .catch(() => {{
+                if (window.opener && !window.opener.closed) {{
+                    window.opener.location.href = '/?error=request_failed';
+                }} else {{
+                    window.location.href = '/?error=request_failed';
+                }}
+                window.close();
+            }});
         }})();
     </script>
 </body>
@@ -1073,7 +1096,6 @@ def deriv_oauth_url():
     return jsonify({'url': url})
 
 # ==================== TRADING ====================
-
 @app.route('/api/trade', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
