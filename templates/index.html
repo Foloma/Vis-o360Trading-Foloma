@@ -159,7 +159,7 @@
   <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
 </audio>
 
-<!-- Modal do Guia de Utilização -->
+<!-- Modal do Guia de Utilização (ACTUALIZADO) -->
 <div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
   <div class="guide-modal" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeGuide()">✕</button>
@@ -169,73 +169,64 @@
       <button class="tf-btn" onclick="scrollToSection('g2')">Decisão</button>
       <button class="tf-btn" onclick="scrollToSection('g3')">Modos</button>
       <button class="tf-btn" onclick="scrollToSection('g4')">Risco</button>
-      <button class="tf-btn" onclick="scrollToSection('g5')">Gráfico</button>
-      <button class="tf-btn" onclick="scrollToSection('g6')">Resultados</button>
-      <button class="tf-btn" onclick="scrollToSection('g7')">Erros</button>
+      <button class="tf-btn" onclick="scrollToSection('g5')">Resultados</button>
+      <button class="tf-btn" onclick="scrollToSection('g6')">Erros</button>
     </div>
+
     <h3 id="g1" style="color:var(--accent);">1. O que cada elemento significa</h3>
     <table>
       <tr><th>Elemento</th><th>Significado</th></tr>
-      <tr><td><strong>Preço actual</strong></td><td>Cotação em tempo real do índice sintético.</td></tr>
-      <tr><td><strong>Sinal BUY / SELL</strong></td><td>Combinação de indicadores técnicos (30%) + dígitos (70%). Só aparece com confiança ≥ 55%.</td></tr>
-      <tr><td><strong>Confiança %</strong></td><td>Grau de alinhamento dos padrões. <strong>Não é garantia de ganho.</strong></td></tr>
-      <tr><td><strong>Barras Técnico / Dígitos / Final</strong></td><td>Origem do sinal. Se discordam, não há sinal.</td></tr>
-      <tr><td><strong>Gráfico</strong></td><td>Contexto visual. Use para confirmar, não como critério único.</td></tr>
-      <tr><td><strong>RSI, MACD, TREND, BB, ADX</strong></td><td>Indicadores técnicos. ADX mede força da tendência.</td></tr>
-      <tr><td><strong>Regime (TRENDING/RANGING/VOLATILE)</strong></td><td>Condição do mercado. TRENDING = ideal para CALL/PUT. RANGING = evitar.</td></tr>
-      <tr><td><strong>Entropia (Dígitos)</strong></td><td>Aleatoriedade. "BEM DEFINIDO" = padrão. "ALEATÓRIO" = não operar.</td></tr>
-      <tr><td><strong>Placar de Sinais</strong></td><td>Sinais emitidos hoje e quantos teriam ganho se tivesse operado.</td></tr>
+      <tr><td><strong>Preço actual</strong></td><td>Cotação em tempo real do índice sintético (R_100).</td></tr>
+      <tr><td><strong>Frequências 0-9</strong></td><td>Percentagem de aparição de cada dígito nos últimos 100. O dígito destacado a verde é o <strong>menos frequente</strong> — é o alvo do DIFFER.</td></tr>
+      <tr><td><strong>ÍMPAR / PAR</strong></td><td>Aposta que o próximo dígito lento será ímpar ou par. Probabilidade base 50/50, paga ~90%.</td></tr>
+      <tr><td><strong>🎯 DIFFER</strong></td><td>Aposta que o dígito menos frequente <strong>NÃO</strong> sairá. Win rate matemático de 85‑95%. Payout menor (~9%), mas ganha muito mais vezes. <strong>Estratégia principal recomendada.</strong></td></tr>
+      <tr><td><strong>Entropia</strong></td><td>"BEM DEFINIDO" = padrão detectável, pode operar. "ALEATÓRIO" = não operar (mercado imprevisível).</td></tr>
+      <tr><td><strong>Placar</strong></td><td>Sinais emitidos hoje e quantos teriam ganho se tivesse operado. Use para validar a estratégia sem arriscar dinheiro.</td></tr>
     </table>
 
     <h3 id="g2" style="color:var(--accent);">2. Checklist: entro ou não entro?</h3>
     <div style="background:#020617;border-radius:8px;padding:12px;border:1px solid var(--accent);">
-      <p><strong>1. O sinal está BUY ou SELL?</strong><br>→ NÃO = <span style="color:var(--danger)">NÃO OPERAR</span>.</p>
-      <p><strong>2. Confiança ≥ 65%?</strong><br>→ NÃO (55-64%) = risco maior, valor mínimo<br>→ SIM (65%+) = sinal sólido</p>
-      <p><strong>3. [Dígitos] Entropia "BEM DEFINIDO" ou "PREVISÍVEL"?</strong><br>→ NÃO = <span style="color:var(--danger)">NÃO OPERAR</span></p>
-      <p><strong>4. [Ativos] Regime do mercado é TRENDING?</strong><br>→ NÃO (RANGING/VOLATILE) = <span style="color:var(--danger)">NÃO OPERAR</span></p>
-      <p><strong>5. Já tive 2 perdas seguidas?</strong><br>→ SIM = pausa 15 minutos</p>
-      <p><strong>6. Stop-loss diário (5%) atingido?</strong><br>→ SIM = <span style="color:var(--danger)">PARAR até amanhã</span></p>
+      <p><strong>1. Entropia "BEM DEFINIDO" ou "PREVISÍVEL"?</strong><br>→ NÃO = <span style="color:var(--danger)">NÃO OPERAR</span>.</p>
+      <p><strong>2. Qual modo?</strong><br>→ <strong>DIFFER:</strong> sempre que houver dígito destacado a verde com frequência &lt; 6%<br>→ <strong>ÍMPAR/PAR:</strong> quando há streak ≥ 4 ou dominância ≥ 75% E entropia favorável</p>
+      <p><strong>3. Stop-loss diário (5%) atingido?</strong><br>→ SIM = <span style="color:var(--danger)">PARAR até amanhã</span></p>
+      <p><strong>4. Já tive 2 perdas seguidas?</strong><br>→ SIM = pausa de 15 minutos</p>
     </div>
 
-    <h3 id="g3" style="color:var(--accent);">3. Como usar cada modo</h3>
-    <p><strong>📈 Ativos:</strong> CALL/PUT 5 ticks. Ideal com regime TRENDING, RSI extremo e MACD confirmando.</p>
-    <p><strong>🎲 Dígitos:</strong> ÍMPAR/PAR 10 ticks. Exige entropia favorável + 2 padrões concordantes.</p>
-    <p><strong>🔗 Híbrido:</strong> Só opera com convergência total. Menos sinais, maior qualidade.</p>
+    <h3 id="g3" style="color:var(--accent);">3. Modos de Trading</h3>
+    <p><strong>🎲 ÍMPAR/PAR:</strong> Probabilidade base 50/50, paga ~90%. Usar quando há padrão claro de streak (4+ repetições) ou dominância (&gt;75%) com entropia favorável. Contratos de 10 ticks.</p>
+    <p><strong>🎯 DIFFER:</strong> Win rate de 85‑95% quando o dígito está significativamente sub‑representado (frequência &lt; 6% nos últimos 100). Paga menos (~9%) mas ganha muito mais vezes. <strong>Esta é a estratégia principal recomendada.</strong> Contratos de 10 ticks.</p>
 
     <h3 id="g4" style="color:var(--accent);">4. Gestão de Risco</h3>
     <table>
-      <tr><th>Saldo</th><th>Valor/trade</th><th>Stop diário</th><th>Meta diária</th></tr>
-      <tr><td>$20</td><td>$0.35</td><td>$1.00</td><td>$2.00</td></tr>
-      <tr><td>$50</td><td>$0.70</td><td>$2.50</td><td>$5.00</td></tr>
-      <tr><td>$100</td><td>$1.50</td><td>$5.00</td><td>$10.00</td></tr>
-      <tr><td>$500</td><td>$5.00</td><td>$25.00</td><td>$50.00</td></tr>
+      <tr><th>Saldo</th><th>Valor/trade (ÍMPAR/PAR)</th><th>Valor/trade (DIFFER)</th><th>Stop diário</th></tr>
+      <tr><td>$20</td><td>$0.35</td><td>$0.50</td><td>$1.00</td></tr>
+      <tr><td>$50</td><td>$0.70</td><td>$1.00</td><td>$2.50</td></tr>
+      <tr><td>$100</td><td>$1.50</td><td>$2.50</td><td>$5.00</td></tr>
+      <tr><td>$500</td><td>$5.00</td><td>$10.00</td><td>$25.00</td></tr>
     </table>
-    <p><strong>Martingale:</strong> máx. 1 nível. Nunca sem sinal ativo.</p>
+    <p><strong>DIFFER permite valores ligeiramente maiores</strong> porque o win rate é significativamente superior.</p>
+    <p><strong>Martingale:</strong> máx. 1 nível. Nunca usar sem sinal ativo.</p>
 
-    <h3 id="g5" style="color:var(--accent);">5. O que o gráfico diz (e não diz)</h3>
-    <p><span style="color:var(--accent)">✅ Serve para:</span> confirmar tendência, ver coerência MACD/TREND, detectar movimentos bruscos.</p>
-    <p><span style="color:var(--danger)">❌ Não serve para:</span> prever o próximo movimento, substituir indicadores, justificar entrada contra o sinal.</p>
-
-    <h3 id="g6" style="color:var(--accent);">6. Honestidade sobre os resultados</h3>
+    <h3 id="g5" style="color:var(--accent);">5. Honestidade sobre os resultados</h3>
     <p style="background:#020617;padding:10px;border-radius:8px;">
-      A Foloma Visão 360 identifica padrões estatísticos em mercados sintéticos. Estes padrões têm tendência de repetição, mas <strong>não são determinísticos</strong> — o mercado é parcialmente aleatório. Dias negativos acontecem mesmo seguindo todas as regras. O objectivo é dar <strong>vantagem estatística a longo prazo</strong>, não garantir ganhos em cada trade.
+      O sistema analisa a distribuição estatística dos dígitos. <strong>DIFFER tem fundamento matemático real</strong> — se um dígito aparece 5% das vezes em vez dos 10% esperados, há 95% de probabilidade de NÃO sair no próximo ciclo. Esta vantagem é real mas pequena. <strong>Gerir o capital com disciplina é o que determina o resultado a longo prazo.</strong> Dias negativos acontecem mesmo seguindo todas as regras.
     </p>
 
-    <h3 id="g7" style="color:var(--accent);">7. Erros que destroem contas</h3>
+    <h3 id="g6" style="color:var(--accent);">6. Erros que destroem contas</h3>
     <table>
       <tr><th>❌ Erro</th><th>✅ Correto</th></tr>
-      <tr><td>Entrar com NEUTRO "porque parece"</td><td>Sem sinal = sem entrada.</td></tr>
+      <tr><td>Operar com entropia "ALEATÓRIO"</td><td>É aposta pura, não análise. Esperar.</td></tr>
       <tr><td>Martingale de 3+ níveis</td><td>$0.35→$0.70→$1.40→$2.80 = conta destruída</td></tr>
       <tr><td>Continuar após stop‑loss 5%</td><td>Um dia mau não justifica destruir a semana</td></tr>
-      <tr><td>Ignorar entropia "ALEATÓRIO"</td><td>É aposta pura, não análise</td></tr>
-      <tr><td>Mudar de modo durante perdas</td><td>Indisciplina esconde o problema real</td></tr>
+      <tr><td>Ignorar o dígito menos frequente</td><td>DIFFER é a melhor oportunidade estatística</td></tr>
+      <tr><td>Variar valor por impulso</td><td>Manter consistência no valor por trade</td></tr>
     </table>
   </div>
 </div>
 
 <div class="container" id="mainContent" style="display:none">
   <div id="dashboard-section">
-    <!-- STATUS -->
+    <!-- STATUS (com priceEl adicionado) -->
     <div class="card">
       <div class="card-title">📡 STATUS <span class="balance"><span id="bal">0.00</span> <span id="cur">USD</span></span></div>
       <div class="status" style="margin-bottom:6px">
@@ -243,8 +234,11 @@
         <div>
           <button class="bmr" style="font-size:10px;padding:4px 8px" id="connectOAuthBtn" onclick="connectWithDeriv()">🔗 Deriv</button>
           <button class="bmr" style="font-size:10px;padding:4px 8px" id="connectTokenBtn" onclick="conectar()">🔌 Token</button>
-          <button class="bmr" style="font-size:10px;padding:4px 8px;margin-left:4px" id="reconnectBtn" style="display:none" onclick="reconnectManual()">🔄 Reconectar</button>
+          <button class="bmr" id="reconnectBtn" style="display:none;font-size:10px;padding:4px 8px;margin-left:4px" onclick="reconnectManual()">🔄 Reconectar</button>
         </div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:2px">
+        Preço: <span id="priceEl" style="color:var(--accent)">---</span>
       </div>
       <div id="conSt" style="text-align:center;font-size:10px;color:#ffaa00"></div>
     </div>
@@ -426,9 +420,11 @@ function scrollToSection(id) {
 }
 
 function initSyms(){
+  const el = document.getElementById('symSel');
+  if (!el) return;
   let h='';
   for(const[k,v] of Object.entries(syms)) h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}', this)">${v}</button>`;
-  document.getElementById('symSel').innerHTML=h;
+  el.innerHTML=h;
 }
 function chgSym(s, el){
   curSym=s;
@@ -539,7 +535,8 @@ function updateAll(){
     document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
     document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
     document.getElementById('cur').textContent=bot.currency||'USD';
-    document.getElementById('priceEl').textContent=(bot.price||0).toFixed(4);
+    const priceEl = document.getElementById('priceEl');
+    if (priceEl) priceEl.textContent=(bot.price||0).toFixed(4);
 
     if(data.digits) {
       updateDigits(data.digits);
@@ -903,7 +900,7 @@ fetch('/api/auth/status').then(r=>r.json()).then(d=>{
   }
 });
 </script>
-<!-- Elemento de depuração (visível apenas durante testes) -->
+<!-- Elemento de depuração -->
 <div id="debugPoll" style="position:fixed;bottom:5px;right:5px;background:#000;color:#0f0;font-size:10px;padding:4px;z-index:9999;opacity:0.8">a aguardar...</div>
 </body>
 </html>
