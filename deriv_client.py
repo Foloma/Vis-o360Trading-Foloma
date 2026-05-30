@@ -354,10 +354,6 @@ class DerivWebSocketClient:
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
 
-        # Suporte a inversão de sinal para diagnóstico
-        if getattr(config, 'INVERT_SIGNAL', False) and not is_digit:
-            contract_type = 'PUT' if contract_type == 'CALL' else 'CALL'
-
         if is_digit:
             time.sleep(0.5)
             
@@ -424,7 +420,6 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
-    # 🔥 NOVO: método específico para DIGITDIFFER
     def place_differ_trade(self, digit, amount):
         """
         Aposta que um dígito específico NÃO será o último dígito.
@@ -454,7 +449,6 @@ class DerivWebSocketClient:
 
             self._last_trade_time = time.time()
 
-            # Contrato DIGITDIFF tem duração de 10 ticks
             duration = self.config.DIGIT_CONTRACT_DURATION
             duration_unit = 't'
 
@@ -648,6 +642,14 @@ class DerivWebSocketClient:
                     'data': candles,
                     'timestamp': time.time()
                 }
+            # 🔥 Passar high/low das últimas 20 velas para o trading_bot
+            if self.trading_bot and hasattr(self.trading_bot, 'feed_candle_data'):
+                for candle in candles[-20:]:
+                    high = float(candle.get('high', 0))
+                    low = float(candle.get('low', 0))
+                    close = float(candle.get('close', 0))
+                    if high and low and close:
+                        self.trading_bot.feed_candle_data(high, low, close)
             if self.on_candles_callback:
                 self.on_candles_callback(candles)
 
