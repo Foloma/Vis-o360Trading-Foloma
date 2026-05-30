@@ -1151,6 +1151,10 @@ def trade_differ():
             return jsonify({'error': 'Valor inválido'}), 400
 
         analyzer = sess['digit_analyzer']
+        tr = analyzer.get_ticks_remaining()
+        if tr < 2:
+            return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
+
         least = analyzer.get_least_frequent_digit()
         if least is None:
             return jsonify({'error': 'Ainda não há dados suficientes para DIFFER. Aguarde.'}), 400
