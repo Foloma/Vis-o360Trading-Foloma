@@ -66,6 +66,10 @@ class TradingBot:
         self.on_signal_result_callback = None
         self._last_signal_id = None
 
+        # Diagnóstico
+        self._last_signal_for_trade = None
+        self._last_entry_price = None
+
     def start(self, client):
         self.client = client
         self.daily_stats['start_balance'] = self.balance
@@ -166,7 +170,6 @@ class TradingBot:
         if not self.last_analysis:
             return 'NEUTRAL', 0, 0, 0, None
 
-        # Obter regime de mercado
         regime = self.last_analysis.get('adx', {}).get('regime', 'UNKNOWN')
         adx_value = self.last_analysis.get('adx', {}).get('score', 0)
 
@@ -176,7 +179,6 @@ class TradingBot:
             f"| Preços: {len(prices)} | Regime: {regime} (ADX {adx_value:.1f})"
         )
 
-        # CORREÇÃO: bloqueio apenas em RANGING, penalização em VOLATILE
         if tech_signal != 'NEUTRAL':
             if regime == 'RANGING':
                 logger.info(f"⛔ Sinal {tech_signal} bloqueado – mercado lateral (RANGING)")
@@ -185,7 +187,6 @@ class TradingBot:
                 tech_conf *= 0.9
                 logger.info(f"⚠️ Sinal {tech_signal} penalizado – mercado volátil, confiança reduzida para {tech_conf:.1f}%")
 
-        # Consenso mínimo de 3 indicadores (revertido)
         if tech_signal != 'NEUTRAL' and not self._check_consensus(self.last_analysis, tech_signal):
             logger.info(f"⛔ Sinal {tech_signal} rejeitado por falta de consenso (>=3 indicadores)")
             return 'NEUTRAL', 0, tech_conf, 0, None
@@ -193,6 +194,7 @@ class TradingBot:
         if not (self.current_symbol.startswith('R_') and self.digit_analyzer):
             if tech_signal != 'NEUTRAL' and tech_conf >= config.RISK_LIMITS.get('min_confidence', 55):
                 self._notify_signal(tech_signal, tech_conf, tech_conf, 0, None)
+            self._last_signal_for_trade = tech_signal if tech_conf >= config.RISK_LIMITS.get('min_confidence', 55) else None
             return tech_signal, tech_conf, tech_conf, 0, None
 
         dig_action, dig_conf = self._get_digit_signal()
@@ -200,6 +202,7 @@ class TradingBot:
             logger.info(f"🎲 [{self.current_symbol}] Dígito sem sinal válido: {dig_action} ({dig_conf:.1f}%)")
             if tech_signal != 'NEUTRAL' and tech_conf >= config.RISK_LIMITS.get('min_confidence', 55):
                 self._notify_signal(tech_signal, tech_conf, tech_conf, dig_conf, dig_action)
+            self._last_signal_for_trade = tech_signal if tech_conf >= config.RISK_LIMITS.get('min_confidence', 55) else None
             return tech_signal, tech_conf, tech_conf, dig_conf, dig_action
 
         logger.info(f"🎲 [{self.current_symbol}] DÍGITO: {dig_action} ({dig_conf:.1f}%)")
@@ -208,22 +211,24 @@ class TradingBot:
             total_weight = _TECH_WEIGHT + _DIGIT_WEIGHT
             confidence = (_TECH_WEIGHT * tech_conf + _DIGIT_WEIGHT * dig_conf) / total_weight
             signal = tech_signal
-            logger.info(f"🤝 [{self.current_symbol}] CONVERGÊNCIA: {signal} ({confidence:.1f}%) Técnico:{tech_conf:.0f}% + Dígito:{dig_conf:.0f}%")
+            logger.info(f"🤝 [{self.current_symbol}] CONVERGÊNCIA: {signal} ({confidence:.1f}%)")
         else:
             if _DIGIT_WEIGHT > _TECH_WEIGHT:
                 signal = dig_action
                 confidence = dig_conf * 0.85
-                logger.info(f"⚠️ [{self.current_symbol}] DIVERGÊNCIA (Dígito vence): {signal} ({confidence:.1f}%) Técnico:{tech_conf:.0f}% vs Dígito:{dig_conf:.0f}%")
+                logger.info(f"⚠️ [{self.current_symbol}] DIVERGÊNCIA (Dígito vence): {signal} ({confidence:.1f}%)")
             else:
                 signal = tech_signal
                 confidence = tech_conf * 0.85
-                logger.info(f"⚠️ [{self.current_symbol}] DIVERGÊNCIA (Técnico vence): {signal} ({confidence:.1f}%) Técnico:{tech_conf:.0f}% vs Dígito:{dig_conf:.0f}%")
+                logger.info(f"⚠️ [{self.current_symbol}] DIVERGÊNCIA (Técnico vence): {signal} ({confidence:.1f}%)")
 
         if confidence >= config.RISK_LIMITS.get('min_confidence', 55):
             logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – VÁLIDO")
             self._notify_signal(signal, confidence, tech_conf, dig_conf, dig_action)
+            self._last_signal_for_trade = signal
         else:
             logger.info(f"🚦 [{self.current_symbol}] SINAL FINAL: {signal} ({confidence:.1f}%) – ABAIXO DO LIMIAR")
+            self._last_signal_for_trade = None
 
         return signal, min(confidence, 100), tech_conf, dig_conf, dig_action
 
@@ -336,7 +341,7 @@ class TradingBot:
             aligned += 1
         elif signal == 'SELL' and ('sobrecomprado' in bb_desc or 'acima' in bb_desc):
             aligned += 1
-        return aligned >= 3   # revertido para 3
+        return aligned >= 3
 
     def _calculate_pure_technical(self, prices):
         if len(prices) < 20 or not self.last_analysis:
@@ -540,7 +545,19 @@ class TradingBot:
             self.update_stats()
             if self.client:
                 self.client.get_balance()
-            
+
+            # 🔬 DIAGNÓSTICO: comparar sinal emitido com resultado
+            if self._last_signal_for_trade:
+                expected = self._last_signal_for_trade
+                actual = 'win' if is_win else 'loss'
+                entry_price = self._last_entry_price or 'N/A'
+                sell_price = result.get('sell_price', 'N/A')
+                logger.warning(
+                    f"🔬 DIAGNÓSTICO: Sinal={expected}, Resultado={actual}, "
+                    f"Profit={profit:.2f}, Entrada={entry_price}, Saída={sell_price}, "
+                    f"Contrato={contract_id}"
+                )
+
             if self.on_signal_result_callback and self._last_signal_id:
                 try:
                     self.on_signal_result_callback(
