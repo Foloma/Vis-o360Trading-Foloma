@@ -354,13 +354,9 @@ class DerivWebSocketClient:
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
 
-        # 🔬 INVERSÃO DE SINAL PARA DIAGNÓSTICO
-        if config.INVERT_SIGNAL:
-            if not is_digit:
-                contract_type = 'PUT' if contract_type == 'CALL' else 'CALL'
-            else:
-                contract_type = 'PUT' if contract_type == 'CALL' else 'CALL'
-            logger.warning(f"🔃 SINAL INVERTIDO: {contract_type}")
+        # Suporte a inversão de sinal para diagnóstico
+        if getattr(config, 'INVERT_SIGNAL', False) and not is_digit:
+            contract_type = 'PUT' if contract_type == 'CALL' else 'CALL'
 
         if is_digit:
             time.sleep(0.5)
@@ -384,11 +380,6 @@ class DerivWebSocketClient:
                         logger.warning("Trade pendente"); return False
                         
             self._last_trade_time = time.time()
-
-            # 🔬 Guardar preço de entrada para diagnóstico
-            entry_price = None
-            if self.trading_bot:
-                entry_price = self.trading_bot.current_price
             
             if is_digit:
                 duration = self.config.DIGIT_CONTRACT_DURATION
@@ -410,8 +401,7 @@ class DerivWebSocketClient:
                     'is_digit': is_digit,
                     'timestamp': time.time(),
                     'status': 'waiting_proposal',
-                    'req_id': req_id,
-                    'entry_price': entry_price
+                    'req_id': req_id
                 }
             self.pending_trade_time = time.time()
             
@@ -430,6 +420,75 @@ class DerivWebSocketClient:
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro trade: {e}")
+                with self._pending_lock:
+                    self.pending_trade = None
+                return False
+
+    # 🔥 NOVO: método específico para DIGITDIFFER
+    def place_differ_trade(self, digit, amount):
+        """
+        Aposta que um dígito específico NÃO será o último dígito.
+        Contrato DIGITDIFF com barreira = dígito escolhido.
+        """
+        if self.trading_bot and not self.trading_bot.check_risk_limits():
+            logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
+            return False
+
+        with self._trade_lock:
+            if not self.streaming:
+                logger.warning("🚫 Sem streaming"); return False
+            if self.balance <= 0:
+                logger.warning("🚫 Saldo não carregado"); return False
+            if self.balance < 0.35:
+                logger.warning("🚫 Saldo insuficiente"); return False
+            if time.time() - self._last_trade_time < 2:
+                logger.warning("⏱️ Intervalo mínimo 2s"); return False
+            if not self.authorized:
+                logger.warning("🚫 Não autorizado"); return False
+            with self._pending_lock:
+                if self.pending_trade is not None:
+                    if time.time() - self.pending_trade_time > 60:
+                        self.pending_trade = None
+                    else:
+                        logger.warning("Trade pendente"); return False
+
+            self._last_trade_time = time.time()
+
+            # Contrato DIGITDIFF tem duração de 10 ticks
+            duration = self.config.DIGIT_CONTRACT_DURATION
+            duration_unit = 't'
+
+            req_id = self._next_req()
+            with self._pending_lock:
+                self.pending_trade = {
+                    'amount': amount,
+                    'contract_type': f'DIFFER_{digit}',
+                    'is_digit': True,
+                    'is_differ': True,
+                    'digit_barrier': digit,
+                    'timestamp': time.time(),
+                    'status': 'waiting_proposal',
+                    'req_id': req_id
+                }
+            self.pending_trade_time = time.time()
+
+            try:
+                self.ws.send(json.dumps({
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": "DIGITDIFF",
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": duration_unit,
+                    "symbol": self.current_symbol,
+                    "barrier": digit,
+                    "req_id": req_id
+                }))
+                logger.info(f"🎯 DIGITDIFF enviado: barreira={digit}, valor=${amount:.2f}")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Erro trade DIGITDIFF: {e}")
                 with self._pending_lock:
                     self.pending_trade = None
                 return False
@@ -471,26 +530,25 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return
             if self.pending_trade:
-                amt, action = self.pending_trade.get('amount', 0), self.pending_trade.get('contract_type', '')
+                amt = self.pending_trade.get('amount', 0)
+                action = self.pending_trade.get('contract_type', '')
                 is_digit = self.pending_trade.get('is_digit', False)
-                entry_price = self.pending_trade.get('entry_price')
+                is_differ = self.pending_trade.get('is_differ', False)
+                digit_barrier = self.pending_trade.get('digit_barrier')
                 
                 if self.trading_bot:
-                    trade_data = {
+                    self.trading_bot.register_trade({
                         'contract_id': cid,
                         'symbol': self.current_symbol,
                         'action': action,
                         'amount': amt,
                         'price': bp,
                         'result': 'pending',
-                        'confidence': 70,
+                        'confidence': 95 if is_differ else 70,
                         'is_digit': is_digit,
-                        'entry_price': entry_price
-                    }
-                    self.trading_bot.register_trade(trade_data)
-                    # Guardar preço de entrada no bot para diagnóstico
-                    if entry_price:
-                        self.trading_bot._last_entry_price = entry_price
+                        'is_differ': is_differ,
+                        'digit_barrier': digit_barrier
+                    })
                 self.active_trades[cid] = {
                     'contract_id': cid,
                     'amount': amt,
@@ -498,8 +556,9 @@ class DerivWebSocketClient:
                     'timestamp': time.time(),
                     'action': action,
                     'is_digit': is_digit,
-                    'symbol': self.current_symbol,
-                    'entry_price': entry_price
+                    'is_differ': is_differ,
+                    'digit_barrier': digit_barrier,
+                    'symbol': self.current_symbol
                 }
                 self._subscribe_contract(cid)
                 self.pending_trade = None
@@ -526,16 +585,14 @@ class DerivWebSocketClient:
         is_win = profit > 0
         trade_info = self.active_trades.get(cid, {})
         is_digit = trade_info.get('is_digit', False)
-        entry_price = trade_info.get('entry_price')
+        is_differ = trade_info.get('is_differ', False)
+        digit_barrier = trade_info.get('digit_barrier')
         
-        logger.info(f"📊 RESULTADO [{cid}]: {'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f}")
-
-        # 🔬 DIAGNÓSTICO: registar preços e direção
-        if config.DIAGNOSTIC_MODE and entry_price:
-            price_moved = sp - entry_price if not is_digit else None
-            direction = 'subiu' if (price_moved and price_moved > 0) else ('desceu' if price_moved else 'inalterado')
-            logger.warning(f"🔬 DIAG: Entrada=${entry_price:.4f} Saída=${sp:.4f} Movimento={direction} "
-                           f"Sinal={trade_info.get('action')} Resultado={'GANHO' if is_win else 'PERDA'}")
+        if is_differ and digit_barrier is not None:
+            logger.info(f"🎯 DIGITDIFF [{cid}]: Barreira={digit_barrier}, "
+                       f"{'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f}")
+        else:
+            logger.info(f"📊 RESULTADO [{cid}]: {'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f}")
         
         if self.trading_bot:
             self.trading_bot.on_trade_result({
@@ -544,8 +601,7 @@ class DerivWebSocketClient:
                 'sell_price': sp,
                 'profit': profit,
                 'amount': amt,
-                'is_win': is_win,
-                'entry_price': entry_price
+                'is_win': is_win
             })
         if self.on_result_callback:
             self.on_result_callback({
@@ -557,7 +613,9 @@ class DerivWebSocketClient:
                 'sell_price': sp,
                 'profit': profit,
                 'is_win': is_win,
-                'is_digit': is_digit
+                'is_digit': is_digit,
+                'is_differ': is_differ,
+                'digit_barrier': digit_barrier
             })
         if cid in self.active_trades:
             del self.active_trades[cid]
