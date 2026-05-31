@@ -905,6 +905,7 @@ def status():
     analysis = analyzer.get_analysis()
     digit_frequencies = analyzer.get_digit_frequencies()
     least_frequent = analyzer.get_least_frequent_digit()
+    most_frequent = analyzer.get_most_frequent_digit()
 
     _save_daily_stats_to_db(session.get('user_email'), bot)
 
@@ -921,7 +922,8 @@ def status():
             'digit_counter': analyzer.get_digit_counter(),
             'ticks_per_digit': analyzer.TICKS_PER_DIGIT,
             'digit_frequencies': digit_frequencies,
-            'least_frequent_digit': least_frequent
+            'least_frequent_digit': least_frequent,
+            'most_frequent_digit': most_frequent
         },
         'symbols': config.AVAILABLE_SYMBOLS,
         'loginid': client.loginid if client else None
@@ -1100,7 +1102,7 @@ def deriv_oauth_url():
 @require_auth
 @limit_if_available("20 per minute")
 def trade():
-    return jsonify({'error': 'Modo Ativos desativado. Use Dígitos ou Differ.'}), 400
+    return jsonify({'error': 'Modo Ativos desativado. Use Dígitos, Differ ou Matches.'}), 400
 
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
@@ -1157,14 +1159,14 @@ def trade_differ():
 
         least = analyzer.get_least_frequent_digit()
         if least is None:
-            return jsonify({'error': 'Ainda não há dados suficientes para DIFFER. Aguarde.'}), 400
+            return jsonify({'error': 'Nenhum dígito sub‑representado. Aguarde.'}), 400
 
         ok = sess['client'].place_differ_trade(least, amt)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
             return jsonify({
                 'status': 'ok',
-                'message': f'🎯 DIGITDIFFER no dígito {least} por ${amt:.2f}',
+                'message': f'🎯 DIFFER no dígito {least} por ${amt:.2f}',
                 'digit': least
             })
         return jsonify({'error': 'Falha no trade DIFFER'}), 500
@@ -1172,15 +1174,54 @@ def trade_differ():
         logger.exception("Erro trade differ")
         return jsonify({'error': 'Erro interno'}), 500
 
+# 🔥 NOVA ROTA: MATCHES
+@app.route('/api/trade/matches', methods=['POST'])
+@require_auth
+@limit_if_available("10 per minute")
+def trade_matches():
+    try:
+        sess = get_session(session['user_id'])
+        if not sess or not sess['client'].authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        bot = sess['trading_bot']
+        if bot.stop_loss_active:
+            return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+        d = request.json
+        amt = float(d.get('amount', 0.35))
+        if amt < 0.35 or amt > 100:
+            return jsonify({'error': 'Valor inválido'}), 400
+
+        analyzer = sess['digit_analyzer']
+        tr = analyzer.get_ticks_remaining()
+        if tr < 2:
+            return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
+
+        most = analyzer.get_most_frequent_digit()
+        if most is None:
+            return jsonify({'error': 'Nenhum dígito acima de 15%. Aguarde.'}), 400
+
+        ok = sess['client'].place_matches_trade(most, amt)
+        if ok:
+            credit_affiliate_commission(session['user_email'], amt)
+            return jsonify({
+                'status': 'ok',
+                'message': f'🎯 MATCHES no dígito {most} por ${amt:.2f}',
+                'digit': most
+            })
+        return jsonify({'error': 'Falha no trade MATCHES'}), 500
+    except Exception:
+        logger.exception("Erro trade matches")
+        return jsonify({'error': 'Erro interno'}), 500
+
 @app.route('/api/trade/hybrid', methods=['POST'])
 @require_auth
 def trade_hybrid():
-    return jsonify({'error': 'Modo Híbrido desativado. Use Dígitos ou Differ.'}), 400
+    return jsonify({'error': 'Modo Híbrido desativado. Use Dígitos, Differ ou Matches.'}), 400
 
 @app.route('/api/trade/manual', methods=['POST'])
 @require_auth
 def trade_manual():
-    return jsonify({'error': 'Modo Manual desativado. Use Dígitos ou Differ.'}), 400
+    return jsonify({'error': 'Modo Manual desativado. Use Dígitos, Differ ou Matches.'}), 400
 
 @app.route('/api/symbol/change', methods=['POST'])
 @require_auth
