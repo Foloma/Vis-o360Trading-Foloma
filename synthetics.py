@@ -9,15 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 class DigitAnalyzer:
-    """
-    Analisador de dígitos para contratos DIGITODD/DIGITEVEN e DIGITDIFFER.
-
-    CONVENÇÃO:
-    - 'BUY'  / 'CALL'  = ÍMPAR (DIGITODD)
-    - 'SELL' / 'PUT'   = PAR   (DIGITEVEN)
-    - 'DIFFER'         = Aposta que um dígito específico NÃO sairá (DIGITDIFF)
-    """
-
     TICKS_PER_DIGIT = 10
 
     def __init__(self, max_digits=1000):
@@ -31,7 +22,7 @@ class DigitAnalyzer:
 
         self._lock = threading.RLock()
 
-        # Rastreamento de frequência individual por dígito (0-9) — janela reduzida para 70
+        # Rastreamento de frequência individual por dígito (0-9) — janela de 70 ticks
         self._digit_window = deque(maxlen=70)
         self._digit_counts = {i: 0 for i in range(10)}
 
@@ -130,25 +121,22 @@ class DigitAnalyzer:
             self._digit_window.append(digit)
             self._digit_counts[digit] = self._digit_counts.get(digit, 0) + 1
 
+    # 🔧 CORREÇÃO FINAL: removida a condição distinct
     def get_least_frequent_digit(self):
         """
-        Retorna o dígito (0-9) que menos apareceu nos últimos 70 ticks,
-        usando diretamente self._digit_counts para evitar percorrer a janela.
-        Requer pelo menos 35 ticks acumulados.
+        Retorna o dígito (0-9) que menos apareceu nos últimos 70 ticks.
+        Requer pelo menos 20 ticks acumulados e que o dígito menos frequente
+        esteja abaixo de 80% do esperado.
         """
         with self._lock:
-            if len(self._digit_window) < 35:
+            if len(self._digit_window) < 20:
                 return None
             total = len(self._digit_window)
-            # Verificar se todos os dígitos já apareceram
-            if len(self._digit_counts) < 10 or any(v == 0 for v in self._digit_counts.values()):
-                return None
-            # Encontrar o dígito com menor contagem
             least_digit = min(self._digit_counts, key=self._digit_counts.get)
             least_count = self._digit_counts[least_digit]
             expected = total / 10
-            # Só retorna se estiver abaixo de 70% do esperado
-            if least_count < expected * 0.7:
+            if least_count < expected * 0.8:
+                logger.info(f"DIFFER disponível: dígito {least_digit} ({least_count}/{total}, esperado {expected:.1f})")
                 return least_digit
             return None
 
