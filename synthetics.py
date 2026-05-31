@@ -9,6 +9,16 @@ logger = logging.getLogger(__name__)
 
 
 class DigitAnalyzer:
+    """
+    Analisador de dígitos para contratos DIGITODD/DIGITEVEN, DIGITDIFF e DIGITMATCH.
+
+    CONVENÇÃO:
+    - 'BUY'  / 'CALL'  = ÍMPAR (DIGITODD)
+    - 'SELL' / 'PUT'   = PAR   (DIGITEVEN)
+    - 'DIFFER'         = Aposta que um dígito específico NÃO sairá
+    - 'MATCHES'        = Aposta que um dígito específico VAI sair (payout ~900%)
+    """
+
     TICKS_PER_DIGIT = 10
 
     def __init__(self, max_digits=1000):
@@ -41,6 +51,7 @@ class DigitAnalyzer:
             'entropy': 0.0,
             'entropy_verdict': '---',
             'least_frequent_digit': None,
+            'most_frequent_digit': None,
             'digit_frequencies': {i: 0 for i in range(10)}
         }
 
@@ -121,13 +132,8 @@ class DigitAnalyzer:
             self._digit_window.append(digit)
             self._digit_counts[digit] = self._digit_counts.get(digit, 0) + 1
 
-    # 🔧 CORREÇÃO FINAL: removida a condição distinct
     def get_least_frequent_digit(self):
-        """
-        Retorna o dígito (0-9) que menos apareceu nos últimos 70 ticks.
-        Requer pelo menos 20 ticks acumulados e que o dígito menos frequente
-        esteja abaixo de 80% do esperado.
-        """
+        """Retorna o dígito menos frequente (para DIFFER)."""
         with self._lock:
             if len(self._digit_window) < 20:
                 return None
@@ -138,6 +144,20 @@ class DigitAnalyzer:
             if least_count < expected * 0.8:
                 logger.info(f"DIFFER disponível: dígito {least_digit} ({least_count}/{total}, esperado {expected:.1f})")
                 return least_digit
+            return None
+
+    def get_most_frequent_digit(self):
+        """Retorna o dígito mais frequente (para MATCHES) se estiver acima de 15%."""
+        with self._lock:
+            if len(self._digit_window) < 20:
+                return None
+            total = len(self._digit_window)
+            most_digit = max(self._digit_counts, key=self._digit_counts.get)
+            most_count = self._digit_counts[most_digit]
+            pct = (most_count / total) * 100
+            if pct >= 15:
+                logger.info(f"MATCHES disponível: dígito {most_digit} ({most_count}/{total} = {pct:.1f}%)")
+                return most_digit
             return None
 
     def get_digit_frequencies(self):
@@ -166,7 +186,6 @@ class DigitAnalyzer:
 
         entropy = self._calculate_entropy(snap[-100:])
 
-        # Filtro de rajada
         last10 = snap[-10:] if len(snap) >= 10 else snap
         if len(last10) == 10:
             odd_in_10 = sum(1 for d in last10 if d % 2 != 0)
@@ -186,7 +205,6 @@ class DigitAnalyzer:
                                 sequences=seq_info, entropy=entropy)
             return
 
-        # 1. Streak consecutivo (>=4)
         if streak >= 4:
             base_conf = min(65 + (streak - 4) * 10, 90)
             conf = self._apply_entropy_penalty(base_conf, entropy)
@@ -196,7 +214,6 @@ class DigitAnalyzer:
                 else:
                     candidates.append((conf, 'SELL', 'streak', f'🔥 {streak} ÍMPARES seguidos → aposte PAR ({conf:.0f}%)'))
 
-        # 2. Dominância >=75%
         if w >= 20:
             if odd_pct >= 75:
                 base_conf = min(60 + int((odd_pct - 75) * 1.8), 85)
@@ -209,7 +226,6 @@ class DigitAnalyzer:
                 if conf >= 55:
                     candidates.append((conf, 'BUY', 'dominance', f'📊 {even_pct}% PARES → reversão ÍMPAR ({conf:.0f}%)'))
 
-        # 3. Alternância >=6
         if w >= 10:
             alt = self._calc_alternating(window)
             if alt >= 6:
@@ -221,7 +237,6 @@ class DigitAnalyzer:
                     else:
                         candidates.append((conf, 'BUY', 'alternating', f'🔄 Alternância {alt} → ÍMPAR ({conf:.0f}%)'))
 
-        # 4. Desequilíbrio moderado
         if w >= 30:
             if odd_pct >= 65 and streak >= 2:
                 base_conf = 60
