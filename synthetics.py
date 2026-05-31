@@ -132,24 +132,24 @@ class DigitAnalyzer:
 
     def get_least_frequent_digit(self):
         """
-        Retorna o dígito (0-9) que menos apareceu nos últimos 70 ticks.
-        Requer pelo menos 35 ticks acumulados para ser fiável.
-        Critério relaxado: frequência < 70% do esperado (7% em vez de 6%).
+        Retorna o dígito (0-9) que menos apareceu nos últimos 70 ticks,
+        usando diretamente self._digit_counts para evitar percorrer a janela.
+        Requer pelo menos 35 ticks acumulados.
         """
         with self._lock:
             if len(self._digit_window) < 35:
                 return None
             total = len(self._digit_window)
-            frequencies = {}
-            for d in list(self._digit_window):
-                frequencies[d] = frequencies.get(d, 0) + 1
-            if len(frequencies) < 10:
+            # Verificar se todos os dígitos já apareceram
+            if len(self._digit_counts) < 10 or any(v == 0 for v in self._digit_counts.values()):
                 return None
-            least = min(frequencies.items(), key=lambda x: x[1])
+            # Encontrar o dígito com menor contagem
+            least_digit = min(self._digit_counts, key=self._digit_counts.get)
+            least_count = self._digit_counts[least_digit]
             expected = total / 10
-            # Critério relaxado: 70% do esperado (antes era 60%)
-            if least[1] < expected * 0.7:
-                return least[0]
+            # Só retorna se estiver abaixo de 70% do esperado
+            if least_count < expected * 0.7:
+                return least_digit
             return None
 
     def get_digit_frequencies(self):
@@ -296,7 +296,6 @@ class DigitAnalyzer:
             })
 
     def _apply_entropy_penalty(self, base_confidence, entropy):
-        # Limiares ajustados
         if entropy > 0.97:
             return 0.0
         elif entropy > 0.93:
@@ -308,7 +307,6 @@ class DigitAnalyzer:
         return base_confidence * (1 - penalty)
 
     def _get_entropy_verdict(self, entropy):
-        # Limiares ajustados
         if entropy > 0.97:
             return 'ALEATÓRIO (não operar)'
         elif entropy > 0.93:
