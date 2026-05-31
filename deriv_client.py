@@ -489,6 +489,77 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
+    # 🔥 NOVO: MATCHES
+    def place_matches_trade(self, digit, amount):
+        """
+        Aposta que um dígito específico VAI ser o último dígito.
+        Contrato DIGITMATCH com barreira = dígito escolhido.
+        Payout ~900%.
+        """
+        if self.trading_bot and not self.trading_bot.check_risk_limits():
+            logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
+            return False
+
+        time.sleep(0.5)
+
+        with self._trade_lock:
+            if not self.streaming:
+                logger.warning("🚫 Sem streaming"); return False
+            if self.balance <= 0:
+                logger.warning("🚫 Saldo não carregado"); return False
+            if self.balance < 0.35:
+                logger.warning("🚫 Saldo insuficiente"); return False
+            if time.time() - self._last_trade_time < 2:
+                logger.warning("⏱️ Intervalo mínimo 2s"); return False
+            if not self.authorized:
+                logger.warning("🚫 Não autorizado"); return False
+            with self._pending_lock:
+                if self.pending_trade is not None:
+                    if time.time() - self.pending_trade_time > 60:
+                        self.pending_trade = None
+                    else:
+                        logger.warning("Trade pendente"); return False
+
+            self._last_trade_time = time.time()
+
+            duration = self.config.DIGIT_CONTRACT_DURATION
+            duration_unit = 't'
+
+            req_id = self._next_req()
+            with self._pending_lock:
+                self.pending_trade = {
+                    'amount': amount,
+                    'contract_type': f'MATCH_{digit}',
+                    'is_digit': True,
+                    'is_matches': True,
+                    'digit_barrier': digit,
+                    'timestamp': time.time(),
+                    'status': 'waiting_proposal',
+                    'req_id': req_id
+                }
+            self.pending_trade_time = time.time()
+
+            try:
+                self.ws.send(json.dumps({
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": "DIGITMATCH",
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": duration_unit,
+                    "symbol": self.current_symbol,
+                    "barrier": digit,
+                    "req_id": req_id
+                }))
+                logger.info(f"🎯 DIGITMATCH enviado: dígito={digit}, valor=${amount:.2f}")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Erro trade DIGITMATCH: {e}")
+                with self._pending_lock:
+                    self.pending_trade = None
+                return False
+
     def _on_proposal(self, data):
         with self._pending_lock:
             if self.pending_trade is None:
@@ -530,6 +601,7 @@ class DerivWebSocketClient:
                 action = self.pending_trade.get('contract_type', '')
                 is_digit = self.pending_trade.get('is_digit', False)
                 is_differ = self.pending_trade.get('is_differ', False)
+                is_matches = self.pending_trade.get('is_matches', False)
                 digit_barrier = self.pending_trade.get('digit_barrier')
                 
                 if self.trading_bot:
@@ -540,9 +612,10 @@ class DerivWebSocketClient:
                         'amount': amt,
                         'price': bp,
                         'result': 'pending',
-                        'confidence': 95 if is_differ else 70,
+                        'confidence': 15 if is_matches else (95 if is_differ else 70),
                         'is_digit': is_digit,
                         'is_differ': is_differ,
+                        'is_matches': is_matches,
                         'digit_barrier': digit_barrier
                     })
                 self.active_trades[cid] = {
@@ -553,6 +626,7 @@ class DerivWebSocketClient:
                     'action': action,
                     'is_digit': is_digit,
                     'is_differ': is_differ,
+                    'is_matches': is_matches,
                     'digit_barrier': digit_barrier,
                     'symbol': self.current_symbol
                 }
@@ -582,9 +656,13 @@ class DerivWebSocketClient:
         trade_info = self.active_trades.get(cid, {})
         is_digit = trade_info.get('is_digit', False)
         is_differ = trade_info.get('is_differ', False)
+        is_matches = trade_info.get('is_matches', False)
         digit_barrier = trade_info.get('digit_barrier')
         
-        if is_differ and digit_barrier is not None:
+        if is_matches and digit_barrier is not None:
+            logger.info(f"🎯 DIGITMATCH [{cid}]: Dígito={digit_barrier}, "
+                       f"{'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f} (payout 9x)")
+        elif is_differ and digit_barrier is not None:
             logger.info(f"🎯 DIGITDIFF [{cid}]: Barreira={digit_barrier}, "
                        f"{'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f}")
         else:
@@ -611,6 +689,7 @@ class DerivWebSocketClient:
                 'is_win': is_win,
                 'is_digit': is_digit,
                 'is_differ': is_differ,
+                'is_matches': is_matches,
                 'digit_barrier': digit_barrier
             })
         if cid in self.active_trades:
@@ -644,7 +723,6 @@ class DerivWebSocketClient:
                     'data': candles,
                     'timestamp': time.time()
                 }
-            # Passar high/low das últimas 20 velas para o trading_bot
             if self.trading_bot and hasattr(self.trading_bot, 'feed_candle_data'):
                 for candle in candles[-20:]:
                     high = float(candle.get('high', 0))
