@@ -338,7 +338,25 @@ function stopPolling(){if(_updateInterval){clearTimeout(_updateInterval);_update
 function scheduleNextPoll(){const d=isConnected?1500:5000;_updateInterval=setTimeout(()=>{updateAll();scheduleNextPoll();},d);}
 
 function updateScoreboard(){fetch('/api/signals/scoreboard').then(r=>r.json()).then(d=>{if(d.today_signals>0){document.getElementById('signalScoreboard').style.display='block';document.getElementById('sigTotal').textContent=d.today_signals;document.getElementById('sigWins').textContent=d.would_have_won;document.getElementById('sigWinRate').textContent=d.simulated_win_rate+'%';}}).catch(()=>{});}
-async function autoConnect(){try{const r=await fetch('/api/auth/auto-connect');const d=await r.json();if(d.status==='already_connected'){document.getElementById('conSt').textContent='✅ Conectado';isConnected=true;}else if(d.status==='connecting'){document.getElementById('conSt').textContent='🔄 Auto-conectando...';toast('🔄 Auto-conectando...','info');setTimeout(updateAll,3000);}}catch(e){}}
+async function autoConnect(){
+    try{
+        const r=await fetch('/api/auth/auto-connect');
+        const d=await r.json();
+        if(d.status==='already_connected'){
+            document.getElementById('conSt').textContent='✅ Conectado';
+            isConnected=true;
+        } else if (d.status === 'connecting') {
+            document.getElementById('conSt').textContent = '🔄 Auto-conectando...';
+            // 🔥 CORREÇÃO: polling progressivo em vez de setTimeout único
+            let attempts = 0;
+            const check = setInterval(() => {
+                attempts++;
+                updateAll();
+                if (isConnected || attempts >= 4) clearInterval(check);
+            }, 3000);
+        }
+    }catch(e){}
+}
 
 function initSyms(){
   const el=document.getElementById('symSel');if(!el)return;
