@@ -9,16 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 class DigitAnalyzer:
-    """
-    Analisador de dígitos para contratos DIGITODD/DIGITEVEN, DIGITDIFF e DIGITMATCH.
-
-    CONVENÇÃO:
-    - 'BUY'  / 'CALL'  = ÍMPAR (DIGITODD)
-    - 'SELL' / 'PUT'   = PAR   (DIGITEVEN)
-    - 'DIFFER'         = Aposta que um dígito específico NÃO sairá
-    - 'MATCHES'        = Aposta que um dígito específico VAI sair (payout ~900%)
-    """
-
     TICKS_PER_DIGIT = 10
 
     def __init__(self, max_digits=1000):
@@ -133,7 +123,6 @@ class DigitAnalyzer:
             self._digit_counts[digit] = self._digit_counts.get(digit, 0) + 1
 
     def get_least_frequent_digit(self):
-        """Retorna o dígito menos frequente (para DIFFER)."""
         with self._lock:
             if len(self._digit_window) < 20:
                 return None
@@ -142,23 +131,33 @@ class DigitAnalyzer:
             least_count = self._digit_counts[least_digit]
             expected = total / 10
             if least_count < expected * 0.8:
-                logger.info(f"DIFFER disponível: dígito {least_digit} ({least_count}/{total}, esperado {expected:.1f})")
                 return least_digit
             return None
 
     def get_most_frequent_digit(self):
-        """Retorna o dígito mais frequente (para MATCHES) se estiver acima de 15%."""
+        """
+        Retorna o dígito mais frequente para MATCHES apenas se:
+        - Janela >= 50 ticks
+        - Frequência >= 20%
+        - Apareceu pelo menos 2 vezes nos últimos 5 dígitos lentos
+        """
         with self._lock:
-            if len(self._digit_window) < 20:
+            if len(self._digit_window) < 50:
                 return None
             total = len(self._digit_window)
             most_digit = max(self._digit_counts, key=self._digit_counts.get)
             most_count = self._digit_counts[most_digit]
             pct = (most_count / total) * 100
-            if pct >= 15:
-                logger.info(f"MATCHES disponível: dígito {most_digit} ({most_count}/{total} = {pct:.1f}%)")
-                return most_digit
-            return None
+
+            if pct < 20:
+                return None
+
+            recent_5 = list(self.slow_digits)[-5:] if len(self.slow_digits) >= 5 else []
+            if recent_5.count(most_digit) < 2:
+                return None
+
+            logger.info(f"MATCHES disponível: dígito {most_digit} ({most_count}/{total} = {pct:.1f}%)")
+            return most_digit
 
     def get_digit_frequencies(self):
         with self._lock:
