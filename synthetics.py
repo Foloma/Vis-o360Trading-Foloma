@@ -135,10 +135,7 @@ class DigitAnalyzer:
             self._digit_counts[digit] = self._digit_counts.get(digit, 0) + 1
 
     def _is_volatile(self):
-        """
-        Verifica se o mercado está demasiado volátil (muitos dígitos diferentes nos últimos 10).
-        ATENÇÃO: Este método deve ser chamado com self._lock já adquirido.
-        """
+        """Verifica se o mercado está demasiado volátil (muitos dígitos diferentes nos últimos 10)."""
         recent_10 = list(self.slow_digits)[-10:] if len(self.slow_digits) >= 10 else []
         if len(recent_10) < 10:
             self.last_analysis['volatility_filter'] = False
