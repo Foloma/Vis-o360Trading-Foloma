@@ -355,7 +355,7 @@ oauth_states_lock = threading.Lock()
 connecting_lock = threading.Lock()
 connecting_users = set()
 
-OAUTH_STATE_TTL = 600
+OAUTH_STATE_TTL = 900  # aumentado para 15 minutos
 OAUTH_STATE_REUSE_WINDOW = 30
 
 def reset_bot_state(bot):
@@ -963,7 +963,9 @@ def debug():
 @app.route('/oauth/callback')
 def oauth_callback():
     state_id = request.args.get('state')
+    logger.info(f"📥 OAuth Callback recebido. State: {state_id}, Args: {request.args.to_dict()}")
     if not state_id:
+        logger.error("🚫 Callback sem state!")
         return redirect('/?error=invalid_state')
     html = f"""<!DOCTYPE html>
 <html>
@@ -1029,14 +1031,24 @@ def process_oauth():
     tokens = data.get('tokens', [])
     if not state_id or not tokens:
         return jsonify({'error': 'Dados incompletos'}), 400
+
     with oauth_states_lock:
+        # limpeza de states expirados
+        now = time.time()
+        for sid in list(oauth_states.keys()):
+            if now - oauth_states[sid].get('created_at', 0) > OAUTH_STATE_TTL:
+                del oauth_states[sid]
+                logger.debug(f"State expirado removido: {sid}")
+
         state_data = oauth_states.pop(state_id, None)
+
     if not state_data:
-        if 'user_id' not in session:
-            return jsonify({'error': 'Sessão expirada'}), 401
-        user_id = session['user_id']
-    else:
-        user_id = state_data['user_id']
+        logger.error(f"🚫 State '{state_id}' não encontrado. States ativos: {list(oauth_states.keys())}")
+        return jsonify({'error': 'OAuth expirado. Por favor, inicie novamente.'}), 401
+
+    user_id = state_data['user_id']
+    account_type_request = state_data.get('account_type', 'demo')
+
     conn = sqlite3.connect(DATABASE_PATH)
     try:
         row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
@@ -1045,7 +1057,7 @@ def process_oauth():
         email = row[0]
     finally:
         conn.close()
-    account_type_request = state_data.get('account_type', 'demo') if state_data else 'demo'
+
     for acc in tokens:
         tok = acc.get('token')
         acct = acc.get('acct', '')
@@ -1058,12 +1070,14 @@ def process_oauth():
         if (account_type_request == 'demo' and acct.startswith('VR')) or \
            (account_type_request == 'real' and not acct.startswith('VR')):
             UserStore.set_active_account(email, account_type_request)
+
     user = UserStore.get(email)
     session['user_id'] = user_id
     session['user_email'] = email
     session['user_name'] = user['name']
     session['user_role'] = user.get('role', 'user')
     session.permanent = True
+
     create_session(user_id, user, force=True)
     return jsonify({'status': 'ok'})
 
@@ -1174,7 +1188,7 @@ def trade_differ():
         logger.exception("Erro trade differ")
         return jsonify({'error': 'Erro interno'}), 500
 
-# 🔥 NOVA ROTA: MATCHES
+# 🔥 MATCHES
 @app.route('/api/trade/matches', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1198,7 +1212,7 @@ def trade_matches():
 
         most = analyzer.get_most_frequent_digit()
         if most is None:
-            return jsonify({'error': 'Nenhum dígito acima de 15%. Aguarde.'}), 400
+            return jsonify({'error': 'Condições para MATCHES não atingidas. Aguarde mais ticks.'}), 400
 
         ok = sess['client'].place_matches_trade(most, amt)
         if ok:
