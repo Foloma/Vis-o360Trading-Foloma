@@ -351,12 +351,22 @@ class TradingBot:
                     if trade.get('contract_id') == contract_id:
                         target_trade = trade
                         break
+
+            # 🔥 CORREÇÃO: Fallback para o último trade pendente se o contract_id não bater
             if not target_trade:
-                logger.warning(f"⚠️ Nenhum trade pendente com contract_id {contract_id}. Ignorando.")
-                return
+                with self._state_lock:
+                    pending = [t for t in self.trades if t.get('result') == 'pending']
+                    if pending:
+                        target_trade = pending[-1]
+                        logger.info(f"⚡ Fallback: usando último trade pendente (contract_id original: {contract_id})")
+                    else:
+                        logger.warning(f"⚠️ Nenhum trade pendente para contract_id {contract_id}. Ignorando.")
+                        return
+
             if target_trade.get('result') != 'pending':
                 logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
                 return
+
             with self._state_lock:
                 if is_win:
                     target_trade['result'] = 'win'
