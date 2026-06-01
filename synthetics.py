@@ -9,6 +9,16 @@ logger = logging.getLogger(__name__)
 
 
 class DigitAnalyzer:
+    """
+    Analisador de dígitos para contratos DIGITODD/DIGITEVEN, DIGITDIFF e DIGITMATCH.
+
+    CONVENÇÃO:
+    - 'BUY'  / 'CALL'  = ÍMPAR (DIGITODD)
+    - 'SELL' / 'PUT'   = PAR   (DIGITEVEN)
+    - 'DIFFER'         = Aposta que um dígito específico NÃO sairá
+    - 'MATCHES'        = Aposta que um dígito específico VAI sair (payout ~900%)
+    """
+
     TICKS_PER_DIGIT = 10
 
     def __init__(self, max_digits=1000):
@@ -42,7 +52,9 @@ class DigitAnalyzer:
             'entropy_verdict': '---',
             'least_frequent_digit': None,
             'most_frequent_digit': None,
-            'digit_frequencies': {i: 0 for i in range(10)}
+            'digit_frequencies': {i: 0 for i in range(10)},
+            'volatility_filter': False,
+            'volatility_reason': ''
         }
 
     def _extract_last_digit(self, price):
@@ -122,28 +134,68 @@ class DigitAnalyzer:
             self._digit_window.append(digit)
             self._digit_counts[digit] = self._digit_counts.get(digit, 0) + 1
 
-    def get_least_frequent_digit(self):
-        with self._lock:
-            if len(self._digit_window) < 20:
-                return None
-            total = len(self._digit_window)
-            least_digit = min(self._digit_counts, key=self._digit_counts.get)
-            least_count = self._digit_counts[least_digit]
-            expected = total / 10
-            if least_count < expected * 0.8:
-                return least_digit
-            return None
-
-    def get_most_frequent_digit(self):
+    def _is_volatile(self):
         """
-        Retorna o dígito mais frequente para MATCHES apenas se:
+        Verifica se o mercado está demasiado volátil (muitos dígitos diferentes nos últimos 10).
+        ATENÇÃO: Este método deve ser chamado com self._lock já adquirido.
+        """
+        recent_10 = list(self.slow_digits)[-10:] if len(self.slow_digits) >= 10 else []
+        if len(recent_10) < 10:
+            self.last_analysis['volatility_filter'] = False
+            self.last_analysis['volatility_reason'] = ''
+            return False
+        unique = len(set(recent_10))
+        if unique >= 8:
+            self.last_analysis['volatility_filter'] = True
+            self.last_analysis['volatility_reason'] = f'Mercado instável ({unique}/10 dígitos diferentes)'
+            return True
+        self.last_analysis['volatility_filter'] = False
+        self.last_analysis['volatility_reason'] = ''
+        return False
+
+    def get_least_frequent_digit(self):
+        """
+        DIFFER com critérios rigorosos:
         - Janela >= 50 ticks
-        - Frequência >= 20%
-        - Apareceu pelo menos 2 vezes nos últimos 5 dígitos lentos
+        - Frequência < 5%
+        - Dígito NÃO apareceu nos últimos 20 ticks
+        - Volatilidade baixa
         """
         with self._lock:
             if len(self._digit_window) < 50:
                 return None
+            if self._is_volatile():
+                return None
+
+            total = len(self._digit_window)
+            least_digit = min(self._digit_counts, key=self._digit_counts.get)
+            least_count = self._digit_counts[least_digit]
+            pct = (least_count / total) * 100
+
+            if pct >= 5:
+                return None
+
+            recent_20 = list(self._digit_window)[-20:] if len(self._digit_window) >= 20 else []
+            if least_digit in recent_20:
+                return None
+
+            logger.info(f"DIFFER disponível: dígito {least_digit} ({least_count}/{total} = {pct:.1f}%) — fora há 20+ ticks")
+            return least_digit
+
+    def get_most_frequent_digit(self):
+        """
+        MATCHES com critérios muito rigorosos:
+        - Janela >= 50 ticks
+        - Frequência >= 20%
+        - Apareceu pelo menos 3 vezes nos últimos 5 dígitos lentos
+        - Volatilidade baixa
+        """
+        with self._lock:
+            if len(self._digit_window) < 50:
+                return None
+            if self._is_volatile():
+                return None
+
             total = len(self._digit_window)
             most_digit = max(self._digit_counts, key=self._digit_counts.get)
             most_count = self._digit_counts[most_digit]
@@ -153,7 +205,7 @@ class DigitAnalyzer:
                 return None
 
             recent_5 = list(self.slow_digits)[-5:] if len(self.slow_digits) >= 5 else []
-            if recent_5.count(most_digit) < 2:
+            if recent_5.count(most_digit) < 3:
                 return None
 
             logger.info(f"MATCHES disponível: dígito {most_digit} ({most_count}/{total} = {pct:.1f}%)")
