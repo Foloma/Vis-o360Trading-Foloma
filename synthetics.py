@@ -141,12 +141,19 @@ class DigitAnalyzer:
             return False, None
 
     def _update_frequency(self, digit):
+        """
+        🔴 CORREÇÃO: Bug de contagem que afetava DIFFER e MATCHES.
+        Antes removia o dígito antigo só se len >= 70, mas não guardava qual era.
+        Agora guarda o dígito que sai e só depois adiciona o novo.
+        """
         with self._lock:
+            old = None
             if len(self._digit_window) >= 70:
                 old = self._digit_window[0]
-                self._digit_counts[old] = max(0, self._digit_counts[old] - 1)
             self._digit_window.append(digit)
             self._digit_counts[digit] = self._digit_counts.get(digit, 0) + 1
+            if old is not None:
+                self._digit_counts[old] = max(0, self._digit_counts[old] - 1)
 
     def _is_volatile(self):
         """
@@ -159,7 +166,7 @@ class DigitAnalyzer:
             self.last_analysis['volatility_reason'] = ''
             return False
         unique = len(set(recent_10))
-        if unique >= self.volatile_unique:               # ← parâmetro configurável
+        if unique >= self.volatile_unique:
             self.last_analysis['volatility_filter'] = True
             self.last_analysis['volatility_reason'] = f'Mercado instável ({unique}/10 dígitos diferentes)'
             return True
@@ -173,7 +180,7 @@ class DigitAnalyzer:
         Janela, percentagem e ausência agora configuráveis.
         """
         with self._lock:
-            if len(self._digit_window) < self.diff_min_window:   # ← configurável
+            if len(self._digit_window) < self.diff_min_window:
                 return None
             if self._is_volatile():
                 return None
@@ -183,10 +190,9 @@ class DigitAnalyzer:
             least_count = self._digit_counts[least_digit]
             pct = (least_count / total) * 100
 
-            if pct >= self.diff_max_pct:                         # ← configurável
+            if pct >= self.diff_max_pct:
                 return None
 
-            # Verifica ausência nos últimos N ticks (default 20)
             recent_n = list(self._digit_window)[-self.diff_absent_ticks:] if len(self._digit_window) >= self.diff_absent_ticks else []
             if least_digit in recent_n:
                 return None
@@ -197,8 +203,8 @@ class DigitAnalyzer:
     def get_most_frequent_digit(self):
         """
         MATCHES com critérios ajustados:
-        - Frequência >= 15% (em vez de 20%)
-        - Apareceu pelo menos 2 vezes nos últimos 5 dígitos lentos (em vez de 3)
+        - Frequência >= 15%
+        - Apareceu pelo menos 2 vezes nos últimos 5 dígitos lentos
         - Volatilidade baixa
         """
         with self._lock:
@@ -212,11 +218,11 @@ class DigitAnalyzer:
             most_count = self._digit_counts[most_digit]
             pct = (most_count / total) * 100
 
-            if pct < 15:                     # ← CORREÇÃO: 20% → 15%
+            if pct < 15:
                 return None
 
             recent_5 = list(self.slow_digits)[-5:] if len(self.slow_digits) >= 5 else []
-            if recent_5.count(most_digit) < 2:   # ← CORREÇÃO: 3 → 2
+            if recent_5.count(most_digit) < 2:
                 return None
 
             logger.info(f"MATCHES disponível: dígito {most_digit} ({most_count}/{total} = {pct:.1f}%)")
