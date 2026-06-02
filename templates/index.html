@@ -137,46 +137,169 @@
   <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
 </audio>
 
-<!-- Modal do Guia de Utilização -->
+<!-- Modal do Guia de Utilização — CONTEÚDO COMPLETO SUBSTITUÍDO -->
 <div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
   <div class="guide-modal" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeGuide()">✕</button>
-    <h2>📖 Guia da Plataforma</h2>
+    <h2>📖 GUIA FOLOMA VISÃO 360</h2>
+
     <div class="guide-nav">
-      <button class="tf-btn active" onclick="scrollToSection('g1')">Elementos</button>
-      <button class="tf-btn" onclick="scrollToSection('g2')">Decisão</button>
-      <button class="tf-btn" onclick="scrollToSection('g3')">Estratégia</button>
-      <button class="tf-btn" onclick="scrollToSection('g4')">Risco</button>
-      <button class="tf-btn" onclick="scrollToSection('g5')">Erros</button>
+      <button class="tf-btn active" onclick="scrollToSection('g1')">Par/Ímpar</button>
+      <button class="tf-btn" onclick="scrollToSection('g2')">DIFFER</button>
+      <button class="tf-btn" onclick="scrollToSection('g3')">MATCHES</button>
+      <button class="tf-btn" onclick="scrollToSection('g4')">Plano $20→$100</button>
+      <button class="tf-btn" onclick="scrollToSection('g5')">Emocional</button>
     </div>
-    <h3 id="g1">1. Elementos</h3>
+
+    <!-- ══════════ PAR / ÍMPAR ══════════ -->
+    <h3 id="g1">🎲 1. PAR / ÍMPAR (Even/Odd)</h3>
     <table>
-      <tr><td><strong>Frequências 0-9</strong></td><td>% de cada dígito nos últimos 70. Verde = menos frequente (DIFFER). Roxo = mais frequente (MATCHES).</td></tr>
-      <tr><td><strong>🎯 DIFFER</strong></td><td>Aposta que o dígito menos frequente NÃO sairá. Win rate 85‑95%, payout ~1.1x.</td></tr>
-      <tr><td><strong>🎯 MATCHES</strong></td><td>Aposta que o dígito mais frequente (≥15%) VAI sair. Win rate baixo, payout ~9x.</td></tr>
-      <tr><td><strong>Entropia</strong></td><td>"BEM DEFINIDO" = padrão detetável. "ALEATÓRIO" = não operar.</td></tr>
+      <tr><th>O que é</th><td>Aposta se o último dígito do próximo tick será PAR (0,2,4,6,8) ou ÍMPAR (1,3,5,7,9).</td></tr>
+      <tr><th>Payout</th><td>~96% do valor apostado. Apostas $0.35 → ganho ~$0.34.</td></tr>
+      <tr><th>Win rate real</th><td>50% — é matemática pura. Não há vantagem estatística estrutural.</td></tr>
+      <tr><th>Quando usar</th><td>Quando a entropia mostra "BEM DEFINIDO" e há streak de 4+ dígitos do mesmo tipo.</td></tr>
+      <tr><th>Quando NÃO usar</th><td>Entropia "ALEATÓRIO" ou "IMPREVISÍVEL". Após 3 perdas seguidas.</td></tr>
     </table>
-    <h3 id="g2">2. Checklist</h3>
-    <div style="background:#020617;border-radius:8px;padding:12px;border:1px solid var(--accent);">
-      <p>1. Entropia "BEM DEFINIDO" ou "PREVISÍVEL"? → NÃO = não operar</p>
-      <p>2. DIFFER: dígito verde com frequência &lt; 8% → apostar $0.50</p>
-      <p>3. MATCHES: dígito roxo com frequência ≥ 15% → apostar $0.35</p>
-      <p>4. Stop‑loss 5% atingido? → PARAR até amanhã</p>
-      <p>5. Meta de 10% atingida? → PARAR e sacar</p>
+
+    <p style="margin-top:8px"><strong>Estratégia — Contra-tendência com streak:</strong></p>
+    <div style="background:#020617;border-radius:8px;padding:10px;border:1px solid var(--accent);margin-bottom:8px">
+      <p>1. Aguardar entropia "BEM DEFINIDO" ou "PREVISÍVEL"</p>
+      <p>2. Esperar streak de 4 ou mais PAR ou ÍMPAR consecutivos</p>
+      <p>3. Apostar no <strong>oposto</strong> do streak (se 4 ÍMPARES → apostar PAR)</p>
+      <p>4. Valor fixo: <strong>$0.50</strong> por operação — nunca aumentar em sequência de perdas</p>
+      <p>5. Máximo <strong>3 operações seguidas</strong> — parar independentemente do resultado</p>
+      <p>6. Stop diário: <strong>5% do saldo</strong>. Meta diária: <strong>3-5%</strong></p>
     </div>
-    <h3 id="g3">3. Estratégia</h3>
-    <p><strong>DIFFER:</strong> usar frequentemente para acumular pequenos ganhos. Ideal com saldo baixo.</p>
-    <p><strong>MATCHES:</strong> usar quando dígito atinge ≥15%. Um ganho paga 9 perdas. Usar valor menor ($0.35).</p>
-    <p><strong>Combinar:</strong> 1 MATCHES ganho cobre ~35 trades DIFFER.</p>
-    <h3 id="g4">4. Risco</h3>
+
+    <p style="color:var(--warning);font-size:10px">⚠️ Par/Ímpar é o método de maior risco por ter payout inferior a 100%. Usar com cautela e volume reduzido.</p>
+
+    <!-- ══════════ DIFFER ══════════ -->
+    <h3 id="g2">🎯 2. DIFFER (Digit Differs)</h3>
     <table>
-      <tr><th>Saldo</th><th>DIFFER</th><th>MATCHES</th><th>Stop diário</th></tr>
-      <tr><td>$20</td><td>$0.50</td><td>$0.35</td><td>$1.00</td></tr>
-      <tr><td>$50</td><td>$0.70</td><td>$0.35</td><td>$2.50</td></tr>
-      <tr><td>$100</td><td>$1.50</td><td>$0.50</td><td>$5.00</td></tr>
+      <tr><th>O que é</th><td>Aposta que o dígito menos frequente NÃO será o último dígito do tick.</td></tr>
+      <tr><th>Payout</th><td>6% a 20% do valor apostado. Apostas $0.50 → ganho ~$0.05 a $0.10.</td></tr>
+      <tr><th>Win rate real</th><td>85% a 95% dependendo da frequência do dígito escolhido.</td></tr>
+      <tr><th>Quando usar</th><td>Dígito verde com frequência abaixo de 7% e ausente nos últimos 15 ticks.</td></tr>
+      <tr><th>Quando NÃO usar</th><td>Mercado instável (entropia alta). Menos de 40 ticks na janela.</td></tr>
     </table>
-    <h3 id="g5">5. Erros Fatais</h3>
-    <p>❌ MATCHES com valor alto → $0.35 máximo. ❌ Continuar após 3 perdas seguidas → pausar 30 min. ❌ Operar sem entropia favorável.</p>
+
+    <p style="margin-top:8px"><strong>Estratégia — Acumulação constante (principal método):</strong></p>
+    <div style="background:#020617;border-radius:8px;padding:10px;border:1px solid var(--accent);margin-bottom:8px">
+      <p>1. Verificar que a plataforma mostra dígito <strong>verde</strong> com % abaixo de 7%</p>
+      <p>2. Confirmar que o dígito <strong>não apareceu</strong> nos últimos 15 ticks</p>
+      <p>3. Entropia deve ser "BEM DEFINIDO" ou "PREVISÍVEL"</p>
+      <p>4. Valor: <strong>$0.50 a $1.00</strong> por operação — nunca mais de 5% do saldo</p>
+      <p>5. Fazer operações <strong>espaçadas</strong> — não mais de 1 por ciclo de 10 ticks</p>
+      <p>6. O ganho é pequeno mas consistente — o objetivo é volume com segurança</p>
+      <p>7. Stop diário: <strong>5% do saldo</strong>. Meta diária: <strong>5-8%</strong></p>
+    </div>
+
+    <p><strong>Matemática do DIFFER:</strong></p>
+    <table>
+      <tr><th>Frequência do dígito</th><th>Chance de ganhar</th><th>Payout aprox.</th></tr>
+      <tr><td>5%</td><td>95%</td><td>~6%</td></tr>
+      <tr><td>7%</td><td>93%</td><td>~8%</td></tr>
+      <tr><td>10%</td><td>90%</td><td>~12%</td></tr>
+    </table>
+
+    <!-- ══════════ MATCHES ══════════ -->
+    <h3 id="g3">🎯 3. MATCHES (Digit Matches)</h3>
+    <table>
+      <tr><th>O que é</th><td>Aposta que o dígito mais frequente VAI ser o último dígito do tick.</td></tr>
+      <tr><th>Payout</th><td>~800% a 900% do valor apostado. Apostas $0.35 → ganho ~$3.00.</td></tr>
+      <tr><th>Win rate real</th><td>10% a 20% — probabilidade baixa, recompensa alta.</td></tr>
+      <tr><th>Quando usar</th><td>Dígito roxo com frequência acima de 15% E apareceu 2+ vezes nos últimos 5 dígitos lentos.</td></tr>
+      <tr><th>Quando NÃO usar</th><td>Nenhum dígito dominante visível. Após 5 perdas consecutivas neste modo.</td></tr>
+    </table>
+
+    <p style="margin-top:8px"><strong>Estratégia — Caçada de dominância:</strong></p>
+    <div style="background:#020617;border-radius:8px;padding:10px;border:1px solid var(--purple);margin-bottom:8px">
+      <p>1. Aguardar dígito <strong>roxo</strong> com frequência ≥ 15%</p>
+      <p>2. Confirmar que apareceu <strong>2 vezes nos últimos 5 dígitos lentos</strong></p>
+      <p>3. Entropia deve ser "BEM DEFINIDO"</p>
+      <p>4. Valor: <strong>sempre $0.35</strong> — nunca aumentar este valor</p>
+      <p>5. Máximo <strong>5 tentativas por sessão</strong> neste modo</p>
+      <p>6. Um ganho ($3.15) cobre <strong>9 perdas</strong> ($0.35 × 9 = $3.15)</p>
+      <p>7. Usar como <strong>complemento</strong> ao DIFFER, nunca como modo principal</p>
+    </div>
+
+    <p><strong>Matemática do MATCHES:</strong></p>
+    <table>
+      <tr><th>Tentativas</th><th>Custo total</th><th>1 ganho cobre</th></tr>
+      <tr><td>$0.35 × 9 perdas</td><td>$3.15</td><td>1 ganho = $3.15 ✅</td></tr>
+      <tr><td>$0.35 × 5 perdas</td><td>$1.75</td><td>1 ganho = lucro $1.40 ✅</td></tr>
+    </table>
+
+    <!-- ══════════ PLANO $20 → $100 ══════════ -->
+    <h3 id="g4">📈 4. PLANO $20 → $100 EM 30 DIAS</h3>
+    <p style="color:var(--warning);font-size:10px;margin-bottom:8px">⚠️ Este plano exige disciplina absoluta. Sem disciplina, qualquer plano falha.</p>
+
+    <p><strong>Meta diária realista: 5% do saldo</strong></p>
+    <table>
+      <tr><th>Semana</th><th>Saldo início</th><th>Meta diária</th><th>Saldo fim</th></tr>
+      <tr><td>Semana 1</td><td>$20.00</td><td>~$1.00</td><td>~$27.00</td></tr>
+      <tr><td>Semana 2</td><td>$27.00</td><td>~$1.35</td><td>~$36.00</td></tr>
+      <tr><td>Semana 3</td><td>$36.00</td><td>~$1.80</td><td>~$49.00</td></tr>
+      <tr><td>Semana 4</td><td>$49.00</td><td>~$2.45</td><td>~$66.00</td></tr>
+      <tr><td>+ 5 dias</td><td>$66.00</td><td>~$3.30</td><td>~$100.00 ✅</td></tr>
+    </table>
+
+    <p style="margin-top:8px"><strong>Distribuição diária recomendada:</strong></p>
+    <div style="background:#020617;border-radius:8px;padding:10px;border:1px solid var(--accent);margin-bottom:8px">
+      <p>🎯 <strong>70% do tempo:</strong> DIFFER — construir base sólida de ganhos</p>
+      <p>🎯 <strong>20% do tempo:</strong> MATCHES — acelerar quando dígito dominante aparece</p>
+      <p>🎯 <strong>10% do tempo:</strong> PAR/ÍMPAR — apenas com streak claro e entropia boa</p>
+      <p>🛑 <strong>Atingiu a meta diária?</strong> Parar imediatamente. Não há segunda sessão.</p>
+      <p>🛑 <strong>Perdeu 5% do saldo?</strong> Parar imediatamente. Retomar amanhã.</p>
+    </div>
+
+    <p><strong>Regras de valores por saldo:</strong></p>
+    <table>
+      <tr><th>Saldo</th><th>DIFFER</th><th>MATCHES</th><th>PAR/ÍMPAR</th><th>Stop diário</th></tr>
+      <tr><td>$20-$30</td><td>$0.35</td><td>$0.35</td><td>$0.35</td><td>$1.00</td></tr>
+      <tr><td>$30-$50</td><td>$0.50</td><td>$0.35</td><td>$0.50</td><td>$1.75</td></tr>
+      <tr><td>$50-$75</td><td>$0.70</td><td>$0.35</td><td>$0.70</td><td>$2.50</td></tr>
+      <tr><td>$75-$100</td><td>$1.00</td><td>$0.35</td><td>$1.00</td><td>$3.75</td></tr>
+    </table>
+
+    <!-- ══════════ CONTROLO EMOCIONAL ══════════ -->
+    <h3 id="g5">🧠 5. CONTROLO EMOCIONAL</h3>
+    <div style="background:#1a0a0a;border-radius:8px;padding:12px;border:1px solid var(--danger);margin-bottom:8px">
+      <p style="color:var(--danger);font-weight:700;margin-bottom:6px">⚠️ 70-80% dos traders perdem dinheiro nos primeiros 3 meses. A causa principal não é estratégia — é emoção.</p>
+      <p>Após uma perda, o cérebro quer "recuperar" imediatamente. Este impulso é o maior inimigo do trader. Reconhecê-lo é o primeiro passo.</p>
+    </div>
+
+    <p><strong>Sinais de que está a operar com emoção:</strong></p>
+    <div style="background:#020617;border-radius:8px;padding:10px;margin-bottom:8px">
+      <p>❌ Aumentou o valor após uma perda sem motivo técnico</p>
+      <p>❌ Fez mais de 3 operações seguidas sem pausa</p>
+      <p>❌ Está a operar há mais de 45 minutos consecutivos</p>
+      <p>❌ Sente raiva, frustração ou euforia durante as operações</p>
+      <p>❌ Está a ignorar o stop-loss porque "desta vez vai ganhar"</p>
+    </div>
+
+    <p><strong>Protocolo após perda:</strong></p>
+    <div style="background:#020617;border-radius:8px;padding:10px;border:1px solid var(--warning);margin-bottom:8px">
+      <p>1. <strong>Parar imediatamente</strong> após 3 perdas seguidas</p>
+      <p>2. Fechar a plataforma e afastar-se do ecrã por <strong>mínimo 30 minutos</strong></p>
+      <p>3. Beber água. Respirar. Não é urgente — o mercado estará lá amanhã</p>
+      <p>4. Perguntar: <em>"Esta operação segue as minhas regras ou estou a tentar recuperar?"</em></p>
+      <p>5. Se a resposta for recuperar — <strong>não operar</strong></p>
+    </div>
+
+    <p><strong>Regras invioláveis:</strong></p>
+    <div style="background:#020617;border-radius:8px;padding:10px;border:2px solid var(--danger);margin-bottom:8px">
+      <p>🔴 Stop-loss diário atingido = sessão encerrada. Sem exceções.</p>
+      <p>🔴 Meta diária atingida = sessão encerrada. Sem exceções.</p>
+      <p>🔴 Nunca operar dinheiro que não pode perder.</p>
+      <p>🔴 Nunca aumentar valor para "recuperar" perdas.</p>
+      <p>🔴 Nunca operar com sono, stress ou pressa.</p>
+      <p>🟢 Lembrar: um dia ruim não destrói o plano. Abandonar o plano sim.</p>
+    </div>
+
+    <p style="text-align:center;color:var(--accent);font-size:11px;margin-top:8px">
+      "O trader que sobrevive é aquele que sabe quando NÃO operar."
+    </p>
   </div>
 </div>
 
@@ -347,7 +470,6 @@ async function autoConnect(){
             isConnected=true;
         } else if (d.status === 'connecting') {
             document.getElementById('conSt').textContent = '🔄 Auto-conectando...';
-            // 🔥 CORREÇÃO: polling progressivo em vez de setTimeout único
             let attempts = 0;
             const check = setInterval(() => {
                 attempts++;
@@ -404,7 +526,7 @@ function updateAll(){
       updateDigits(data.digits);
       const tr=data.digits.ticks_remaining;
       const btnOdd=document.getElementById('btnOdd'),btnEven=document.getElementById('btnEven'),blockerMsg=document.getElementById('digitBlockerMsg');
-      if(tr!==undefined&&tr<3){btnOdd.disabled=true;btnEven.disabled=true;blockerMsg.textContent=`⏳ Aguarde ${tr} tick(s)...`;}
+      if(tr!==undefined&&tr<2){btnOdd.disabled=true;btnEven.disabled=true;blockerMsg.textContent=`⏳ Aguarde ${tr} tick(s)...`;}
       else{btnOdd.disabled=false;btnEven.disabled=false;blockerMsg.textContent='';}
       if(data.digits.digit_frequencies)updateFreqGrid(data.digits.digit_frequencies,data.digits.least_frequent_digit,data.digits.most_frequent_digit);
     }
@@ -467,8 +589,36 @@ async function conectar(){
   const tok=document.getElementById('tokIn').value.trim();if(!tok){toast('❌ Token obrigatório','loss');return;}
   try{const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok,account_type:selectedAcct})});const d=await r.json();if(d.error){toast('❌ '+d.error,'loss');return;}toast('✅ Token guardado','win');document.getElementById('conSt').textContent='🔄 A conectar...';setTimeout(()=>{fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{if(d.status==='connecting')toast('🔄 Conectando...','info');});},500);}catch(e){toast('❌ Erro de rede','loss');}
 }
-async function connectWithDeriv(){
-  try{const r=await fetch('/api/auth/deriv_oauth_url');const d=await r.json();if(d.error){toast('❌ '+d.error,'loss');return;}const popup=window.open(d.url,'derivOAuth','width=800,height=700');const checkPopup=setInterval(()=>{if(!popup||popup.closed){clearInterval(checkPopup);toast('🔄 A processar autorização...','info',2000);setTimeout(async()=>{try{const connResp=await fetch('/api/connect',{method:'POST'});const connData=await connResp.json();if(connData.status==='connecting'){document.getElementById('conSt').textContent='🔄 A ligar...';isConnecting=true;setTimeout(()=>{updateAll();isConnecting=false;},2000);}else if(connData.error)toast('❌ '+connData.error,'loss');}catch(e){toast('❌ Erro ao conectar','loss');}},3000);}},500);}catch(e){toast('❌ Erro OAuth','loss');}
+// 🔴 CORREÇÃO: connectWithDeriv com polling progressivo
+async function connectWithDeriv() {
+    try {
+        const r = await fetch('/api/auth/deriv_oauth_url');
+        const d = await r.json();
+        if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
+        const popup = window.open(d.url, 'derivOAuth', 'width=800,height=700');
+        const checkPopup = setInterval(async () => {
+            if (!popup || popup.closed) {
+                clearInterval(checkPopup);
+                toast('🔄 A processar...', 'info', 2000);
+                await new Promise(r => setTimeout(r, 2000));
+                try {
+                    const connResp = await fetch('/api/connect', { method: 'POST' });
+                    const connData = await connResp.json();
+                    if (connData.status === 'connecting' || connData.status === 'connecting_already') {
+                        document.getElementById('conSt').textContent = '🔄 A ligar...';
+                        let attempts = 0;
+                        const check = setInterval(() => {
+                            attempts++;
+                            updateAll();
+                            if (isConnected || attempts >= 5) clearInterval(check);
+                        }, 2000);
+                    } else if (connData.error) {
+                        toast('❌ ' + connData.error, 'loss');
+                    }
+                } catch(e) { toast('❌ Erro ao conectar', 'loss'); }
+            }
+        }, 500);
+    } catch(e) { toast('❌ Erro OAuth', 'loss'); }
 }
 async function reconnectManual(){try{const resp=await fetch('/api/connect',{method:'POST'});const data=await resp.json();if(data.status==='connecting'){toast('🔄 A tentar ligar...','info');document.getElementById('conSt').textContent='🔄 A ligar...';setTimeout(updateAll,3000);}else if(data.error)toast('❌ '+data.error,'loss');}catch(e){toast('❌ Erro de rede','loss');}}
 async function disconnectWebSocket(){try{await fetch('/api/disconnect',{method:'POST'});toast('🔌 Desconectado','info');isConnected=false;document.getElementById('sDot').className='dot';document.getElementById('connStatus').textContent='Desconectado';document.getElementById('connectOAuthBtn').disabled=false;document.getElementById('connectTokenBtn').disabled=false;}catch(e){toast('❌ Erro','loss');}}
