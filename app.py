@@ -73,7 +73,11 @@ def decrypt_token(encrypted: str) -> str:
 # ==================== INICIALIZAÇÃO DA BASE DE DADOS ====================
 def init_db():
     os.makedirs(DATA_PATH, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH)
+    # 🔴 Correção 1: WAL mode + timeout
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=5000')
+
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         email TEXT PRIMARY KEY,
@@ -149,6 +153,14 @@ def init_db():
         result TEXT,
         profit REAL
     )''')
+    # 🔴 Correção 2: tabela para OAuth states
+    c.execute('''CREATE TABLE IF NOT EXISTS oauth_states (
+        state_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        account_type TEXT DEFAULT 'demo',
+        created_at REAL NOT NULL,
+        used INTEGER DEFAULT 0
+    )''')
     try:
         c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
     except sqlite3.OperationalError:
@@ -159,10 +171,27 @@ def init_db():
 
 init_db()
 
+# 🔴 Correção 3: Limpeza periódica de tokens expirados e OAuth states antigos
+def _cleanup_loop():
+    while True:
+        time.sleep(3600)
+        try:
+            conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+            conn.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
+            conn.execute("DELETE FROM oauth_states WHERE created_at < ?",
+                         (time.time() - OAUTH_STATE_TTL,))
+            conn.commit()
+            conn.close()
+            logger.debug("Limpeza periódica executada.")
+        except Exception as e:
+            logger.error(f"Erro na limpeza periódica: {e}")
+
+threading.Thread(target=_cleanup_loop, daemon=True).start()
+
 # ==================== CARREGAR MARKUP DA BASE DE DADOS ====================
 def load_markup_from_db():
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         row = conn.execute("SELECT value FROM settings WHERE key='markup_percentage'").fetchone()
         if row:
             from config import config
@@ -181,7 +210,7 @@ def migrate_from_json():
         return
     with open(json_path, 'r') as f:
         old = json.load(f)
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         for email, u in old.items():
             conn.execute('''INSERT OR IGNORE INTO users (email, id, name, password_hash, active_account,
@@ -221,7 +250,7 @@ migrate_from_json()
 class UserStore:
     @staticmethod
     def get(email):
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         try:
             row = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
             if not row:
@@ -244,7 +273,7 @@ class UserStore:
 
     @staticmethod
     def save(user):
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         try:
             daily_json = json.dumps(user.get('daily_stats')) if user.get('daily_stats') else None
             conn.execute('''INSERT OR REPLACE INTO users (email, id, name, password_hash, active_account,
@@ -295,7 +324,7 @@ class UserStore:
 
     @staticmethod
     def set_active_account(email, account_type):
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         try:
             conn.execute('UPDATE users SET active_account = ? WHERE email = ?', (account_type, email))
             conn.commit()
@@ -305,7 +334,7 @@ class UserStore:
 
     @staticmethod
     def add_token(email, account_type, token):
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         try:
             conn.execute('INSERT OR REPLACE INTO user_tokens (email, account_type, token) VALUES (?,?,?)',
                          (email, account_type, encrypt_token(token)))
@@ -333,7 +362,7 @@ class AuthService:
         h = generate_password_hash(password)
         user = UserStore.create_user(email, name, h, ref)
         if ref:
-            conn = sqlite3.connect(DATABASE_PATH)
+            conn = sqlite3.connect(DATABASE_PATH, timeout=10)
             try:
                 row = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref,)).fetchone()
                 if row:
@@ -350,13 +379,14 @@ class AuthService:
 # ==================== GESTOR DE SESSÃO WEBSOCKET ====================
 sessions = {}
 sessions_lock = threading.RLock()
-oauth_states = {}
-oauth_states_lock = threading.Lock()
 connecting_lock = threading.Lock()
 connecting_users = set()
 
-OAUTH_STATE_TTL = 900  # aumentado para 15 minutos
+OAUTH_STATE_TTL = 900
 OAUTH_STATE_REUSE_WINDOW = 30
+
+# 🔴 As variáveis globais oauth_states e oauth_states_lock foram removidas.
+# Agora o OAuth usa a tabela 'oauth_states' na BD.
 
 def reset_bot_state(bot):
     bot.reset_stats()
@@ -372,7 +402,7 @@ def validate_account_type(loginid, expected):
     return is_demo if expected == 'demo' else not is_demo
 
 def persist_trade(user_id, trade_data):
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         conn.execute('''INSERT OR REPLACE INTO trades
             (user_id, contract_id, symbol, action, amount, buy_price, sell_price, profit, result, timestamp)
@@ -395,7 +425,7 @@ def _save_daily_stats_to_db(email, bot):
         return
     try:
         stats_json = json.dumps(bot.get_daily_stats_for_db())
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         try:
             conn.execute('UPDATE users SET daily_stats_json = ? WHERE email = ?',
                          (stats_json, email))
@@ -408,7 +438,7 @@ def _save_daily_stats_to_db(email, bot):
 
 def _load_martingale_state(user_id, bot):
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         row = conn.execute('SELECT active, step, original_amount FROM martingale_state WHERE user_id = ?', 
                           (user_id,)).fetchone()
         conn.close()
@@ -422,7 +452,7 @@ def _load_martingale_state(user_id, bot):
 
 def _save_martingale_state(user_id, bot):
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         conn.execute('''INSERT OR REPLACE INTO martingale_state 
             (user_id, active, step, original_amount, last_updated)
             VALUES (?,?,?,?,?)''',
@@ -489,7 +519,7 @@ def create_session(user_id, user, force=False):
 
     def on_signal(signal_data):
         try:
-            conn = sqlite3.connect(DATABASE_PATH)
+            conn = sqlite3.connect(DATABASE_PATH, timeout=10)
             conn.execute('''INSERT INTO signals 
                 (user_id, timestamp, symbol, signal, confidence, tech_confidence, digit_confidence, digit_action, regime)
                 VALUES (?,?,?,?,?,?,?,?,?)''',
@@ -509,7 +539,7 @@ def create_session(user_id, user, force=False):
         if not signal_id:
             return
         try:
-            conn = sqlite3.connect(DATABASE_PATH)
+            conn = sqlite3.connect(DATABASE_PATH, timeout=10)
             conn.execute('UPDATE signals SET executed=1, result=?, profit=? WHERE id=?',
                          (result, profit, signal_id))
             conn.commit()
@@ -777,7 +807,7 @@ def reset_password():
         return jsonify({'error': 'Email não encontrado'}), 404
     token = secrets.token_urlsafe(64)
     hashed = hashlib.sha256(token.encode()).hexdigest()
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         conn.execute('INSERT OR REPLACE INTO password_resets (email, token_hash, expires_at, used) VALUES (?,?,?,0)',
                      (email, hashed, time.time() + 3600))
@@ -794,7 +824,7 @@ def reset_password_confirm():
     if not token or new_pw is None or len(new_pw) < 6:
         return jsonify({'error': 'Token ou senha inválidos'}), 400
     hashed = hashlib.sha256(token.encode()).hexdigest()
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         row = conn.execute('SELECT email FROM password_resets WHERE token_hash = ? AND used = 0 AND expires_at > ?',
                            (hashed, time.time())).fetchone()
@@ -959,14 +989,15 @@ def debug():
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
     })
 
-# ==================== OAUTH (CORRIGIDO) ====================
+# ==================== OAUTH (PERSISTIDO NA BD) ====================
 @app.route('/oauth/callback')
 def oauth_callback():
     state_id = request.args.get('state')
-    logger.info(f"📥 OAuth Callback recebido. State: {state_id}, Args: {request.args.to_dict()}")
+    logger.info(f"📥 OAuth Callback recebido. State: {state_id}, Session: {dict(session)}, Args: {request.args.to_dict()}")
     if not state_id:
         logger.error("🚫 Callback sem state!")
         return redirect('/?error=invalid_state')
+
     html = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>OAuth Callback</title></head>
@@ -1029,27 +1060,32 @@ def process_oauth():
     data = request.json
     state_id = data.get('state')
     tokens = data.get('tokens', [])
+    logger.info(f"📥 Process OAuth. State: {state_id}, Session: {dict(session)}, Tokens recebidos: {tokens}")
     if not state_id or not tokens:
         return jsonify({'error': 'Dados incompletos'}), 400
 
-    with oauth_states_lock:
-        # limpeza de states expirados
-        now = time.time()
-        for sid in list(oauth_states.keys()):
-            if now - oauth_states[sid].get('created_at', 0) > OAUTH_STATE_TTL:
-                del oauth_states[sid]
-                logger.debug(f"State expirado removido: {sid}")
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        # Buscar o estado na BD, desde que não usado e ainda dentro do TTL
+        row = conn.execute(
+            "SELECT user_id, account_type FROM oauth_states WHERE state_id = ? AND used = 0 AND created_at > ?",
+            (state_id, time.time() - OAUTH_STATE_TTL)
+        ).fetchone()
+        if not row:
+            logger.error(f"🚫 State '{state_id}' não encontrado ou já usado/expirado.")
+            return jsonify({'error': 'OAuth expirado. Por favor, inicie novamente.'}), 401
 
-        state_data = oauth_states.pop(state_id, None)
+        user_id = row[0]
+        account_type_request = row[1]
 
-    if not state_data:
-        logger.error(f"🚫 State '{state_id}' não encontrado. States ativos: {list(oauth_states.keys())}")
-        return jsonify({'error': 'OAuth expirado. Por favor, inicie novamente.'}), 401
+        # Marcar como usado imediatamente (evita reutilização)
+        conn.execute("UPDATE oauth_states SET used = 1 WHERE state_id = ?", (state_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
-    user_id = state_data['user_id']
-    account_type_request = state_data.get('account_type', 'demo')
-
-    conn = sqlite3.connect(DATABASE_PATH)
+    # Continuar com o fluxo (user_id garantido)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
         if not row:
@@ -1079,6 +1115,7 @@ def process_oauth():
     session.permanent = True
 
     create_session(user_id, user, force=True)
+    logger.info(f"✅ OAuth concluído para {email}")
     return jsonify({'status': 'ok'})
 
 @app.route('/api/auth/deriv_oauth_url')
@@ -1092,14 +1129,20 @@ def deriv_oauth_url():
     redirect_uri = base_url + '/oauth/callback'
     encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
     state_id = uuid.uuid4().hex
-    with oauth_states_lock:
-        oauth_states[state_id] = {
-            'user_id': session['user_id'],
-            'account_type': request.args.get('account_type', 'demo'),
-            'created_at': time.time(),
-            'used': False,
-            'used_at': None
-        }
+    # Persistir o estado na BD
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        conn.execute(
+            "INSERT INTO oauth_states (state_id, user_id, account_type, created_at) VALUES (?, ?, ?, ?)",
+            (state_id, session['user_id'], request.args.get('account_type', 'demo'), time.time())
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Erro ao criar state OAuth: {e}")
+        return jsonify({'error': 'Erro interno ao iniciar OAuth'}), 500
+    finally:
+        conn.close()
+
     url = (
         f"https://oauth.deriv.com/oauth2/authorize"
         f"?app_id={app_id}"
@@ -1341,7 +1384,7 @@ def candles_data():
 def signals_scoreboard():
     user_id = session['user_id']
     today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         total = conn.execute('SELECT COUNT(*) FROM signals WHERE user_id=? AND timestamp>=?',
                              (user_id, today_start)).fetchone()[0]
@@ -1367,7 +1410,7 @@ def credit_affiliate_commission(user_email, amount):
     if not user or not user.get('referral_code'):
         return
     ref_code = user['referral_code']
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         ref_user = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref_code,)).fetchone()
         if ref_user:
@@ -1389,7 +1432,7 @@ def affiliate_stats():
     user = UserStore.get(email)
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         referred_count = conn.execute(
             'SELECT COUNT(*) FROM referrals WHERE referrer_email = ?', (email,)
@@ -1412,7 +1455,7 @@ def affiliate_link():
     if not user:
         user_id = session.get('user_id')
         if user_id:
-            conn = sqlite3.connect(DATABASE_PATH)
+            conn = sqlite3.connect(DATABASE_PATH, timeout=10)
             try:
                 row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
                 if row:
@@ -1425,7 +1468,7 @@ def affiliate_link():
         return jsonify({'error': 'Utilizador não encontrado'}), 404
     if not user.get('referral_link_code'):
         ref_link = base64.b64encode(hashlib.md5(user['id'].encode()).digest()).hex()[:8]
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         try:
             conn.execute('UPDATE users SET referral_link_code = ? WHERE email = ?',
                          (ref_link, user['email']))
@@ -1445,7 +1488,7 @@ def affiliate_earnings():
     if not user:
         user_id = session.get('user_id')
         if user_id:
-            conn = sqlite3.connect(DATABASE_PATH)
+            conn = sqlite3.connect(DATABASE_PATH, timeout=10)
             try:
                 row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
                 if row:
@@ -1456,7 +1499,7 @@ def affiliate_earnings():
                 conn.close()
     if not user:
         return jsonify({'error': 'Utilizador não encontrado'}), 404
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         referred_count = conn.execute('SELECT COUNT(*) FROM referrals WHERE referrer_email = ?',
                                        (user['email'],)).fetchone()[0]
@@ -1507,7 +1550,7 @@ def withdraw():
 @app.route('/api/admin/users')
 @require_admin
 def admin_users():
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         rows = conn.execute('SELECT email, name, active FROM users').fetchall()
         return jsonify({'users': [{'email': r[0], 'name': r[1], 'active': bool(r[2])} for r in rows]})
@@ -1520,7 +1563,7 @@ def toggle_user():
     d = request.json
     email = d.get('email')
     en = d.get('enable', True)
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         conn.execute('UPDATE users SET active = ? WHERE email = ?', (1 if en else 0, email))
         conn.commit()
@@ -1535,7 +1578,7 @@ def admin_clear_tokens():
     email = d.get('email', '').strip().lower()
     user = UserStore.get(email) if email else None
     target_uid = user['id'] if user else None
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         if email:
             conn.execute('DELETE FROM user_tokens WHERE email = ?', (email,))
@@ -1561,7 +1604,7 @@ def admin_clear_tokens():
 @app.route('/api/admin/settings')
 @require_admin
 def admin_settings():
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         row = conn.execute("SELECT value FROM settings WHERE key='markup_percentage'").fetchone()
         markup = float(row[0]) if row else config.MARKUP_PERCENTAGE
@@ -1576,7 +1619,7 @@ def set_markup():
     pct = float(d.get('percentage', 0.5))
     if not (0.0 <= pct <= 3.0):
         return jsonify({'error': 'Percentagem deve estar entre 0% e 3%'}), 400
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('markup_percentage', ?)",
                      (str(pct),))
