@@ -73,7 +73,6 @@ def decrypt_token(encrypted: str) -> str:
 # ==================== INICIALIZAÇÃO DA BASE DE DADOS ====================
 def init_db():
     os.makedirs(DATA_PATH, exist_ok=True)
-    # 🔴 Correção 1: WAL mode + timeout
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA busy_timeout=5000')
@@ -153,7 +152,6 @@ def init_db():
         result TEXT,
         profit REAL
     )''')
-    # 🔴 Correção 2: tabela para OAuth states
     c.execute('''CREATE TABLE IF NOT EXISTS oauth_states (
         state_id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -171,7 +169,11 @@ def init_db():
 
 init_db()
 
-# 🔴 Correção 3: Limpeza periódica de tokens expirados e OAuth states antigos
+# ==================== CONSTANTES OAUTH (DEVEM PRECEDER A THREAD) ====================
+OAUTH_STATE_TTL = 900
+OAUTH_STATE_REUSE_WINDOW = 30
+
+# ==================== LIMPEZA PERIÓDICA ====================
 def _cleanup_loop():
     while True:
         time.sleep(3600)
@@ -382,12 +384,6 @@ sessions_lock = threading.RLock()
 connecting_lock = threading.Lock()
 connecting_users = set()
 
-OAUTH_STATE_TTL = 900
-OAUTH_STATE_REUSE_WINDOW = 30
-
-# 🔴 As variáveis globais oauth_states e oauth_states_lock foram removidas.
-# Agora o OAuth usa a tabela 'oauth_states' na BD.
-
 def reset_bot_state(bot):
     bot.reset_stats()
     bot.reset_martingale()
@@ -480,7 +476,14 @@ def create_session(user_id, user, force=False):
     from synthetics import DigitAnalyzer
 
     bot = TradingBot()
-    analyzer = DigitAnalyzer(max_digits=1000)
+    # 🔴 CORREÇÃO 1: parâmetros mais relaxados para DIFFER aparecer mais
+    analyzer = DigitAnalyzer(
+        max_digits=1000,
+        diff_min_window=40,
+        diff_max_pct=7,
+        diff_absent_ticks=15,
+        volatile_unique=9
+    )
 
     def on_trade_result(trade):
         try:
@@ -1066,7 +1069,6 @@ def process_oauth():
 
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
-        # Buscar o estado na BD, desde que não usado e ainda dentro do TTL
         row = conn.execute(
             "SELECT user_id, account_type FROM oauth_states WHERE state_id = ? AND used = 0 AND created_at > ?",
             (state_id, time.time() - OAUTH_STATE_TTL)
@@ -1078,13 +1080,11 @@ def process_oauth():
         user_id = row[0]
         account_type_request = row[1]
 
-        # Marcar como usado imediatamente (evita reutilização)
         conn.execute("UPDATE oauth_states SET used = 1 WHERE state_id = ?", (state_id,))
         conn.commit()
     finally:
         conn.close()
 
-    # Continuar com o fluxo (user_id garantido)
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
@@ -1129,7 +1129,6 @@ def deriv_oauth_url():
     redirect_uri = base_url + '/oauth/callback'
     encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
     state_id = uuid.uuid4().hex
-    # Persistir o estado na BD
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         conn.execute(
