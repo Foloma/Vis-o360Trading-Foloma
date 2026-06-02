@@ -74,9 +74,13 @@ class DerivWebSocketClient:
     def set_payment_system(self, p): 
         self.payment_system = p
         
+    # 🔴 CORREÇÃO 2: Log do token ao configurar
     def set_user_token(self, t):
+        if not t:
+            logger.error("❌ Token vazio recebido!")
+            return
         self.user_token = t
-        logger.info("🔑 Token configurado")
+        logger.info(f"🔑 Token configurado: {t[:8]}...")
 
     def connect(self):
         self._stop_event.set()
@@ -147,9 +151,15 @@ class DerivWebSocketClient:
         self.loginid = None
         self.auth_error = None
 
+    # 🔴 CORREÇÃO 1: Validar token antes de autorizar
     def _authorize_and_wait(self, timeout=10):
         if not self.user_token:
-            raise Exception("Token não configurado")
+            logger.error("🚫 Tentativa de autorizar sem token!")
+            return False
+        if len(self.user_token) < 10:
+            logger.error(f"🚫 Token suspeito (muito curto): '{self.user_token}'")
+            return False
+
         self.ws.send(json.dumps({"authorize": self.user_token, "req_id": self._next_req()}))
         self._auth_time = time.time()
         logger.info("🔐 Pedido de autorização enviado")
@@ -265,6 +275,7 @@ class DerivWebSocketClient:
         if self._watchdog_thread and self._watchdog_thread.is_alive():
             self._watchdog_thread.join(timeout=2)
 
+    # 🔴 CORREÇÃO 3: Watchdog menos agressivo (90s em vez de 45s)
     def _watchdog_loop(self):
         while not self._stop_event.is_set() and not self._watchdog_stop.is_set():
             if self._watchdog_stop.wait(timeout=10):
@@ -272,8 +283,8 @@ class DerivWebSocketClient:
             if not self.ws or not self.connected:
                 break
             if self.streaming and self._last_tick_time is not None:
-                if time.time() - self._last_tick_time > 45:
-                    logger.warning("🛑 Watchdog: >45s sem ticks. Forçando reconexão.")
+                if time.time() - self._last_tick_time > 90:
+                    logger.warning("🛑 Watchdog: >90s sem ticks. Forçando reconexão.")
                     self._close_connection()
                     break
             elif not self.streaming:
@@ -489,7 +500,6 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
-    # 🔥 NOVO: MATCHES
     def place_matches_trade(self, digit, amount):
         """
         Aposta que um dígito específico VAI ser o último dígito.
@@ -695,10 +705,19 @@ class DerivWebSocketClient:
         if cid in self.active_trades:
             del self.active_trades[cid]
 
+    # 🔴 CORREÇÃO 4: Erros OAuth com códigos específicos
     def _on_api_error(self, data):
         err = data.get('error', {})
+        code = err.get('code', 'N/A')
+        msg = err.get('message', 'desconhecido')
         self.auth_error = err
-        logger.error(f"API Error: {err.get('message', 'desconhecido')} (código: {err.get('code', 'N/A')})")
+        logger.error(f"❌ API Error: {msg} (código: {code})")
+        if code == 'InvalidToken':
+            logger.error("🔑 Token inválido — utilizador deve refazer OAuth")
+        elif code == 'AuthorizationRequired':
+            logger.error("🔒 Autorização necessária — token pode ter expirado")
+        elif code == 'RateLimit':
+            logger.warning("⏱️ Rate limit — aguardar antes de reconectar")
 
     def request_candles(self, symbol=None, granularity=60, count=50):
         symbol = symbol or self.current_symbol
