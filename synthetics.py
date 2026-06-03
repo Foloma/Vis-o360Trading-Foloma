@@ -142,9 +142,8 @@ class DigitAnalyzer:
 
     def _update_frequency(self, digit):
         """
-        🔴 CORREÇÃO: Bug de contagem que afetava DIFFER e MATCHES.
-        Antes removia o dígito antigo só se len >= 70, mas não guardava qual era.
-        Agora guarda o dígito que sai e só depois adiciona o novo.
+        Corrigido: remove o dígito mais antigo antes de adicionar o novo,
+        garantindo contagens exatas.
         """
         with self._lock:
             old = None
@@ -176,8 +175,12 @@ class DigitAnalyzer:
 
     def get_least_frequent_digit(self):
         """
-        DIFFER com critérios rigorosos.
-        Janela, percentagem e ausência agora configuráveis.
+        DIFFER com critérios rigorosos e filtro adicional de segurança:
+        - Janela mínima configurável
+        - Frequência < diff_max_pct
+        - Ausente nos últimos diff_absent_ticks da janela de frequência
+        - NÃO pode ter aparecido nos últimos 5 dígitos lentos (slow_digits)
+        - Volatilidade baixa
         """
         with self._lock:
             if len(self._digit_window) < self.diff_min_window:
@@ -193,11 +196,18 @@ class DigitAnalyzer:
             if pct >= self.diff_max_pct:
                 return None
 
+            # Verifica ausência na janela de frequência
             recent_n = list(self._digit_window)[-self.diff_absent_ticks:] if len(self._digit_window) >= self.diff_absent_ticks else []
             if least_digit in recent_n:
                 return None
 
-            logger.info(f"DIFFER disponível: dígito {least_digit} ({least_count}/{total} = {pct:.1f}%) — fora há {self.diff_absent_ticks}+ ticks")
+            # 🛡️ Filtro extra: não pode ter aparecido nos últimos 5 dígitos lentos
+            recent_slow_5 = list(self.slow_digits)[-5:] if len(self.slow_digits) >= 5 else []
+            if least_digit in recent_slow_5:
+                logger.info(f"DIFFER bloqueado: dígito {least_digit} apareceu nos últimos 5 dígitos lentos")
+                return None
+
+            logger.info(f"DIFFER disponível: dígito {least_digit} ({least_count}/{total} = {pct:.1f}%) — fora há {self.diff_absent_ticks}+ ticks e não nos últimos 5 lentos")
             return least_digit
 
     def get_most_frequent_digit(self):
@@ -218,11 +228,11 @@ class DigitAnalyzer:
             most_count = self._digit_counts[most_digit]
             pct = (most_count / total) * 100
 
-            if pct < 15:
+            if pct < 15:                     # threshold de 15%
                 return None
 
             recent_5 = list(self.slow_digits)[-5:] if len(self.slow_digits) >= 5 else []
-            if recent_5.count(most_digit) < 2:
+            if recent_5.count(most_digit) < 2:   # mínimo 2 ocorrências
                 return None
 
             logger.info(f"MATCHES disponível: dígito {most_digit} ({most_count}/{total} = {pct:.1f}%)")
