@@ -476,12 +476,13 @@ def create_session(user_id, user, force=False):
     from synthetics import DigitAnalyzer
 
     bot = TradingBot()
+    # 🔴 Parâmetros conservadores — menos operações mas com win rate elevada
     analyzer = DigitAnalyzer(
         max_digits=1000,
-        diff_min_window=40,
-        diff_max_pct=7,
-        diff_absent_ticks=15,
-        volatile_unique=9
+        diff_min_window=50,
+        diff_max_pct=5,
+        diff_absent_ticks=20,
+        volatile_unique=8
     )
 
     def on_trade_result(trade):
@@ -569,7 +570,7 @@ def create_session(user_id, user, force=False):
         'trading_bot': bot,
         'digit_analyzer': analyzer,
         'candles': [],
-        'matches_cooldown_until': 0       # 🔥 cooldown inicial
+        'matches_cooldown_until': 0
     }
 
     def on_candles(candles):
@@ -1000,7 +1001,7 @@ def debug():
         'ws_thread_alive': c._ws_thread.is_alive() if c._ws_thread else False,
         'pending_trade': c.pending_trade is not None,
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None,
-        # 🔥 Novos campos de latência e reconexão
+        # Campos de latência e reconexão
         'ping_ms': getattr(c, '_ping_ms', 0),
         'reconnect_count': getattr(c, '_reconnect_count', 0),
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
@@ -1257,7 +1258,7 @@ def trade_matches():
         if bot.stop_loss_active:
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
 
-        # 🔥 Verificar cooldown após perda recente
+        # Verificar cooldown após perda recente
         if time.time() < sess.get('matches_cooldown_until', 0):
             remaining = round(sess['matches_cooldown_until'] - time.time())
             return jsonify({'error': f'⏳ Cooldown MATCHES: aguarde {remaining}s'}), 400
