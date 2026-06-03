@@ -202,7 +202,7 @@
       <tr><td>10%</td><td>90%</td><td>~12%</td></tr>
     </table>
 
-    <!-- ══════════ MATCHES ══════════ -->
+    <!-- ══════════ MATCHES (com limite de 10 tentativas) ══════════ -->
     <h3 id="g3">🎯 3. MATCHES (Digit Matches)</h3>
     <table>
       <tr><th>O que é</th><td>Aposta que o dígito mais frequente VAI ser o último dígito do tick.</td></tr>
@@ -218,9 +218,10 @@
       <p>2. Confirmar que apareceu <strong>2 vezes nos últimos 5 dígitos lentos</strong></p>
       <p>3. Entropia deve ser "BEM DEFINIDO"</p>
       <p>4. Valor: <strong>sempre $0.35</strong> — nunca aumentar este valor</p>
-      <p>5. Máximo <strong>5 tentativas por sessão</strong> neste modo</p>
-      <p>6. Um ganho ($3.15) cobre <strong>9 perdas</strong> ($0.35 × 9 = $3.15)</p>
-      <p>7. Usar como <strong>complemento</strong> ao DIFFER, nunca como modo principal</p>
+      <p>5. Máximo <strong>10 tentativas por sessão</strong> — sempre $0.35</p>
+      <p>6. Matemática: 10 × $0.35 = $3.50 risco máximo | probabilidade de 1 ganho = ~80%</p>
+      <p>7. Um ganho ($3.15) cobre <strong>9 perdas</strong> ($0.35 × 9 = $3.15)</p>
+      <p>8. Usar como <strong>complemento</strong> ao DIFFER, nunca como modo principal</p>
     </div>
 
     <p><strong>Matemática do MATCHES:</strong></p>
@@ -538,6 +539,18 @@ function updateAll(){
     }).catch(()=>{});
     updateHistSummary(bot);
     if(!candleChart)initCandleChart();
+
+    // 🔥 Mostrar ping e reconexões
+    if(isConnected){
+      fetch('/api/debug').then(r=>r.json()).then(d=>{
+        if(d.ping_ms !== undefined){
+          const ping = d.ping_ms;
+          const cor = ping < 100 ? 'var(--accent)' : ping < 250 ? 'var(--warning)' : 'var(--danger)';
+          document.getElementById('conSt').innerHTML =
+            `✅ Ping: <span style="color:${cor}">${ping}ms</span> | Reconexões: ${d.reconnect_count}`;
+        }
+      }).catch(()=>{});
+    }
   }).catch(()=>{});
 }
 
