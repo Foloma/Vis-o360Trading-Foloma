@@ -29,13 +29,14 @@ class TradingBot:
         self.stats = {
             'total': 0, 'wins': 0, 'losses': 0,
             'win_rate': 0, 'profit_loss': 0,
-            'total_invested': 0, 'total_return': 0
+            'total_invested': 0, 'total_return': 0,
+            'expired_trades': 0     # 🔥 novo contador
         }
 
         self.daily_stats = {
             'date': datetime.now().date(), 'trades': 0,
             'wins': 0, 'losses': 0, 'profit_loss': 0,
-            'start_balance': 0
+            'start_balance': 0, 'expired_trades': 0   # 🔥 novo campo
         }
 
         self.trades = deque(maxlen=100)
@@ -257,7 +258,7 @@ class TradingBot:
         self.daily_stats = {
             'date': datetime.now().date(), 'trades': 0,
             'wins': 0, 'losses': 0, 'profit_loss': 0,
-            'start_balance': self.balance
+            'start_balance': self.balance, 'expired_trades': 0
         }
         self.stop_loss_active = False
         self._daily_stats_dirty = True
@@ -274,7 +275,8 @@ class TradingBot:
                             'wins': saved.get('wins', 0),
                             'losses': saved.get('losses', 0),
                             'profit_loss': saved.get('profit_loss', 0),
-                            'start_balance': saved.get('start_balance', self.balance)
+                            'start_balance': saved.get('start_balance', self.balance),
+                            'expired_trades': saved.get('expired_trades', 0)
                         }
                         self.stop_loss_active = saved.get('stop_loss_active', False)
                     logger.info(f"📂 Estatísticas diárias carregadas da BD: {self.daily_stats}")
@@ -326,17 +328,18 @@ class TradingBot:
         for trade in list(self.trades):
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
-                is_digit = trade.get('is_digit', False)
-                timeout = 120 if is_digit else 90
+                timeout = 180  # 🔥 180 segundos para todos os modos
                 if elapsed > timeout:
                     with self._state_lock:
                         trade['result'] = 'loss'
                         trade['profit'] = 0
                         self.daily_stats['losses'] += 1
                         self.daily_stats['profit_loss'] -= trade.get('amount', 0)
+                        self.stats['expired_trades'] += 1       # 🔥 contabiliza expirado
+                        self.daily_stats['expired_trades'] += 1
                         self._daily_stats_dirty = True
                         updated = True
-                    logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')}")
+                    logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')} (ID: {trade.get('contract_id')})")
         if updated:
             self.update_stats()
 
@@ -352,7 +355,7 @@ class TradingBot:
                         target_trade = trade
                         break
 
-            # 🔥 CORREÇÃO: Fallback para o último trade pendente se o contract_id não bater
+            # Fallback para o último trade pendente se o contract_id não bater
             if not target_trade:
                 with self._state_lock:
                     pending = [t for t in self.trades if t.get('result') == 'pending']
@@ -385,7 +388,8 @@ class TradingBot:
                     self.daily_stats['profit_loss'] -= loss
                     self.consecutive_losses += 1
                     self.consecutive_wins = 0
-                    logger.info(f"❌ PERDA! -${loss:.2f} | Perdas consecutivas: {self.consecutive_losses}")
+                    # 🔥 Log detalhado do motivo da perda
+                    logger.info(f"❌ PERDA! -${loss:.2f} | Contrato: {contract_id} | Ação: {target_trade.get('action')} | Perdas consecutivas: {self.consecutive_losses}")
                 self._daily_stats_dirty = True
             self.update_stats()
             if self.client:
@@ -419,7 +423,8 @@ class TradingBot:
                     'win_rate': round(self.stats['win_rate'], 2),
                     'profit_loss': round(self.stats['profit_loss'], 2),
                     'total_invested': round(self.stats['total_invested'], 2),
-                    'total_return': round(self.stats['total_return'], 2)
+                    'total_return': round(self.stats['total_return'], 2),
+                    'expired_trades': self.stats['expired_trades']   # 🔥 visível no relatório
                 },
                 'historico': [{
                     'time': t['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
@@ -437,7 +442,8 @@ class TradingBot:
             self.stats = {
                 'total': 0, 'wins': 0, 'losses': 0,
                 'win_rate': 0, 'profit_loss': 0,
-                'total_invested': 0, 'total_return': 0
+                'total_invested': 0, 'total_return': 0,
+                'expired_trades': 0
             }
             self.trades.clear()
             self.consecutive_losses = 0
