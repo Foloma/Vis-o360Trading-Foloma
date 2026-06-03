@@ -67,7 +67,7 @@ class DerivWebSocketClient:
         self._last_reconnect_time = 0
         self._ping_ms = 0
         self._reconnect_count = 0
-        self._ping_sent_at = 0        # ← correção da medição de ping
+        self._ping_sent_at = 0
 
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
@@ -117,6 +117,9 @@ class DerivWebSocketClient:
                     self._subscribe_ticks(self.current_symbol)
                     self.request_candles(self.current_symbol)
 
+                # 🔥 Reassinar contratos ativos que ficaram pendentes
+                self._resubscribe_active_trades()
+
                 if self._had_gap and not self._first_connect and self.trading_bot:
                     logger.warning("🕳️ Gap detetado – a limpar dados históricos do bot")
                     if hasattr(self.trading_bot, 'reset_price_history'):
@@ -149,7 +152,7 @@ class DerivWebSocketClient:
         with self._pending_lock:
             self.pending_trade = None
         self.pending_trade_time = 0
-        self.active_trades.clear()
+        # Não limpar active_trades aqui para reassinar depois
         self._balance_subscribed = False
         self.connected = False
         self.authorized = False
@@ -239,7 +242,7 @@ class DerivWebSocketClient:
                 'proposal_open_contract': self._on_poc,
                 'error':                  self._on_api_error,
                 'candles':                self._on_candles,
-                'pong':                   self._on_pong,       # ← handler de pong
+                'pong':                   self._on_pong,
             }
             handler = handlers.get(msg_type)
             if handler:
@@ -266,7 +269,7 @@ class DerivWebSocketClient:
                 break
             if self.ws and self.connected:
                 try:
-                    self._ping_sent_at = time.time()       # ← envia apenas o timestamp
+                    self._ping_sent_at = time.time()
                     self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
                 except Exception:
                     break
@@ -274,7 +277,6 @@ class DerivWebSocketClient:
                 break
 
     def _on_pong(self, data):
-        """Medição real de latência (round‑trip)"""
         if self._ping_sent_at:
             self._ping_ms = round((time.time() - self._ping_sent_at) * 1000)
             logger.debug(f"🏓 Ping: {self._ping_ms}ms")
@@ -617,7 +619,6 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return
             if self.pending_trade:
-                # capturar timestamp da proposta para medir latência
                 trade_timestamp = self.pending_trade.get('timestamp', time.time())
 
                 amt = self.pending_trade.get('amount', 0)
@@ -627,7 +628,6 @@ class DerivWebSocketClient:
                 is_matches = self.pending_trade.get('is_matches', False)
                 digit_barrier = self.pending_trade.get('digit_barrier')
 
-                # log de latência proposta → compra
                 latency_ms = round((time.time() - trade_timestamp) * 1000)
                 logger.info(f"⚡ Latência proposta→compra: {latency_ms}ms")
                 if latency_ms > 300:
@@ -668,11 +668,29 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro subs. contrato {cid}: {e}")
 
+    def _resubscribe_active_trades(self):
+        """Reassina todos os contratos ativos após uma reconexão."""
+        if not self.active_trades:
+            return
+        logger.info(f"🔄 Reassinar {len(self.active_trades)} contrato(s) ativo(s)...")
+        for cid in list(self.active_trades.keys()):
+            try:
+                self.ws.send(json.dumps({
+                    "proposal_open_contract": 1,
+                    "contract_id": cid,
+                    "subscribe": 1,
+                    "req_id": self._next_req()
+                }))
+                logger.info(f"📎 Reassinar contrato {cid}")
+            except Exception as e:
+                logger.error(f"Falha ao reassinar contrato {cid}: {e}")
+
     def _on_poc(self, data):
         c = data.get('proposal_open_contract', {})
         cid = c.get('contract_id')
         if not cid or not c.get('is_sold'):
             return
+        logger.info(f"📦 POC recebido: contract_id={cid}, is_sold={c.get('is_sold')}")
         with self._processed_lock:
             if cid in self._processed_contracts:
                 return
