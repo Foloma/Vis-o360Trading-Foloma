@@ -476,7 +476,6 @@ def create_session(user_id, user, force=False):
     from synthetics import DigitAnalyzer
 
     bot = TradingBot()
-    # 🔴 CORREÇÃO 1: parâmetros mais relaxados para DIFFER aparecer mais
     analyzer = DigitAnalyzer(
         max_digits=1000,
         diff_min_window=40,
@@ -499,6 +498,16 @@ def create_session(user_id, user, force=False):
                 'result': result
             })
             _save_martingale_state(user_id, bot)
+
+            # 🔥 Cooldown MATCHES após perda
+            if result == 'loss':
+                action = trade.get('action', '')
+                if action.startswith('MATCH'):
+                    sess = sessions.get(user_id)
+                    if sess:
+                        sess['matches_cooldown_until'] = time.time() + 150
+                        logger.info(f"⏳ MATCHES cooldown ativado até {datetime.fromtimestamp(sess['matches_cooldown_until']).strftime('%H:%M:%S')}")
+
         except Exception as e:
             logger.error(f"Callback de trade falhou: {e}")
 
@@ -559,7 +568,8 @@ def create_session(user_id, user, force=False):
         'client': client,
         'trading_bot': bot,
         'digit_analyzer': analyzer,
-        'candles': []
+        'candles': [],
+        'matches_cooldown_until': 0       # 🔥 cooldown inicial
     }
 
     def on_candles(candles):
@@ -989,7 +999,11 @@ def debug():
         'loginid': c.loginid if hasattr(c,'loginid') else None,
         'ws_thread_alive': c._ws_thread.is_alive() if c._ws_thread else False,
         'pending_trade': c.pending_trade is not None,
-        'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None
+        'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None,
+        # 🔥 Novos campos de latência e reconexão
+        'ping_ms': getattr(c, '_ping_ms', 0),
+        'reconnect_count': getattr(c, '_reconnect_count', 0),
+        'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
 
 # ==================== OAUTH (PERSISTIDO NA BD) ====================
@@ -1230,7 +1244,7 @@ def trade_differ():
         logger.exception("Erro trade differ")
         return jsonify({'error': 'Erro interno'}), 500
 
-# 🔥 MATCHES
+# 🔥 MATCHES (com cooldown)
 @app.route('/api/trade/matches', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1242,6 +1256,12 @@ def trade_matches():
         bot = sess['trading_bot']
         if bot.stop_loss_active:
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+
+        # 🔥 Verificar cooldown após perda recente
+        if time.time() < sess.get('matches_cooldown_until', 0):
+            remaining = round(sess['matches_cooldown_until'] - time.time())
+            return jsonify({'error': f'⏳ Cooldown MATCHES: aguarde {remaining}s'}), 400
+
         d = request.json
         amt = float(d.get('amount', 0.35))
         if amt < 0.35 or amt > 100:
