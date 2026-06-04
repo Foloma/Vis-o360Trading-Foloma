@@ -117,7 +117,6 @@ class DerivWebSocketClient:
                     self._subscribe_ticks(self.current_symbol)
                     self.request_candles(self.current_symbol)
 
-                # 🔥 Reassinar contratos ativos que ficaram pendentes
                 self._resubscribe_active_trades()
 
                 if self._had_gap and not self._first_connect and self.trading_bot:
@@ -152,7 +151,6 @@ class DerivWebSocketClient:
         with self._pending_lock:
             self.pending_trade = None
         self.pending_trade_time = 0
-        # Não limpar active_trades aqui para reassinar depois
         self._balance_subscribed = False
         self.connected = False
         self.authorized = False
@@ -669,10 +667,18 @@ class DerivWebSocketClient:
             logger.error(f"Erro subs. contrato {cid}: {e}")
 
     def _resubscribe_active_trades(self):
-        """Reassina todos os contratos ativos após uma reconexão."""
         if not self.active_trades:
             return
-        logger.info(f"🔄 Reassinar {len(self.active_trades)} contrato(s) ativo(s)...")
+        # Limpar trades com mais de 5 minutos
+        now = time.time()
+        expired = [cid for cid, t in self.active_trades.items()
+                   if now - t.get('timestamp', now) > 300]
+        for cid in expired:
+            logger.warning(f"⚠️ Trade {cid} expirado após reconexão — removido")
+            del self.active_trades[cid]
+        if not self.active_trades:
+            return
+        logger.info(f"🔄 Reassinar {len(self.active_trades)} contrato(s)...")
         for cid in list(self.active_trades.keys()):
             try:
                 self.ws.send(json.dumps({
@@ -681,9 +687,8 @@ class DerivWebSocketClient:
                     "subscribe": 1,
                     "req_id": self._next_req()
                 }))
-                logger.info(f"📎 Reassinar contrato {cid}")
             except Exception as e:
-                logger.error(f"Falha ao reassinar contrato {cid}: {e}")
+                logger.error(f"Falha ao reassinar {cid}: {e}")
 
     def _on_poc(self, data):
         c = data.get('proposal_open_contract', {})
@@ -698,9 +703,14 @@ class DerivWebSocketClient:
 
         bp, sp = c.get('buy_price', 0), c.get('sell_price', 0)
         profit = sp - bp
-        amt = self.active_trades.get(cid, {}).get('amount', bp)
         is_win = profit > 0
+        # Log de diagnóstico detalhado
+        logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}")
+
         trade_info = self.active_trades.get(cid, {})
+        if not trade_info:
+            logger.warning(f"⚠️ POC para contrato desconhecido: {cid}")
+
         is_digit = trade_info.get('is_digit', False)
         is_differ = trade_info.get('is_differ', False)
         is_matches = trade_info.get('is_matches', False)
@@ -721,7 +731,7 @@ class DerivWebSocketClient:
                 'buy_price': bp,
                 'sell_price': sp,
                 'profit': profit,
-                'amount': amt,
+                'amount': trade_info.get('amount', bp),
                 'is_win': is_win
             })
         if self.on_result_callback:
@@ -729,7 +739,7 @@ class DerivWebSocketClient:
                 'contract_id': cid,
                 'symbol': trade_info.get('symbol', self.current_symbol),
                 'action': trade_info.get('action', ''),
-                'amount': amt,
+                'amount': trade_info.get('amount', bp),
                 'buy_price': bp,
                 'sell_price': sp,
                 'profit': profit,
