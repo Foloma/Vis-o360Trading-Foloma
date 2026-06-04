@@ -11,10 +11,8 @@ logger = logging.getLogger(__name__)
 class TradingBot:
     """
     Versão focada exclusivamente em DÍGITOS.
-    Os modos Ativos e Híbrido foram desativados por falta de eficácia comprovada.
-    O sinal agora depende apenas do DigitAnalyzer, com dois filtros:
-    1. Entropia favorável (BEM DEFINIDO ou PREVISÍVEL)
-    2. Confiança mínima (>= 60%)
+    O sinal agora é orquestrado pelo StrategyManager (módulo strategy.py),
+    mas o bot mantém a gestão de trades, estatísticas e risco.
     """
     def __init__(self):
         self.client = None
@@ -25,18 +23,19 @@ class TradingBot:
         self.paused = False
         self.stop_loss_active = False
         self.digit_analyzer = None
+        self.strategy = None  # será injetado pelo app.py
 
         self.stats = {
             'total': 0, 'wins': 0, 'losses': 0,
             'win_rate': 0, 'profit_loss': 0,
             'total_invested': 0, 'total_return': 0,
-            'expired_trades': 0     # 🔥 novo contador
+            'expired_trades': 0
         }
 
         self.daily_stats = {
             'date': datetime.now().date(), 'trades': 0,
             'wins': 0, 'losses': 0, 'profit_loss': 0,
-            'start_balance': 0, 'expired_trades': 0   # 🔥 novo campo
+            'start_balance': 0, 'expired_trades': 0
         }
 
         self.trades = deque(maxlen=100)
@@ -57,7 +56,6 @@ class TradingBot:
         self.on_signal_result_callback = None
         self._last_signal_id = None
 
-        # Cache do último sinal emitido (evita spam na BD)
         self._last_emitted_signal = None
 
     def start(self, client):
@@ -122,27 +120,12 @@ class TradingBot:
         self.check_take_profit()
 
     def feed_candle_data(self, high, low, close):
-        """
-        🔥 NOVO: Recebe dados de high/low das velas para alimentar
-        os indicadores (ATR/ADX). Chamado pelo deriv_client quando as velas chegam.
-        """
         pass
 
     def calculate_signal(self):
-        """
-        Devolve sempre NEUTRAL para manter compatibilidade com rotas de Ativos/Híbrido.
-        Estas rotas bloqueiam o trade porque a confiança é 0.
-        """
         return 'NEUTRAL', 0
 
     def get_digit_signal(self):
-        """
-        Sinal de dígito com apenas dois filtros:
-        1. Entropia favorável (BEM DEFINIDO ou PREVISÍVEL)
-        2. Confiança >= 60%
-        
-        Só emite callback quando o sinal muda (evita spam na BD).
-        """
         if not self.digit_analyzer:
             return None, 0
 
@@ -151,7 +134,6 @@ class TradingBot:
         conf = analysis.get('confidence', 0)
         entropy_verdict = analysis.get('entropy_verdict', '---')
 
-        # Reset se não há sinal válido
         if entropy_verdict not in ('BEM DEFINIDO', 'PREVISÍVEL'):
             self._last_emitted_signal = None
             return None, 0
@@ -160,7 +142,6 @@ class TradingBot:
             self._last_emitted_signal = None
             return None, 0
 
-        # Só notifica se o sinal for diferente do último emitido
         if self.on_signal_callback and action != self._last_emitted_signal:
             self._last_emitted_signal = action
             try:
@@ -328,14 +309,14 @@ class TradingBot:
         for trade in list(self.trades):
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
-                timeout = 180  # 🔥 180 segundos para todos os modos
+                timeout = 180
                 if elapsed > timeout:
                     with self._state_lock:
                         trade['result'] = 'loss'
                         trade['profit'] = 0
                         self.daily_stats['losses'] += 1
                         self.daily_stats['profit_loss'] -= trade.get('amount', 0)
-                        self.stats['expired_trades'] += 1       # 🔥 contabiliza expirado
+                        self.stats['expired_trades'] += 1
                         self.daily_stats['expired_trades'] += 1
                         self._daily_stats_dirty = True
                         updated = True
@@ -355,7 +336,6 @@ class TradingBot:
                         target_trade = trade
                         break
 
-            # Fallback para o último trade pendente se o contract_id não bater
             if not target_trade:
                 with self._state_lock:
                     pending = [t for t in self.trades if t.get('result') == 'pending']
@@ -388,12 +368,17 @@ class TradingBot:
                     self.daily_stats['profit_loss'] -= loss
                     self.consecutive_losses += 1
                     self.consecutive_wins = 0
-                    # 🔥 Log detalhado do motivo da perda
                     logger.info(f"❌ PERDA! -${loss:.2f} | Contrato: {contract_id} | Ação: {target_trade.get('action')} | Perdas consecutivas: {self.consecutive_losses}")
                 self._daily_stats_dirty = True
+
             self.update_stats()
             if self.client:
                 self.client.get_balance()
+
+            # Notificar o StrategyManager
+            if self.strategy:
+                action = target_trade.get('action', '')
+                self.strategy.notify_result(action, is_win)
 
             if self.on_signal_result_callback and self._last_signal_id:
                 try:
@@ -424,7 +409,7 @@ class TradingBot:
                     'profit_loss': round(self.stats['profit_loss'], 2),
                     'total_invested': round(self.stats['total_invested'], 2),
                     'total_return': round(self.stats['total_return'], 2),
-                    'expired_trades': self.stats['expired_trades']   # 🔥 visível no relatório
+                    'expired_trades': self.stats['expired_trades']
                 },
                 'historico': [{
                     'time': t['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
