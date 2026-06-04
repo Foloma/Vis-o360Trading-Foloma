@@ -105,7 +105,16 @@
     .tf-btn { padding: 3px 8px; background: #020617; border: 1px solid var(--border); color: var(--text); border-radius: 10px; font-size: 10px; cursor: pointer; }
     .tf-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
-  </style>
+
+    /* Estratégia – indicadores de estado */
+    .strategy-indicators { display: flex; gap: 6px; margin-bottom: 6px; }
+    .strat-badge { font-size: 9px; padding: 3px 8px; border-radius: 12px; font-weight: 700; text-align: center; }
+    .strat-badge.ready { background: var(--accent); color: #000; }
+    .strat-badge.blocked { background: var(--danger); color: #fff; }
+    .strat-badge.warning { background: var(--warning); color: #000; }
+    .strat-info { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+    .strat-info .dot { width: 6px; height: 6px; }
+</style>
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -319,6 +328,8 @@
       </div>
       <div id="conSt" style="text-align:center;font-size:10px;color:#ffaa00"></div>
       <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:2px">Preço: <span id="priceEl" style="color:var(--accent)">---</span></div>
+      <!-- Indicadores da estratégia -->
+      <div id="strategyStatus" style="margin-top:6px; font-size:10px;"></div>
     </div>
 
     <!-- PLACAR DE SINAIS -->
@@ -539,6 +550,11 @@ function updateAll(){
     }).catch(()=>{});
     updateHistSummary(bot);
     if(!candleChart)initCandleChart();
+
+    // 🔥 Atualizar estado da estratégia
+    if(data.strategy){
+      updateStrategyDisplay(data.strategy);
+    }
   }).catch(()=>{});
 }
 
@@ -584,6 +600,41 @@ function updateHistSummary(bot){
   if(!sum||!s)return;
   const pl=s.profit_loss||0,cor=pl>=0?'var(--accent)':'var(--danger)',sinal=pl>=0?'+':'';
   sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${s.total||0}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WIN RATE</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${s.win_rate||0}%</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">P/L</div><div style="font-size:16px;font-weight:bold;color:${cor}">${sinal}$${Math.abs(pl).toFixed(2)}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${d?d.trades:0}</div></div>`;
+}
+
+function updateStrategyDisplay(strategy){
+  if(!strategy) return;
+  const el = document.getElementById('strategyStatus');
+  if(!el) return;
+  let html = '<div class="strategy-indicators">';
+
+  // Estado global
+  if(strategy.global_stop){
+    html += '<span class="strat-badge blocked">🛑 STOP GLOBAL</span>';
+  } else if(strategy.cooldown){
+    html += '<span class="strat-badge warning">⏳ COOLDOWN</span>';
+  } else {
+    html += '<span class="strat-badge ready">✅ ATIVO</span>';
+  }
+
+  // Módulos
+  html += '<span class="strat-badge ' + (strategy.differ_available ? 'ready' : 'blocked') + '">DIFFER</span>';
+  html += '<span class="strat-badge ' + (strategy.parity_available ? 'ready' : 'blocked') + '">PAR/ÍMPAR</span>';
+  html += '<span class="strat-badge ' + (strategy.matches_available ? 'ready' : 'blocked') + '">MATCHES</span>';
+  html += '</div>';
+
+  // Info adicional
+  if(strategy.consecutive_losses > 0){
+    html += `<div style="font-size:9px;color:var(--danger);margin-top:2px">⚠️ ${strategy.consecutive_losses} perda(s) consecutiva(s)</div>`;
+  }
+  el.innerHTML = html;
+
+  // Desabilitar botões conforme disponibilidade
+  document.getElementById('btnDiffer').disabled = !strategy.differ_available;
+  document.getElementById('btnMatches').disabled = !strategy.matches_available;
+  // Par/Ímpar afeta ambos os botões
+  document.getElementById('btnOdd').disabled = !strategy.parity_available;
+  document.getElementById('btnEven').disabled = !strategy.parity_available;
 }
 
 async function conectar(){
@@ -651,7 +702,6 @@ function updateTokenDisplay(){fetch('/api/auth/status').then(r=>r.json()).then(d
 function toggleMenu(){document.getElementById('sideMenu').classList.toggle('open');document.getElementById('overlay').classList.toggle('show');}
 function showSec(s){document.querySelectorAll('#dashboard-section,#affiliate-section,#history-section,#payment-section,#settings-section,#admin-section').forEach(el=>el.classList.add('hidden'));document.getElementById(s+'-section').classList.remove('hidden');toggleMenu();if(s==='history')loadHistory();if(s==='affiliate')loadAffiliate();if(s==='admin')loadAdminUsers();if(s==='settings')updateTokenDisplay();}
 
-// 🔥 NOVA função de exibição do ping — atualiza a cada 10s
 function updatePingDisplay(){
     if(!isConnected) return;
     fetch('/api/debug').then(r=>{
@@ -671,7 +721,7 @@ function updatePingDisplay(){
 // Inicialização
 setInterval(()=>{if(isConnected)loadCandles();},10000);
 setInterval(updateScoreboard,30000);updateScoreboard();
-setInterval(updatePingDisplay, 10000);   // 🔥 ping atualizado separadamente
+setInterval(updatePingDisplay, 10000);
 (function(){const p=new URLSearchParams(location.search);if(p.get('connected')==='true'){toast('✅ Deriv conectada!','win',4000);if(!_updateInterval)startPolling();setTimeout(()=>{fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{if(d.status==='connecting'){document.getElementById('conSt').textContent='🔄 A ligar...';setTimeout(updateAll,2000);}}).catch(()=>{});},3000);setTimeout(updateAll,6000);history.replaceState({},'',location.pathname);}})();
 (function(){const p=new URLSearchParams(location.search);const ref=p.get('ref');if(ref){const el=document.getElementById('rRef');if(el)el.value=ref;}})();
 fetch('/api/auth/status').then(r=>r.json()).then(d=>{if(d.authenticated){if(d.user?.active_account)selectedAcct=d.user.active_account;document.getElementById('btnDemo').classList.toggle('active',selectedAcct==='demo');document.getElementById('btnReal').classList.toggle('active',selectedAcct==='real');if(d.user?.name)document.getElementById('userNameDisplay').textContent='👤 '+d.user.name;document.getElementById('authModal').style.display='none';document.body.classList.remove('modal-open');document.getElementById('mainContent').style.display='block';if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';initSyms();loadAffiliate();loadHistory();initCandleChart();setTimeout(loadCandles,3000);startPolling();if(d.user?.has_deriv_token)setTimeout(autoConnect,1500);updateTokenDisplay();}});
