@@ -169,11 +169,9 @@ def init_db():
 
 init_db()
 
-# ==================== CONSTANTES OAUTH (DEVEM PRECEDER A THREAD) ====================
 OAUTH_STATE_TTL = 900
 OAUTH_STATE_REUSE_WINDOW = 30
 
-# ==================== LIMPEZA PERIÓDICA ====================
 def _cleanup_loop():
     while True:
         time.sleep(3600)
@@ -190,7 +188,6 @@ def _cleanup_loop():
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
-# ==================== CARREGAR MARKUP DA BASE DE DADOS ====================
 def load_markup_from_db():
     try:
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
@@ -205,7 +202,6 @@ def load_markup_from_db():
 
 load_markup_from_db()
 
-# ==================== MIGRAÇÃO DE users.json ====================
 def migrate_from_json():
     json_path = os.path.join(DATA_PATH, 'users.json')
     if not os.path.exists(json_path):
@@ -344,7 +340,6 @@ class UserStore:
         finally:
             conn.close()
 
-# ==================== SERVIÇO DE AUTENTICAÇÃO ====================
 class AuthService:
     @staticmethod
     def login(email, password):
@@ -474,9 +469,9 @@ def create_session(user_id, user, force=False):
     from deriv_client import DerivWebSocketClient
     from trading_bot import TradingBot
     from synthetics import DigitAnalyzer
+    from strategy import StrategyManager
 
     bot = TradingBot()
-    # 🔴 Parâmetros conservadores — menos operações mas com win rate elevada
     analyzer = DigitAnalyzer(
         max_digits=1000,
         diff_min_window=50,
@@ -484,6 +479,15 @@ def create_session(user_id, user, force=False):
         diff_absent_ticks=20,
         volatile_unique=8
     )
+
+    client = DerivWebSocketClient(config, on_tick_callback=None, on_result_callback=None)
+    client.set_trading_bot(bot)
+    client.set_digit_analyzer(analyzer)
+    bot.client = client
+    bot.digit_analyzer = analyzer
+
+    # Instanciar o strategy
+    strategy = StrategyManager(client, analyzer)
 
     def on_trade_result(trade):
         try:
@@ -499,8 +503,10 @@ def create_session(user_id, user, force=False):
                 'result': result
             })
             _save_martingale_state(user_id, bot)
+            # Notificar o strategy
+            strategy.notify_result(trade.get('action', ''), trade.get('is_win', False))
 
-            # 🔥 Cooldown MATCHES após perda
+            # Cooldown MATCHES mantido
             if result == 'loss':
                 action = trade.get('action', '')
                 if action.startswith('MATCH'):
@@ -508,18 +514,18 @@ def create_session(user_id, user, force=False):
                     if sess:
                         sess['matches_cooldown_until'] = time.time() + 150
                         logger.info(f"⏳ MATCHES cooldown ativado até {datetime.fromtimestamp(sess['matches_cooldown_until']).strftime('%H:%M:%S')}")
-
         except Exception as e:
             logger.error(f"Callback de trade falhou: {e}")
 
-    def tick_callback(tick): 
+    # Callbacks de tick e resultado para o cliente
+    def tick_callback(tick):
         bot.on_tick(tick)
+        # Atualizar ausências no strategy
+        if strategy:
+            strategy.on_tick(tick)
 
-    client = DerivWebSocketClient(config, on_tick_callback=tick_callback, on_result_callback=on_trade_result)
-    client.set_trading_bot(bot)
-    client.set_digit_analyzer(analyzer)
-    bot.client = client
-    bot.digit_analyzer = analyzer
+    client.on_tick_callback = tick_callback
+    client.on_result_callback = on_trade_result
 
     saved_daily = user.get('daily_stats')
     if saved_daily:
@@ -569,6 +575,7 @@ def create_session(user_id, user, force=False):
         'client': client,
         'trading_bot': bot,
         'digit_analyzer': analyzer,
+        'strategy': strategy,
         'candles': [],
         'matches_cooldown_until': 0
     }
@@ -939,6 +946,7 @@ def status():
     client = sess['client']
     bot = sess['trading_bot']
     analyzer = sess['digit_analyzer']
+    strategy = sess.get('strategy')
     if client:
         bot.balance = client.balance
         bot.currency = client.currency
@@ -969,6 +977,7 @@ def status():
             'least_frequent_digit': least_frequent,
             'most_frequent_digit': most_frequent
         },
+        'strategy': strategy.get_status() if strategy else {},
         'symbols': config.AVAILABLE_SYMBOLS,
         'loginid': client.loginid if client else None
     })
@@ -1001,7 +1010,6 @@ def debug():
         'ws_thread_alive': c._ws_thread.is_alive() if c._ws_thread else False,
         'pending_trade': c.pending_trade is not None,
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None,
-        # Campos de latência e reconexão
         'ping_ms': getattr(c, '_ping_ms', 0),
         'reconnect_count': getattr(c, '_reconnect_count', 0),
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
@@ -1186,21 +1194,38 @@ def trade_digit():
         bot = sess['trading_bot']
         if bot.stop_loss_active:
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+
+        strategy = sess.get('strategy')
+        if strategy:
+            action, reason = strategy.evaluate_parity()
+            if not action:
+                return jsonify({'error': f'⛔ {reason}'}), 400
+        else:
+            # Fallback antigo se não houver strategy (não deve acontecer)
+            d = request.json
+            pred = d.get('prediction')
+            if pred not in ('odd', 'even'):
+                return jsonify({'error': 'Use "odd" ou "even"'}), 400
+            action = 'odd' if pred == 'odd' else 'even'
+
         d = request.json
-        pred = d.get('prediction')
         amt = float(d.get('amount', 0.35))
-        if pred not in ('odd', 'even'):
-            return jsonify({'error': 'Use "odd" ou "even"'}), 400
         if amt < 0.35 or amt > 100:
             return jsonify({'error': 'Valor inválido'}), 400
+
         analyzer = sess['digit_analyzer']
         tr = analyzer.get_ticks_remaining()
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
-        ok = sess['client'].place_trade('CALL' if pred == 'odd' else 'PUT', amt, True)
+
+        # Agora action pode vir do strategy ou do request
+        if not action:
+            return jsonify({'error': 'Ação inválida'}), 400
+
+        ok = sess['client'].place_trade('CALL' if action == 'odd' else 'PUT', amt, True)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
-            label = 'ÍMPAR' if pred == 'odd' else 'PAR'
+            label = 'ÍMPAR' if action == 'odd' else 'PAR'
             return jsonify({'status': 'ok', 'message': f'✅ {label} por ${amt:.2f}', 'ticks_remaining': tr})
         return jsonify({'error': 'Falha no trade'}), 500
     except Exception:
@@ -1218,6 +1243,19 @@ def trade_differ():
         bot = sess['trading_bot']
         if bot.stop_loss_active:
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+
+        strategy = sess.get('strategy')
+        if strategy:
+            digit, reason = strategy.evaluate_differ()
+            if digit is None:
+                return jsonify({'error': f'⛔ {reason}'}), 400
+        else:
+            analyzer = sess['digit_analyzer']
+            least = analyzer.get_least_frequent_digit()
+            if least is None:
+                return jsonify({'error': 'Nenhum dígito sub‑representado. Aguarde.'}), 400
+            digit = least
+
         d = request.json
         amt = float(d.get('amount', 0.35))
         if amt < 0.35 or amt > 100:
@@ -1228,24 +1266,19 @@ def trade_differ():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        least = analyzer.get_least_frequent_digit()
-        if least is None:
-            return jsonify({'error': 'Nenhum dígito sub‑representado. Aguarde.'}), 400
-
-        ok = sess['client'].place_differ_trade(least, amt)
+        ok = sess['client'].place_differ_trade(digit, amt)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
             return jsonify({
                 'status': 'ok',
-                'message': f'🎯 DIFFER no dígito {least} por ${amt:.2f}',
-                'digit': least
+                'message': f'🎯 DIFFER no dígito {digit} por ${amt:.2f}',
+                'digit': digit
             })
         return jsonify({'error': 'Falha no trade DIFFER'}), 500
     except Exception:
         logger.exception("Erro trade differ")
         return jsonify({'error': 'Erro interno'}), 500
 
-# 🔥 MATCHES (com cooldown)
 @app.route('/api/trade/matches', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1258,10 +1291,22 @@ def trade_matches():
         if bot.stop_loss_active:
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
 
-        # Verificar cooldown após perda recente
+        # Manter verificação do cooldown MATCHES
         if time.time() < sess.get('matches_cooldown_until', 0):
             remaining = round(sess['matches_cooldown_until'] - time.time())
             return jsonify({'error': f'⏳ Cooldown MATCHES: aguarde {remaining}s'}), 400
+
+        strategy = sess.get('strategy')
+        if strategy:
+            digit, reason = strategy.evaluate_matches()
+            if digit is None:
+                return jsonify({'error': f'⛔ {reason}'}), 400
+        else:
+            analyzer = sess['digit_analyzer']
+            most = analyzer.get_most_frequent_digit()
+            if most is None:
+                return jsonify({'error': 'Condições para MATCHES não atingidas. Aguarde mais ticks.'}), 400
+            digit = most
 
         d = request.json
         amt = float(d.get('amount', 0.35))
@@ -1273,17 +1318,13 @@ def trade_matches():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        most = analyzer.get_most_frequent_digit()
-        if most is None:
-            return jsonify({'error': 'Condições para MATCHES não atingidas. Aguarde mais ticks.'}), 400
-
-        ok = sess['client'].place_matches_trade(most, amt)
+        ok = sess['client'].place_matches_trade(digit, amt)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
             return jsonify({
                 'status': 'ok',
-                'message': f'🎯 MATCHES no dígito {most} por ${amt:.2f}',
-                'digit': most
+                'message': f'🎯 MATCHES no dígito {digit} por ${amt:.2f}',
+                'digit': digit
             })
         return jsonify({'error': 'Falha no trade MATCHES'}), 500
     except Exception:
@@ -1650,7 +1691,6 @@ def set_markup():
     logger.info(f"Markup alterado para {pct}%")
     return jsonify({'status': 'ok', 'percentage': pct})
 
-# ==================== INICIAR ====================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
