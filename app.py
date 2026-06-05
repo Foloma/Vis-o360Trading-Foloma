@@ -504,7 +504,7 @@ def create_session(user_id, user, force=False):
                 'result': result
             })
             _save_martingale_state(user_id, bot)
-            # Notificar o strategy (única notificação)
+            # Notificar o strategy (única notificação, bug #1 corrigido)
             strategy.notify_result(trade.get('action', ''), trade.get('is_win', False))
         except Exception as e:
             logger.error(f"Callback de trade falhou: {e}")
@@ -566,6 +566,7 @@ def create_session(user_id, user, force=False):
         'digit_analyzer': analyzer,
         'strategy': strategy,
         'candles': []
+        # Bug #4: matches_cooldown_until removido — gestão exclusiva do StrategyManager
     }
 
     def on_candles(candles):
@@ -1179,11 +1180,14 @@ def trade_digit():
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
 
         strategy = sess.get('strategy')
+        action = None
+        reason = None
         if strategy:
             action, reason = strategy.evaluate_parity()
             if not action:
                 return jsonify({'error': f'⛔ {reason}'}), 400
         else:
+            # fallback antigo
             d = request.json
             pred = d.get('prediction')
             if pred not in ('odd', 'even'):
@@ -1200,14 +1204,16 @@ def trade_digit():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        if not action:
-            return jsonify({'error': 'Ação inválida'}), 400
-
         ok = sess['client'].place_trade('CALL' if action == 'odd' else 'PUT', amt, True)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
             label = 'ÍMPAR' if action == 'odd' else 'PAR'
-            return jsonify({'status': 'ok', 'message': f'✅ {label} por ${amt:.2f}', 'ticks_remaining': tr, 'executed_action': action})
+            return jsonify({
+                'status': 'ok',
+                'message': f'✅ {label} por ${amt:.2f}',
+                'ticks_remaining': tr,
+                'executed_action': action   # Bug #13: devolve a direção real executada
+            })
         return jsonify({'error': 'Falha no trade'}), 500
     except Exception:
         logger.exception("Erro trade dígito")
@@ -1274,6 +1280,7 @@ def trade_matches():
 
         strategy = sess.get('strategy')
         if strategy:
+            # Bug #4: cooldown MATCHES agora gerido exclusivamente pelo strategy
             digit, reason = strategy.evaluate_matches()
             if digit is None:
                 return jsonify({'error': f'⛔ {reason}'}), 400
