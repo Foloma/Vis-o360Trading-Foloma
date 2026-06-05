@@ -7,11 +7,6 @@ logger = logging.getLogger(__name__)
 class StrategyManager:
     """
     Implementa os três módulos da Foloma Visão 360 Safe Flow.
-    Cada módulo decide se uma entrada deve ser autorizada com base em:
-      - padrões estatísticos (repetição, streak, ausência)
-      - filtros de latência e estabilidade
-      - cooldowns e limitadores de sequência
-      - stop global após perdas consecutivas
     """
 
     def __init__(self, client, analyzer):
@@ -24,9 +19,12 @@ class StrategyManager:
         self._global_stop_until = 0
         self._cooldown_until = 0
         self._differ_sequence_used = set()
-        self._parity_sequence_used = False
+        # Separar estado de paridade
+        self._parity_odd_used = False   # streak de ímpares usado
+        self._parity_even_used = False  # streak de pares usado
+        self._parity_martingale_used = False  # segunda entrada (Martingale) já foi usada?
+        self._last_parity_streak_type = None  # 'odd' ou 'even'
         self._matches_sequence_used = False
-        # Cooldown específico para MATCHES (gerido internamente)
         self._matches_cooldown_until = 0
 
     # -----------------------------------------------------------------
@@ -46,7 +44,6 @@ class StrategyManager:
 
     @property
     def can_trade(self):
-        """Verifica condições básicas para qualquer trade."""
         if self.is_global_stop:
             return False, "STOP GLOBAL ATIVO"
         if self.is_cooldown:
@@ -66,7 +63,10 @@ class StrategyManager:
 
     def reset_sequence_state(self):
         self._differ_sequence_used.clear()
-        self._parity_sequence_used = False
+        self._parity_odd_used = False
+        self._parity_even_used = False
+        self._parity_martingale_used = False
+        self._last_parity_streak_type = None
         self._matches_sequence_used = False
 
     def notify_result(self, action, is_win):
@@ -83,52 +83,70 @@ class StrategyManager:
             if action.startswith('DIFFER'):
                 self._apply_cooldown(5)
             elif action in ('CALL', 'PUT', 'BUY', 'SELL'):
-                self._apply_cooldown(5)
+                # Em paridade, se perdemos e o Martingale ainda não foi usado, NÃO aplicar cooldown longo
+                # Apenas um cooldown curto para permitir reentrada rápida
+                if not self._parity_martingale_used and self._last_parity_streak_type:
+                    self._apply_cooldown(1)  # quase sem espera para reentrada
+                else:
+                    self._apply_cooldown(5)
             elif action.startswith('MATCH'):
                 self._matches_cooldown_until = time.time() + 150
                 self._apply_cooldown(10)
         else:
             self._consecutive_losses = 0
-            self.reset_sequence_state()       # Bug #6: reset em vitória
+            self.reset_sequence_state()
             if action.startswith('DIFFER'):
                 self._apply_cooldown(1)
             elif action in ('CALL', 'PUT', 'BUY', 'SELL'):
                 self._apply_cooldown(2)
-            # MATCHES sem cooldown adicional em vitória
 
     # -----------------------------------------------------------------
-    # Métodos de leitura pura para o frontend (Bug #3)
+    # Métodos de leitura pura para o frontend
     # -----------------------------------------------------------------
     def _peek_differ(self):
-        """Versão somente leitura — NÃO altera estado."""
         ok, _ = self.can_trade
         if not ok:
-            return False
+            return False, None
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 3:
-            return False
+            return False, None
         last_three = recent[-3:]
         if len(set(last_three)) == 1:
-            return last_three[0] not in self._differ_sequence_used
-        return False
+            digit = last_three[0]
+            available = digit not in self._differ_sequence_used
+            return available, digit if available else None
+        return False, None
 
     def _peek_parity(self):
-        """Versão somente leitura — NÃO altera estado."""
+        """Retorna (disponível, direção_recomendada, motivo)."""
         ok, _ = self.can_trade
         if not ok:
-            return False
+            return False, None, "Condições básicas não satisfeitas"
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 4:
-            return False
+            return False, None, "Aguardando dados"
+
         last_four = [d % 2 != 0 for d in recent[-4:]]
-        if all(p == True for p in last_four) and not self._parity_sequence_used:
-            return True
-        if all(p == False for p in last_four) and not self._parity_sequence_used:
-            return True
-        return False
+
+        # Verificar streak de ímpares
+        if all(p == True for p in last_four):
+            # Disponível se ainda não usado ou se Martingale permitido
+            can_enter = not self._parity_odd_used or (
+                self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd'
+            )
+            return can_enter, 'even', "Streak de 4 ÍMPARES → apostar PAR"
+
+        # Verificar streak de pares
+        if all(p == False for p in last_four):
+            can_enter = not self._parity_even_used or (
+                self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even'
+            )
+            return can_enter, 'odd', "Streak de 4 PARES → apostar ÍMPAR"
+
+        # Sem streak
+        return False, None, "Nenhum streak de 4"
 
     def _peek_matches(self):
-        """Versão somente leitura — NÃO altera estado."""
         ok, _ = self.can_trade
         if not ok:
             return False
@@ -143,14 +161,14 @@ class StrategyManager:
         return False
 
     # -----------------------------------------------------------------
-    # Módulo 1: DIFFER por repetição (>=3 iguais consecutivos)
+    # Módulo 1: DIFFER
     # -----------------------------------------------------------------
     def evaluate_differ(self):
         ok, reason = self.can_trade
         if not ok:
             return None, reason
 
-        recent = self.analyzer.get_recent_digits(20)    # Bug #2 corrigido
+        recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 3:
             return None, "Aguardando dados"
 
@@ -167,36 +185,54 @@ class StrategyManager:
             return None, "Nenhuma repetição tripla"
 
     # -----------------------------------------------------------------
-    # Módulo 2: PAR/ÍMPAR por streak (>=4 consecutivos)
+    # Módulo 2: PAR/ÍMPAR com suporte a Martingale
     # -----------------------------------------------------------------
     def evaluate_parity(self):
         ok, reason = self.can_trade
         if not ok:
             return None, reason
 
-        recent = self.analyzer.get_recent_digits(20)    # Bug #2 corrigido
+        recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 4:
             return None, "Aguardando dados"
 
         last_four = [d % 2 != 0 for d in recent[-4:]]
+
+        # Streak de ímpares
         if all(p == True for p in last_four):
-            if self._parity_sequence_used:
-                return None, "Streak ÍMPAR já utilizado"
-            self._parity_sequence_used = True
-            self._last_parity_action = 'odd'
-            return 'even', "Streak de 4 ÍMPARES → apostar PAR"
-        elif all(p == False for p in last_four):
-            if self._parity_sequence_used:
-                return None, "Streak PAR já utilizado"
-            self._parity_sequence_used = True
-            self._last_parity_action = 'even'
-            return 'odd', "Streak de 4 PARES → apostar ÍMPAR"
-        else:
-            self._parity_sequence_used = False
-            return None, "Nenhum streak de 4"
+            # Primeira entrada
+            if not self._parity_odd_used:
+                self._parity_odd_used = True
+                self._last_parity_streak_type = 'odd'
+                self._parity_martingale_used = False
+                return 'even', "Streak de 4 ÍMPARES → apostar PAR"
+            # Martingale (segunda entrada) — permitir se streak continuar e ainda não usado
+            if self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
+                self._parity_martingale_used = True
+                return 'even', "Martingale: streak ÍMPAR continua → apostar PAR novamente"
+            return None, "Streak ÍMPAR já utilizado"
+
+        # Streak de pares
+        if all(p == False for p in last_four):
+            if not self._parity_even_used:
+                self._parity_even_used = True
+                self._last_parity_streak_type = 'even'
+                self._parity_martingale_used = False
+                return 'odd', "Streak de 4 PARES → apostar ÍMPAR"
+            if self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even':
+                self._parity_martingale_used = True
+                return 'odd', "Martingale: streak PAR continua → apostar ÍMPAR novamente"
+            return None, "Streak PAR já utilizado"
+
+        # Se o streak quebrou, resetar os estados de paridade
+        self._parity_odd_used = False
+        self._parity_even_used = False
+        self._parity_martingale_used = False
+        self._last_parity_streak_type = None
+        return None, "Nenhum streak de 4"
 
     # -----------------------------------------------------------------
-    # Módulo 3: MATCHES por ausência (>=25 ticks) — Bug #8 unificado
+    # Módulo 3: MATCHES
     # -----------------------------------------------------------------
     def evaluate_matches(self):
         ok, reason = self.can_trade
@@ -219,15 +255,21 @@ class StrategyManager:
         return None, "Nenhum dígito ausente ≥25 ticks"
 
     # -----------------------------------------------------------------
-    # Status para o frontend (Bug #3 corrigido — usa _peek)
+    # Status para o frontend
     # -----------------------------------------------------------------
     def get_status(self):
+        differ_avail, differ_digit = self._peek_differ()
+        parity_avail, parity_dir, parity_reason = self._peek_parity()
+        matches_avail = self._peek_matches()
         return {
             'global_stop': self.is_global_stop,
             'cooldown': self.is_cooldown,
             'matches_cooldown': self.is_matches_cooldown,
             'consecutive_losses': self._consecutive_losses,
-            'differ_available': self._peek_differ(),
-            'parity_available': self._peek_parity(),
-            'matches_available': self._peek_matches(),
+            'differ_available': differ_avail,
+            'differ_digit': differ_digit,
+            'parity_available': parity_avail,
+            'parity_direction': parity_dir,       # 'odd' ou 'even' (direção da aposta)
+            'parity_reason': parity_reason,
+            'matches_available': matches_avail,
         }
