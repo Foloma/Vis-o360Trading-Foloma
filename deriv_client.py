@@ -3,6 +3,7 @@ import json
 import threading
 import time
 import logging
+import random
 from collections import deque
 from config import config
 
@@ -69,6 +70,12 @@ class DerivWebSocketClient:
         self._reconnect_count = 0
         self._ping_sent_at = 0
 
+        # Proteção contra bloqueios
+        self._consecutive_failures = 0
+        self._max_failures = 5
+        self._cooldown_until = 0
+        self._token_permanently_invalid = False
+
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
 
@@ -85,6 +92,7 @@ class DerivWebSocketClient:
             logger.error("❌ Token vazio recebido!")
             return
         self.user_token = t
+        self._token_permanently_invalid = False  # reset ao trocar de token
         logger.info(f"🔑 Token configurado: {t[:8]}...")
 
     def connect(self):
@@ -100,6 +108,22 @@ class DerivWebSocketClient:
     def _run_forever(self):
         backoff = 1
         while not self._stop_event.is_set():
+            # Verificar cooldown por muitas falhas consecutivas
+            if self._consecutive_failures >= self._max_failures:
+                cooldown = 300  # 5 minutos
+                logger.warning(f"🛑 {self._max_failures} falhas consecutivas. Pausa de {cooldown}s para evitar bloqueio.")
+                if self._stop_event.wait(timeout=cooldown):
+                    break
+                self._consecutive_failures = 0
+                backoff = 1
+
+            # Verificar se o token é permanentemente inválido
+            if self._token_permanently_invalid:
+                logger.error("🔒 Token inválido. A aguardar novo token...")
+                if self._stop_event.wait(timeout=60):
+                    break
+                continue
+
             self._reset_state()
             try:
                 logger.info("🔌 A ligar à Deriv...")
@@ -108,7 +132,11 @@ class DerivWebSocketClient:
                 self.connected = True
                 if not self._authorize_and_wait():
                     logger.error("Falha na autorização")
+                    self._consecutive_failures += 1
                     continue
+
+                # Sucesso — resetar contadores
+                self._consecutive_failures = 0
                 self._last_reconnect_time = time.time()
                 self._reconnect_count += 1
 
@@ -133,7 +161,8 @@ class DerivWebSocketClient:
                 self._start_watchdog()
                 self._read_loop()
             except Exception as e:
-                logger.error(f"Erro no loop principal: {e}", exc_info=True)
+                logger.error(f"Erro no loop principal: {e}")
+                self._consecutive_failures += 1
             finally:
                 self._teardown_connection()
                 if not self._first_connect:
@@ -142,8 +171,11 @@ class DerivWebSocketClient:
             if self._stop_event.is_set():
                 break
             backoff = min(backoff * 2, 60)
-            logger.info(f"🔄 Nova tentativa em {backoff}s...")
-            if self._stop_event.wait(timeout=backoff):
+            # Jitter: atraso aleatório de 0 a 2 segundos
+            jitter = random.uniform(0, 2)
+            total_wait = backoff + jitter
+            logger.info(f"🔄 Nova tentativa em {total_wait:.1f}s (backoff={backoff}s + jitter={jitter:.1f}s)...")
+            if self._stop_event.wait(timeout=total_wait):
                 break
 
     def _reset_state(self):
@@ -178,8 +210,13 @@ class DerivWebSocketClient:
                 data = json.loads(msg)
                 if data.get('msg_type') == 'authorize':
                     if data.get('error'):
-                        logger.error(f"❌ Auth erro: {data['error']}")
-                        self.auth_error = data['error']
+                        err = data['error']
+                        logger.error(f"❌ Auth erro: {err}")
+                        self.auth_error = err
+                        # Bloquear permanentemente se token inválido
+                        if err.get('code') in ('InvalidToken', 'TokenExpired'):
+                            self._token_permanently_invalid = True
+                            logger.error("🔒 Token inválido/expirado — a bloquear novas tentativas.")
                         return False
                     logger.info("✅ Autorizado com sucesso!")
                     self.authorized = True
@@ -297,13 +334,13 @@ class DerivWebSocketClient:
             if not self.ws or not self.connected:
                 break
             if self.streaming and self._last_tick_time is not None:
-                if time.time() - self._last_tick_time > 90:
-                    logger.warning("🛑 Watchdog: >90s sem ticks. Forçando reconexão.")
+                if time.time() - self._last_tick_time > 180:  # 3 minutos sem ticks
+                    logger.warning("🛑 Watchdog: >180s sem ticks. Forçando reconexão.")
                     self._close_connection()
                     break
             elif not self.streaming:
-                if self._auth_time and time.time() - self._auth_time > 90:
-                    logger.warning("🛑 Watchdog: 90s ligado sem stream. Forçando reconexão.")
+                if self._auth_time and time.time() - self._auth_time > 180:
+                    logger.warning("🛑 Watchdog: 180s ligado sem stream. Forçando reconexão.")
                     self._close_connection()
                     break
 
@@ -669,7 +706,6 @@ class DerivWebSocketClient:
     def _resubscribe_active_trades(self):
         if not self.active_trades:
             return
-        # Limpar trades com mais de 5 minutos
         now = time.time()
         expired = [cid for cid, t in self.active_trades.items()
                    if now - t.get('timestamp', now) > 300]
@@ -704,7 +740,6 @@ class DerivWebSocketClient:
         bp, sp = c.get('buy_price', 0), c.get('sell_price', 0)
         profit = sp - bp
         is_win = profit > 0
-        # Log de diagnóstico detalhado
         logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}")
 
         trade_info = self.active_trades.get(cid, {})
