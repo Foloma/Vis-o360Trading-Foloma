@@ -486,8 +486,9 @@ def create_session(user_id, user, force=False):
     bot.client = client
     bot.digit_analyzer = analyzer
 
-    # Instanciar o strategy
+    # Instanciar o strategy e injetar no bot (Bug #5)
     strategy = StrategyManager(client, analyzer)
+    bot.strategy = strategy
 
     def on_trade_result(trade):
         try:
@@ -503,26 +504,14 @@ def create_session(user_id, user, force=False):
                 'result': result
             })
             _save_martingale_state(user_id, bot)
-            # Notificar o strategy
+            # Notificar o strategy (única notificação)
             strategy.notify_result(trade.get('action', ''), trade.get('is_win', False))
-
-            # Cooldown MATCHES mantido
-            if result == 'loss':
-                action = trade.get('action', '')
-                if action.startswith('MATCH'):
-                    sess = sessions.get(user_id)
-                    if sess:
-                        sess['matches_cooldown_until'] = time.time() + 150
-                        logger.info(f"⏳ MATCHES cooldown ativado até {datetime.fromtimestamp(sess['matches_cooldown_until']).strftime('%H:%M:%S')}")
         except Exception as e:
             logger.error(f"Callback de trade falhou: {e}")
 
     # Callbacks de tick e resultado para o cliente
     def tick_callback(tick):
         bot.on_tick(tick)
-        # Atualizar ausências no strategy
-        if strategy:
-            strategy.on_tick(tick)
 
     client.on_tick_callback = tick_callback
     client.on_result_callback = on_trade_result
@@ -576,8 +565,7 @@ def create_session(user_id, user, force=False):
         'trading_bot': bot,
         'digit_analyzer': analyzer,
         'strategy': strategy,
-        'candles': [],
-        'matches_cooldown_until': 0
+        'candles': []
     }
 
     def on_candles(candles):
@@ -1177,11 +1165,6 @@ def deriv_oauth_url():
     return jsonify({'url': url})
 
 # ==================== TRADING ====================
-@app.route('/api/trade', methods=['POST'])
-@require_auth
-@limit_if_available("20 per minute")
-def trade():
-    return jsonify({'error': 'Modo Ativos desativado. Use Dígitos, Differ ou Matches.'}), 400
 
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
@@ -1201,12 +1184,11 @@ def trade_digit():
             if not action:
                 return jsonify({'error': f'⛔ {reason}'}), 400
         else:
-            # Fallback antigo se não houver strategy (não deve acontecer)
             d = request.json
             pred = d.get('prediction')
             if pred not in ('odd', 'even'):
                 return jsonify({'error': 'Use "odd" ou "even"'}), 400
-            action = 'odd' if pred == 'odd' else 'even'
+            action = pred
 
         d = request.json
         amt = float(d.get('amount', 0.35))
@@ -1218,7 +1200,6 @@ def trade_digit():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        # Agora action pode vir do strategy ou do request
         if not action:
             return jsonify({'error': 'Ação inválida'}), 400
 
@@ -1226,7 +1207,7 @@ def trade_digit():
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
             label = 'ÍMPAR' if action == 'odd' else 'PAR'
-            return jsonify({'status': 'ok', 'message': f'✅ {label} por ${amt:.2f}', 'ticks_remaining': tr})
+            return jsonify({'status': 'ok', 'message': f'✅ {label} por ${amt:.2f}', 'ticks_remaining': tr, 'executed_action': action})
         return jsonify({'error': 'Falha no trade'}), 500
     except Exception:
         logger.exception("Erro trade dígito")
@@ -1291,11 +1272,6 @@ def trade_matches():
         if bot.stop_loss_active:
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
 
-        # Manter verificação do cooldown MATCHES
-        if time.time() < sess.get('matches_cooldown_until', 0):
-            remaining = round(sess['matches_cooldown_until'] - time.time())
-            return jsonify({'error': f'⏳ Cooldown MATCHES: aguarde {remaining}s'}), 400
-
         strategy = sess.get('strategy')
         if strategy:
             digit, reason = strategy.evaluate_matches()
@@ -1330,16 +1306,6 @@ def trade_matches():
     except Exception:
         logger.exception("Erro trade matches")
         return jsonify({'error': 'Erro interno'}), 500
-
-@app.route('/api/trade/hybrid', methods=['POST'])
-@require_auth
-def trade_hybrid():
-    return jsonify({'error': 'Modo Híbrido desativado. Use Dígitos, Differ ou Matches.'}), 400
-
-@app.route('/api/trade/manual', methods=['POST'])
-@require_auth
-def trade_manual():
-    return jsonify({'error': 'Modo Manual desativado. Use Dígitos, Differ ou Matches.'}), 400
 
 @app.route('/api/symbol/change', methods=['POST'])
 @require_auth
