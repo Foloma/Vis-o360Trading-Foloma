@@ -119,45 +119,6 @@ class TradingBot:
         self.check_risk_limits()
         self.check_take_profit()
 
-    def feed_candle_data(self, high, low, close):
-        pass
-
-    def calculate_signal(self):
-        return 'NEUTRAL', 0
-
-    def get_digit_signal(self):
-        if not self.digit_analyzer:
-            return None, 0
-
-        analysis = self.digit_analyzer.get_analysis()
-        action = analysis.get('recommended_action')
-        conf = analysis.get('confidence', 0)
-        entropy_verdict = analysis.get('entropy_verdict', '---')
-
-        if entropy_verdict not in ('BEM DEFINIDO', 'PREVISÍVEL'):
-            self._last_emitted_signal = None
-            return None, 0
-
-        if not action or conf < 60:
-            self._last_emitted_signal = None
-            return None, 0
-
-        if self.on_signal_callback and action != self._last_emitted_signal:
-            self._last_emitted_signal = action
-            try:
-                self.on_signal_callback({
-                    'signal': action,
-                    'confidence': conf,
-                    'tech_confidence': 0,
-                    'digit_confidence': conf,
-                    'digit_action': action,
-                    'symbol': self.current_symbol
-                })
-            except Exception as e:
-                logger.error(f"Erro no callback de sinal: {e}")
-
-        return action, conf
-
     def get_status(self):
         self.check_pending_trades()
         digit_action, digit_conf = self.get_digit_signal()
@@ -309,10 +270,14 @@ class TradingBot:
         for trade in list(self.trades):
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
-                timeout = 180
+                is_digit = trade.get('is_digit', False)
+                timeout = 30 if is_digit else 180   # Bug #7: timeout específico
                 if elapsed > timeout:
                     with self._state_lock:
-                        trade['result'] = 'loss'
+                        # Guarda contra recontagem
+                        if trade.get('result') == 'expired':
+                            continue
+                        trade['result'] = 'expired'
                         trade['profit'] = 0
                         self.daily_stats['losses'] += 1
                         self.daily_stats['profit_loss'] -= trade.get('amount', 0)
@@ -346,6 +311,11 @@ class TradingBot:
                         logger.warning(f"⚠️ Nenhum trade pendente para contract_id {contract_id}. Ignorando.")
                         return
 
+            # Bug #7: Ignorar trade já expirado
+            if target_trade.get('result') == 'expired':
+                logger.warning(f"Trade {contract_id} já estava expirado. Ignorando resultado tardio.")
+                return
+
             if target_trade.get('result') != 'pending':
                 logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
                 return
@@ -375,10 +345,8 @@ class TradingBot:
             if self.client:
                 self.client.get_balance()
 
-            # Notificar o StrategyManager
-            if self.strategy:
-                action = target_trade.get('action', '')
-                self.strategy.notify_result(action, is_win)
+            # Bug #1 CORRIGIDO: Notificação movida exclusivamente para o callback do app.py
+            # O strategy.notify_result() é chamado no app.py via on_result_callback
 
             if self.on_signal_result_callback and self._last_signal_id:
                 try:
