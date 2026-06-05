@@ -1,399 +1,867 @@
-import logging
-import time
+import websocket
+import json
 import threading
+import time
+import logging
+import random
 from collections import deque
-from datetime import datetime, date
 from config import config
 
 logger = logging.getLogger(__name__)
 
+class DerivWebSocketClient:
+    ST_DISCONNECTED = 'DISCONNECTED'
+    ST_CONNECTING   = 'CONNECTING'
+    ST_CONNECTED    = 'CONNECTED'
+    ST_STREAMING    = 'STREAMING'
 
-class TradingBot:
-    """
-    Versão focada exclusivamente em DÍGITOS.
-    O sinal agora é orquestrado pelo StrategyManager (módulo strategy.py),
-    mas o bot mantém a gestão de trades, estatísticas e risco.
-    """
-    def __init__(self):
-        self.client = None
-        self.current_price = 0
-        self.current_symbol = 'R_100'
+    def __init__(self, config_obj, on_tick_callback=None, on_result_callback=None):
+        self.config = config_obj
+        self.ws = None
+        self.connected = False
+        self.authorized = False
+        self.streaming = False
         self.balance = 0
         self.currency = 'USD'
-        self.paused = False
-        self.stop_loss_active = False
-        self.digit_analyzer = None
-        self.strategy = None  # será injetado pelo app.py
+        self.current_symbol = 'R_100'
+        self.on_tick_callback = on_tick_callback
+        self.on_result_callback = on_result_callback
+        self.on_candles_callback = None
+        self.trading_bot = None
+        self.payment_system = None
+        self.markup_percentage = 0
+        self.subscribed_symbols = set()
+        self.user_token = None
+        self.active_trades = {}
+        self.pending_trade = None
+        self.pending_trade_time = 0
+        self._trade_lock = threading.Lock()
+        self._pending_lock = threading.Lock()
+        self._req_lock = threading.Lock()
+        self._digit_analyzer = None
+        self._balance_subscribed = False
+        self._stop_event = threading.Event()
+        self._keep_alive_stop = threading.Event()
+        self._watchdog_stop = threading.Event()
+        self._last_tick_time = None
+        self._last_trade_time = 0
+        self._processed_contracts = deque(maxlen=1000)
+        self._processed_lock = threading.Lock()
+        self._req_counter = 1000
+        self.state = self.ST_DISCONNECTED
+        self._auth_time = 0
+        self._keep_alive_thread = None
+        self._watchdog_thread = None
+        self._ws_thread = None
 
-        self.stats = {
-            'total': 0, 'wins': 0, 'losses': 0,
-            'win_rate': 0, 'profit_loss': 0,
-            'total_invested': 0, 'total_return': 0,
-            'expired_trades': 0
-        }
+        self.loginid = None
+        self._connecting = False
+        self._connect_lock = threading.Lock()
+        self.auth_error = None
+        self._had_gap = False
+        self._first_connect = True
 
-        self.daily_stats = {
-            'date': datetime.now().date(), 'trades': 0,
-            'wins': 0, 'losses': 0, 'profit_loss': 0,
-            'start_balance': 0, 'expired_trades': 0
-        }
+        self._candles_cache = {}
+        self._candles_cache_lock = threading.Lock()
 
-        self.trades = deque(maxlen=100)
-        self.consecutive_losses = 0
-        self.consecutive_wins = 0
+        self._last_reconnect_time = 0
+        self._ping_ms = 0
+        self._reconnect_count = 0
+        self._ping_sent_at = 0
 
-        self.martingale = {
-            'active': False, 'step': 0,
-            'original_amount': 0, 'last_result': None
-        }
+        self._consecutive_failures = 0
+        self._max_failures = 5
+        self._cooldown_until = 0
+        self._token_permanently_invalid = False
 
-        self._client_connected = False
-        self._client_authorized = False
-        self._state_lock = threading.RLock()
-        self._daily_stats_dirty = False
+    def set_digit_analyzer(self, a): 
+        self._digit_analyzer = a
 
-        self.on_signal_callback = None
-        self.on_signal_result_callback = None
-        self._last_signal_id = None
+    def set_trading_bot(self, b):
+        self.trading_bot = b
+        if b: 
+            b.balance, b.currency, b.client = self.balance, self.currency, self
 
-    def start(self, client):
-        self.client = client
-        self.daily_stats['start_balance'] = self.balance
-        self._daily_stats_dirty = True
-        logger.info("🚀 Bot iniciado (modo Dígitos)")
+    def set_payment_system(self, p): 
+        self.payment_system = p
 
-    def pause(self):
-        self.paused = True
-        logger.info("⏸️ Pausado")
+    def set_user_token(self, t):
+        if not t:
+            logger.error("❌ Token vazio recebido!")
+            return
+        self.user_token = t
+        self._token_permanently_invalid = False
+        logger.info(f"🔑 Token configurado: {t[:8]}...")
 
-    def resume(self):
-        self.paused = False
-        logger.info("▶️ Resumido")
+    def connect(self):
+        self._stop_event.set()
+        if self._ws_thread and self._ws_thread.is_alive():
+            self._ws_thread.join(timeout=2)
+        self._close_connection()
+        self._stop_event.clear()
+        self._ws_thread = threading.Thread(target=self._run_forever, daemon=True)
+        self._ws_thread.start()
+        logger.info("🔌 Thread de ligação iniciada")
 
-    def check_risk_limits(self):
-        max_loss_pct = config.RISK_LIMITS.get('max_daily_loss_percent', 5)
-        if self.daily_stats['start_balance'] > 0:
-            daily_loss_pct = (
-                abs(min(0, self.daily_stats['profit_loss'])) /
-                self.daily_stats['start_balance'] * 100
-            )
-            if daily_loss_pct >= max_loss_pct:
-                if not self.paused:
-                    self.pause()
-                    logger.warning(
-                        f"🛑 Stop-loss ativado: {daily_loss_pct:.1f}% perda diária"
-                    )
-                self.stop_loss_active = True
-                return False
-        self.stop_loss_active = False
-        return True
+    def _run_forever(self):
+        backoff = 1
+        while not self._stop_event.is_set():
+            if self._consecutive_failures >= self._max_failures:
+                cooldown = 300
+                logger.warning(f"🛑 {self._max_failures} falhas consecutivas. Pausa de {cooldown}s para evitar bloqueio.")
+                if self._stop_event.wait(timeout=cooldown):
+                    break
+                self._consecutive_failures = 0
+                backoff = 1
 
-    def check_take_profit(self):
-        if not config.RISK_LIMITS.get('take_profit_enabled', True):
+            if self._token_permanently_invalid:
+                logger.error("🔒 Token inválido. A aguardar novo token...")
+                if self._stop_event.wait(timeout=60):
+                    break
+                continue
+
+            self._reset_state()
+            try:
+                logger.info("🔌 A ligar à Deriv...")
+                self.ws = websocket.create_connection(self.config.WS_URL, timeout=5)
+                self.ws.settimeout(1.0)
+                self.connected = True
+                if not self._authorize_and_wait():
+                    logger.error("Falha na autorização")
+                    self._consecutive_failures += 1
+                    continue
+
+                self._consecutive_failures = 0
+                self._last_reconnect_time = time.time()
+                self._reconnect_count += 1
+
+                self._subscribe_balance()
+                if self.current_symbol:
+                    self._subscribe_ticks(self.current_symbol)
+                    self.request_candles(self.current_symbol)
+
+                self._resubscribe_active_trades()
+
+                if self._had_gap and not self._first_connect and self.trading_bot:
+                    logger.warning("🕳️ Gap detetado – a limpar dados históricos do bot")
+                    if hasattr(self.trading_bot, 'reset_price_history'):
+                        self.trading_bot.reset_price_history()
+                    else:
+                        self.trading_bot.reset_stats()
+                self._had_gap = False
+                self._first_connect = False
+
+                logger.info("🟢 Conectado e autorizado")
+                self._start_keep_alive()
+                self._start_watchdog()
+                self._read_loop()
+            except Exception as e:
+                logger.error(f"Erro no loop principal: {e}")
+                self._consecutive_failures += 1
+            finally:
+                self._teardown_connection()
+                if not self._first_connect:
+                    self._had_gap = True
+
+            if self._stop_event.is_set():
+                break
+            backoff = min(backoff * 2, 60)
+            jitter = random.uniform(0, 2)
+            total_wait = backoff + jitter
+            logger.info(f"🔄 Nova tentativa em {total_wait:.1f}s (backoff={backoff}s + jitter={jitter:.1f}s)...")
+            if self._stop_event.wait(timeout=total_wait):
+                break
+
+    def _reset_state(self):
+        self.subscribed_symbols.clear()
+        with self._pending_lock:
+            self.pending_trade = None
+        self.pending_trade_time = 0
+        self._balance_subscribed = False
+        self.connected = False
+        self.authorized = False
+        self.streaming = False
+        self._last_tick_time = None
+        self.state = self.ST_DISCONNECTED
+        self.loginid = None
+        self.auth_error = None
+
+    def _authorize_and_wait(self, timeout=10):
+        if not self.user_token:
+            logger.error("🚫 Tentativa de autorizar sem token!")
             return False
-        target_pct = config.RISK_LIMITS.get('daily_target_percent', 10)
-        if self.daily_stats['start_balance'] > 0:
-            profit_pct = (self.balance - self.daily_stats['start_balance']) / self.daily_stats['start_balance'] * 100
-            if profit_pct >= target_pct:
-                self.pause()
-                logger.info(f"🏆 Take-profit atingido: {profit_pct:.1f}%")
-                return True
+        if len(self.user_token) < 10:
+            logger.error(f"🚫 Token suspeito (muito curto): '{self.user_token}'")
+            return False
+
+        self.ws.send(json.dumps({"authorize": self.user_token, "req_id": self._next_req()}))
+        self._auth_time = time.time()
+        logger.info("🔐 Pedido de autorização enviado")
+        deadline = time.time() + timeout
+        while time.time() < deadline and not self._stop_event.is_set():
+            try:
+                msg = self.ws.recv()
+                data = json.loads(msg)
+                if data.get('msg_type') == 'authorize':
+                    if data.get('error'):
+                        err = data['error']
+                        logger.error(f"❌ Auth erro: {err}")
+                        self.auth_error = err
+                        if err.get('code') in ('InvalidToken', 'TokenExpired'):
+                            self._token_permanently_invalid = True
+                            logger.error("🔒 Token inválido/expirado — a bloquear novas tentativas.")
+                        return False
+                    logger.info("✅ Autorizado com sucesso!")
+                    self.authorized = True
+                    self.loginid = data.get('authorize', {}).get('loginid', '')
+                    logger.info(f"LoginID: {self.loginid}")
+                    return True
+            except websocket.WebSocketTimeoutException:
+                continue
+            except Exception as e:
+                logger.error(f"Erro ao aguardar autorização: {e}")
+                return False
         return False
 
-    def on_tick(self, tick):
-        self.current_price = tick['price']
-        self.current_symbol = tick['symbol']
+    def _teardown_connection(self):
+        self._stop_keep_alive()
+        self._stop_watchdog()
+        self._close_connection()
 
-        if self.digit_analyzer:
-            self.digit_analyzer.add_tick(self.current_price)
-
-        if self.client:
-            self.balance = self.client.balance
-            self.currency = self.client.currency
-            today = datetime.now().date()
-            if self.daily_stats['date'] != today:
-                self.reset_daily_stats()
-
-        self.check_risk_limits()
-        self.check_take_profit()
-
-    def get_status(self):
-        self.check_pending_trades()
-        # Correção urgente: get_digit_signal() foi removido
-        digit_action = None
-        digit_conf = 0
-        if self.client:
-            conn = self.client.connected
-            auth = self.client.authorized
-        else:
-            conn = self._client_connected
-            auth = self._client_authorized
-        return {
-            'connected': conn,
-            'authorized': auth,
-            'price': self.current_price,
-            'symbol': self.current_symbol,
-            'balance': self.balance,
-            'currency': self.currency,
-            'signal': 'NEUTRAL',
-            'confidence': 0,
-            'tech_confidence': 0,
-            'digit_confidence': digit_conf,
-            'digit_action': digit_action,
-            'analysis': {},
-            'stats': self.stats,
-            'paused': self.paused,
-            'stop_loss_active': self.stop_loss_active,
-            'martingale': self.get_martingale_status(),
-            'daily_stats': self.daily_stats,
-            'consecutive_wins': self.consecutive_wins,
-            'consecutive_losses': self.consecutive_losses
-        }
-
-    def get_martingale_status(self):
-        with self._state_lock:
-            return {
-                'active': self.martingale['active'],
-                'step': self.martingale['step'],
-                'original_amount': self.martingale['original_amount'],
-                'next_amount': self.get_martingale_amount(config.DEFAULT_STAKE),
-                'max_steps': config.MARTINGALE_CONFIG.get('max_steps', 2),
-                'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0)
-            }
-
-    def get_martingale_amount(self, base_amount):
-        with self._state_lock:
-            if not self.martingale['active'] or self.martingale['step'] == 0:
-                return base_amount
-            multiplier = config.MARTINGALE_CONFIG.get('multiplier', 2.0)
-            return base_amount * (multiplier ** self.martingale['step'])
-
-    def apply_martingale_after_loss(self, last_trade_amount):
-        with self._state_lock:
-            max_steps = config.MARTINGALE_CONFIG.get('max_steps', 2)
-            if self.martingale['step'] >= max_steps:
-                return False, f"Máximo de {max_steps} perdas consecutivas atingido"
-            self.martingale['step'] += 1
-            self.martingale['active'] = True
-            self.martingale['original_amount'] = last_trade_amount
-            nxt = self.get_martingale_amount(last_trade_amount)
-            if self.balance < nxt * 1.2:
-                self.reset_martingale()
-                return False, f"Saldo insuficiente para martingale (precisa ${nxt*1.2:.2f})"
-            return True, {
-                'step': self.martingale['step'],
-                'next_amount': nxt,
-                'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
-                'message': f"📈 Martingale ativo - Passo {self.martingale['step']}/{max_steps} | Próximo: ${nxt:.2f}"
-            }
-
-    def reset_martingale(self):
-        with self._state_lock:
-            self.martingale = {
-                'active': False,
-                'step': 0,
-                'original_amount': 0,
-                'last_result': None
-            }
-
-    def reset_daily_stats(self):
-        self.daily_stats = {
-            'date': datetime.now().date(), 'trades': 0,
-            'wins': 0, 'losses': 0, 'profit_loss': 0,
-            'start_balance': self.balance, 'expired_trades': 0
-        }
-        self.stop_loss_active = False
-        self._daily_stats_dirty = True
-
-    def set_daily_stats_from_db(self, saved):
-        if saved and isinstance(saved, dict):
+    def _close_connection(self):
+        if self.ws:
             try:
-                saved_date = datetime.strptime(saved.get('date', ''), '%Y-%m-%d').date()
-                if saved_date == datetime.now().date():
-                    with self._state_lock:
-                        self.daily_stats = {
-                            'date': saved_date,
-                            'trades': saved.get('trades', 0),
-                            'wins': saved.get('wins', 0),
-                            'losses': saved.get('losses', 0),
-                            'profit_loss': saved.get('profit_loss', 0),
-                            'start_balance': saved.get('start_balance', self.balance),
-                            'expired_trades': saved.get('expired_trades', 0)
-                        }
-                        self.stop_loss_active = saved.get('stop_loss_active', False)
-                    logger.info(f"📂 Estatísticas diárias carregadas da BD: {self.daily_stats}")
-                    self._daily_stats_dirty = False
-                    return
-            except Exception as e:
-                logger.error(f"Erro ao carregar daily_stats da BD: {e}")
-        self.reset_daily_stats()
+                self.ws.send(json.dumps({"forget_all": "ticks", "req_id": self._next_req()}))
+            except Exception:
+                pass
+            try:
+                self.ws.close()
+            except Exception:
+                pass
+            self.ws = None
+        self.connected = False
+        self.authorized = False
+        self.streaming = False
+        self.state = self.ST_DISCONNECTED
 
-    def get_daily_stats_for_db(self):
-        with self._state_lock:
-            s = dict(self.daily_stats)
-            if isinstance(s['date'], date):
-                s['date'] = s['date'].strftime('%Y-%m-%d')
-            else:
-                s['date'] = str(s['date'])
-            s['stop_loss_active'] = self.stop_loss_active
-            return s
+    def _read_loop(self):
+        while not self._stop_event.is_set() and self.ws:
+            try:
+                msg = self.ws.recv()
+                if not msg:
+                    break
+                self._on_message(msg)
+            except websocket.WebSocketTimeoutException:
+                continue
+            except Exception:
+                break
 
-    def register_trade(self, trade_data):
-        trade_data['timestamp'] = datetime.now()
-        with self._state_lock:
-            self.trades.append(trade_data)
-            self.stats['total'] += 1
-            self.stats['total_invested'] += trade_data['amount']
-            self.daily_stats['trades'] += 1
-            self._daily_stats_dirty = True
-        self.update_stats()
-
-    def update_stats(self):
-        with self._state_lock:
-            wins = losses = profit_loss = 0
-            for trade in self.trades:
-                if trade.get('result') == 'win':
-                    wins += 1
-                    profit_loss += trade.get('profit', 0)
-                elif trade.get('result') == 'loss':
-                    losses += 1
-                    profit_loss -= trade.get('amount', 0)
-            self.stats['wins'] = wins
-            self.stats['losses'] = losses
-            self.stats['win_rate'] = (wins / self.stats['total']) * 100 if self.stats['total'] > 0 else 0
-            self.stats['profit_loss'] = profit_loss
-            self.stats['total_return'] = (profit_loss / self.stats['total_invested']) * 100 if self.stats['total_invested'] > 0 else 0
-
-    def check_pending_trades(self):
-        now = datetime.now()
-        updated = False
-        for trade in list(self.trades):
-            if trade.get('result') == 'pending':
-                elapsed = (now - trade['timestamp']).total_seconds()
-                is_digit = trade.get('is_digit', False)
-                timeout = 30 if is_digit else 180
-                if elapsed > timeout:
-                    with self._state_lock:
-                        if trade.get('result') == 'expired':
-                            continue
-                        trade['result'] = 'expired'
-                        trade['profit'] = 0
-                        self.daily_stats['losses'] += 1
-                        self.daily_stats['profit_loss'] -= trade.get('amount', 0)
-                        self.stats['expired_trades'] += 1
-                        self.daily_stats['expired_trades'] += 1
-                        self._daily_stats_dirty = True
-                        updated = True
-                    logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')} (ID: {trade.get('contract_id')})")
-        if updated:
-            self.update_stats()
-
-    def on_trade_result(self, result):
+    def _on_message(self, message):
         try:
-            contract_id = result.get('contract_id')
-            profit = result.get('profit', 0)
-            is_win = profit > 0
-            target_trade = None
-            if contract_id:
-                for trade in self.trades:
-                    if trade.get('contract_id') == contract_id:
-                        target_trade = trade
-                        break
-
-            if not target_trade:
-                with self._state_lock:
-                    pending = [t for t in self.trades if t.get('result') == 'pending']
-                    if pending:
-                        target_trade = pending[-1]
-                        logger.info(f"⚡ Fallback: usando último trade pendente (contract_id original: {contract_id})")
-                    else:
-                        logger.warning(f"⚠️ Nenhum trade pendente para contract_id {contract_id}. Ignorando.")
-                        return
-
-            if target_trade.get('result') == 'expired':
-                logger.warning(f"Trade {contract_id} já estava expirado. Ignorando resultado tardio.")
-                return
-
-            if target_trade.get('result') != 'pending':
-                logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
-                return
-
-            with self._state_lock:
-                if is_win:
-                    target_trade['result'] = 'win'
-                    target_trade['profit'] = profit
-                    self.daily_stats['wins'] += 1
-                    self.daily_stats['profit_loss'] += profit
-                    self.consecutive_wins += 1
-                    self.consecutive_losses = 0
-                    logger.info(f"✅ GANHO! +${profit:.2f} | Vitórias consecutivas: {self.consecutive_wins}")
-                    self.reset_martingale()
-                else:
-                    loss = target_trade.get('amount', 0)
-                    target_trade['result'] = 'loss'
-                    target_trade['profit'] = 0
-                    self.daily_stats['losses'] += 1
-                    self.daily_stats['profit_loss'] -= loss
-                    self.consecutive_losses += 1
-                    self.consecutive_wins = 0
-                    logger.info(f"❌ PERDA! -${loss:.2f} | Contrato: {contract_id} | Ação: {target_trade.get('action')} | Perdas consecutivas: {self.consecutive_losses}")
-                self._daily_stats_dirty = True
-
-            self.update_stats()
-            if self.client:
-                self.client.get_balance()
-
-            if self.on_signal_result_callback and self._last_signal_id:
-                try:
-                    self.on_signal_result_callback(
-                        self._last_signal_id,
-                        'win' if is_win else 'loss',
-                        profit
-                    )
-                    self._last_signal_id = None
-                except Exception as e:
-                    logger.error(f"Erro no callback de resultado: {e}")
+            data = json.loads(message)
+            msg_type = data.get('msg_type', '')
+            if msg_type not in ['tick', 'balance', 'time', 'ping', 'pong']:
+                logger.debug(f"📨 [{msg_type}]")
+            handlers = {
+                'tick':                   self._on_tick,
+                'balance':                self._on_balance,
+                'proposal':               self._on_proposal,
+                'buy':                    self._on_buy_response,
+                'proposal_open_contract': self._on_poc,
+                'error':                  self._on_api_error,
+                'candles':                self._on_candles,
+                'pong':                   self._on_pong,
+            }
+            handler = handlers.get(msg_type)
+            if handler:
+                handler(data)
+        except json.JSONDecodeError:
+            logger.error("Mensagem JSON inválida: %s", message[:200])
         except Exception as e:
-            logger.error(f"Erro ao processar resultado: {e}")
+            logger.error(f"Erro ao processar mensagem: {e}", exc_info=True)
 
-    def get_trade_report(self):
-        self.check_pending_trades()
-        hoje = datetime.now().date()
-        trades_snapshot = list(self.trades)
-        trades_hoje = [t for t in trades_snapshot if t['timestamp'].date() == hoje]
-        with self._state_lock:
-            return {
-                'resumo': {
-                    'total_trades': self.stats['total'],
-                    'trades_hoje': len(trades_hoje),
-                    'wins': self.stats['wins'],
-                    'losses': self.stats['losses'],
-                    'win_rate': round(self.stats['win_rate'], 2),
-                    'profit_loss': round(self.stats['profit_loss'], 2),
-                    'total_invested': round(self.stats['total_invested'], 2),
-                    'total_return': round(self.stats['total_return'], 2),
-                    'expired_trades': self.stats['expired_trades']
-                },
-                'historico': [{
-                    'time': t['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
-                    'symbol': t.get('symbol', ''),
-                    'action': t.get('action', ''),
-                    'amount': t.get('amount', 0),
-                    'result': t.get('result', 'pending'),
-                    'profit': t.get('profit', 0),
-                    'is_digit': t.get('is_digit', False)
-                } for t in trades_snapshot[-50:]]
-            }
+    def _start_keep_alive(self):
+        self._stop_keep_alive()
+        self._keep_alive_stop.clear()
+        self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
+        self._keep_alive_thread.start()
 
-    def reset_stats(self):
-        with self._state_lock:
-            self.stats = {
-                'total': 0, 'wins': 0, 'losses': 0,
-                'win_rate': 0, 'profit_loss': 0,
-                'total_invested': 0, 'total_return': 0,
-                'expired_trades': 0
-            }
-            self.trades.clear()
-            self.consecutive_losses = 0
-            self.consecutive_wins = 0
-        logger.info("📊 Estatísticas e histórico resetados")
+    def _stop_keep_alive(self):
+        self._keep_alive_stop.set()
+        if self._keep_alive_thread and self._keep_alive_thread.is_alive():
+            self._keep_alive_thread.join(timeout=2)
+
+    def _keep_alive_loop(self):
+        while not self._stop_event.is_set() and not self._keep_alive_stop.is_set():
+            if self._keep_alive_stop.wait(timeout=30):
+                break
+            if self.ws and self.connected:
+                try:
+                    self._ping_sent_at = time.time()
+                    self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
+                except Exception:
+                    break
+            else:
+                break
+
+    def _on_pong(self, data):
+        if self._ping_sent_at:
+            self._ping_ms = round((time.time() - self._ping_sent_at) * 1000)
+            logger.debug(f"🏓 Ping: {self._ping_ms}ms")
+
+    def _start_watchdog(self):
+        self._stop_watchdog()
+        self._watchdog_stop.clear()
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+        self._watchdog_thread.start()
+
+    def _stop_watchdog(self):
+        self._watchdog_stop.set()
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            self._watchdog_thread.join(timeout=2)
+
+    def _watchdog_loop(self):
+        while not self._stop_event.is_set() and not self._watchdog_stop.is_set():
+            if self._watchdog_stop.wait(timeout=10):
+                break
+            if not self.ws or not self.connected:
+                break
+            if self.streaming and self._last_tick_time is not None:
+                if time.time() - self._last_tick_time > 180:
+                    logger.warning("🛑 Watchdog: >180s sem ticks. Forçando reconexão.")
+                    self._close_connection()
+                    break
+            elif not self.streaming:
+                if self._auth_time and time.time() - self._auth_time > 180:
+                    logger.warning("🛑 Watchdog: 180s ligado sem stream. Forçando reconexão.")
+                    self._close_connection()
+                    break
+
+    def change_symbol(self, symbol):
+        if symbol in self.subscribed_symbols:
+            self.subscribed_symbols.discard(symbol)
+        self.current_symbol = symbol
+        if self.authorized:
+            self._subscribe_ticks(symbol)
+            self.request_candles(symbol)
+
+    def _subscribe_balance(self):
+        try:
+            self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
+            self._balance_subscribed = True
+        except Exception as e:
+            logger.error(f"Erro subs. saldo: {e}")
+
+    def _on_balance(self, data):
+        bd = data.get('balance', {})
+        if bd:
+            self.balance = float(bd.get('balance', 0))
+            self.currency = bd.get('currency', 'USD')
+            if self.trading_bot:
+                self.trading_bot.balance = self.balance
+                self.trading_bot.currency = self.currency
+
+    def get_balance(self, force=False):
+        if not self._balance_subscribed:
+            self._subscribe_balance()
+        elif force:
+            try:
+                self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
+            except Exception as e:
+                logger.error(f"Erro ao pedir saldo: {e}")
+
+    def _subscribe_ticks(self, symbol):
+        if not self.authorized:
+            return
+        if symbol in self.subscribed_symbols:
+            return
+        try:
+            self.ws.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": self._next_req()}))
+            self.subscribed_symbols.add(symbol)
+            self.current_symbol = symbol
+            logger.info(f"📊 Subscrição de ticks para {symbol} enviada")
+        except Exception as e:
+            logger.error(f"Erro subs. ticks: {e}")
+
+    def _on_tick(self, data):
+        tick = data.get('tick', {})
+        if not tick:
+            return
+        if not self.streaming:
+            self.streaming = True
+            self.state = self.ST_STREAMING
+            logger.info("📡 Estado STREAMING ativado!")
+        self._last_tick_time = time.time()
+        if self.on_tick_callback:
+            self.on_tick_callback({
+                'symbol':    tick.get('symbol', self.current_symbol),
+                'price':     float(tick.get('quote', 0)),
+                'timestamp': tick.get('epoch', time.time())
+            })
+
+    def _next_req(self):
+        with self._req_lock:
+            self._req_counter += 1
+            return self._req_counter
+
+    def place_trade(self, contract_type, amount, is_digit=False):
+        if self.trading_bot and not self.trading_bot.check_risk_limits():
+            logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
+            return False
+
+        with self._trade_lock:
+            if time.time() - self._last_reconnect_time < 10:
+                logger.warning("🚫 Reconexão recente — aguardar estabilização")
+                return False
+
+            if not self.streaming:
+                logger.warning("🚫 Sem streaming"); return False
+            if self.balance <= 0:
+                logger.warning("🚫 Saldo não carregado"); return False
+            if self.balance < 0.35:
+                logger.warning("🚫 Saldo insuficiente (mínimo 0.35 USD)"); return False
+            if time.time() - self._last_trade_time < 2:
+                logger.warning("⏱️ Intervalo mínimo 2s"); return False
+            if not self.authorized:
+                logger.warning("🚫 Não autorizado"); return False
+            with self._pending_lock:
+                if self.pending_trade is not None:
+                    if time.time() - self.pending_trade_time > 60:
+                        self.pending_trade = None
+                    else:
+                        logger.warning("Trade pendente"); return False
+
+            self._last_trade_time = time.time()
+
+            if is_digit:
+                duration = self.config.DIGIT_CONTRACT_DURATION
+                duration_unit = 't'
+                if contract_type == 'CALL':
+                    contract_type_full = 'DIGITODD'
+                else:
+                    contract_type_full = 'DIGITEVEN'
+            else:
+                duration = self.config.CONTRACT_DURATION
+                duration_unit = self.config.CONTRACT_DURATION_UNIT
+                contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
+
+            req_id = self._next_req()
+            with self._pending_lock:
+                self.pending_trade = {
+                    'amount': amount,
+                    'contract_type': contract_type,
+                    'is_digit': is_digit,
+                    'timestamp': time.time(),
+                    'status': 'waiting_proposal',
+                    'req_id': req_id
+                }
+            self.pending_trade_time = time.time()
+
+            logger.info(f"📤 Enviando proposta: {contract_type_full}, amount={amount}, duration={duration}, symbol={self.current_symbol}")
+
+            try:
+                self.ws.send(json.dumps({
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": contract_type_full,
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": duration_unit,
+                    "symbol": self.current_symbol,
+                    "req_id": req_id
+                }))
+                return True
+            except Exception as e:
+                logger.error(f"❌ Erro trade: {e}")
+                with self._pending_lock:
+                    self.pending_trade = None
+                return False
+
+    def place_differ_trade(self, digit, amount):
+        if self.trading_bot and not self.trading_bot.check_risk_limits():
+            logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
+            return False
+
+        with self._trade_lock:
+            if time.time() - self._last_reconnect_time < 10:
+                logger.warning("🚫 Reconexão recente — aguardar estabilização")
+                return False
+
+            if not self.streaming:
+                logger.warning("🚫 Sem streaming"); return False
+            if self.balance <= 0:
+                logger.warning("🚫 Saldo não carregado"); return False
+            if self.balance < 0.35:
+                logger.warning("🚫 Saldo insuficiente"); return False
+            if time.time() - self._last_trade_time < 2:
+                logger.warning("⏱️ Intervalo mínimo 2s"); return False
+            if not self.authorized:
+                logger.warning("🚫 Não autorizado"); return False
+            with self._pending_lock:
+                if self.pending_trade is not None:
+                    if time.time() - self.pending_trade_time > 60:
+                        self.pending_trade = None
+                    else:
+                        logger.warning("Trade pendente"); return False
+
+            self._last_trade_time = time.time()
+
+            duration = self.config.DIGIT_CONTRACT_DURATION
+            duration_unit = 't'
+
+            req_id = self._next_req()
+            with self._pending_lock:
+                self.pending_trade = {
+                    'amount': amount,
+                    'contract_type': f'DIFFER_{digit}',
+                    'is_digit': True,
+                    'is_differ': True,
+                    'digit_barrier': digit,
+                    'timestamp': time.time(),
+                    'status': 'waiting_proposal',
+                    'req_id': req_id
+                }
+            self.pending_trade_time = time.time()
+
+            logger.info(f"📤 Enviando DIGITDIFF: barreira={digit}, amount={amount}")
+
+            try:
+                self.ws.send(json.dumps({
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": "DIGITDIFF",
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": duration_unit,
+                    "symbol": self.current_symbol,
+                    "barrier": digit,
+                    "req_id": req_id
+                }))
+                logger.info(f"🎯 DIGITDIFF enviado: barreira={digit}, valor=${amount:.2f}")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Erro trade DIGITDIFF: {e}")
+                with self._pending_lock:
+                    self.pending_trade = None
+                return False
+
+    def place_matches_trade(self, digit, amount):
+        if self.trading_bot and not self.trading_bot.check_risk_limits():
+            logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
+            return False
+
+        with self._trade_lock:
+            if time.time() - self._last_reconnect_time < 10:
+                logger.warning("🚫 Reconexão recente — aguardar estabilização")
+                return False
+
+            if not self.streaming:
+                logger.warning("🚫 Sem streaming"); return False
+            if self.balance <= 0:
+                logger.warning("🚫 Saldo não carregado"); return False
+            if self.balance < 0.35:
+                logger.warning("🚫 Saldo insuficiente"); return False
+            if time.time() - self._last_trade_time < 2:
+                logger.warning("⏱️ Intervalo mínimo 2s"); return False
+            if not self.authorized:
+                logger.warning("🚫 Não autorizado"); return False
+            with self._pending_lock:
+                if self.pending_trade is not None:
+                    if time.time() - self.pending_trade_time > 60:
+                        self.pending_trade = None
+                    else:
+                        logger.warning("Trade pendente"); return False
+
+            self._last_trade_time = time.time()
+
+            duration = self.config.DIGIT_CONTRACT_DURATION
+            duration_unit = 't'
+
+            req_id = self._next_req()
+            with self._pending_lock:
+                self.pending_trade = {
+                    'amount': amount,
+                    'contract_type': f'MATCH_{digit}',
+                    'is_digit': True,
+                    'is_matches': True,
+                    'digit_barrier': digit,
+                    'timestamp': time.time(),
+                    'status': 'waiting_proposal',
+                    'req_id': req_id
+                }
+            self.pending_trade_time = time.time()
+
+            logger.info(f"📤 Enviando DIGITMATCH: dígito={digit}, amount={amount}")
+
+            try:
+                self.ws.send(json.dumps({
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": "DIGITMATCH",
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": duration_unit,
+                    "symbol": self.current_symbol,
+                    "barrier": digit,
+                    "req_id": req_id
+                }))
+                logger.info(f"🎯 DIGITMATCH enviado: dígito={digit}, valor=${amount:.2f}")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Erro trade DIGITMATCH: {e}")
+                with self._pending_lock:
+                    self.pending_trade = None
+                return False
+
+    def _on_proposal(self, data):
+        with self._pending_lock:
+            if self.pending_trade is None:
+                logger.debug("📨 Proposta recebida mas sem pending_trade")
+                return
+            if data.get('req_id') != self.pending_trade.get('req_id'):
+                logger.debug(f"📨 Proposta com req_id diferente: {data.get('req_id')} != {self.pending_trade.get('req_id')}")
+                return
+            if data.get('error'):
+                logger.error(f"❌ Erro na proposta: {data['error']}")
+                self.pending_trade = None
+                return
+            p = data.get('proposal', {})
+            pid, ask = p.get('id'), p.get('ask_price')
+            if not pid or ask is None:
+                logger.warning(f"⚠️ Proposta sem id ou ask_price: {data}")
+                self.pending_trade = None
+                return
+            if 'proposal_id' in self.pending_trade:
+                logger.warning("BUY já enviado para esta proposta")
+                return
+            self.pending_trade['proposal_id'] = pid
+            logger.info(f"📥 Proposta recebida: id={pid}, ask_price={ask}")
+
+        try:
+            self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
+            logger.info(f"🛒 Buy enviado para proposta {pid}")
+        except Exception as e:
+            logger.error(f"❌ Erro ao enviar buy: {e}")
+            with self._pending_lock:
+                self.pending_trade = None
+
+    def _on_buy_response(self, data):
+        with self._pending_lock:
+            if data.get('error'):
+                logger.error(f"❌ Erro na resposta de buy: {data['error']}")
+                self.pending_trade = None
+                return
+            bd = data.get('buy', {})
+            cid, bp = bd.get('contract_id'), bd.get('buy_price', 0)
+            if not cid:
+                logger.warning(f"⚠️ Buy sem contract_id: {data}")
+                self.pending_trade = None
+                return
+            if self.pending_trade:
+                trade_timestamp = self.pending_trade.get('timestamp', time.time())
+
+                amt = self.pending_trade.get('amount', 0)
+                action = self.pending_trade.get('contract_type', '')
+                is_digit = self.pending_trade.get('is_digit', False)
+                is_differ = self.pending_trade.get('is_differ', False)
+                is_matches = self.pending_trade.get('is_matches', False)
+                digit_barrier = self.pending_trade.get('digit_barrier')
+
+                latency_ms = round((time.time() - trade_timestamp) * 1000)
+                logger.info(f"✅ Contrato comprado: cid={cid}, bp={bp}, action={action}, latency={latency_ms}ms")
+                if latency_ms > 300:
+                    logger.warning(f"⚠️ Latência alta ({latency_ms}ms)")
+
+                if self.trading_bot:
+                    self.trading_bot.register_trade({
+                        'contract_id': cid,
+                        'symbol': self.current_symbol,
+                        'action': action,
+                        'amount': amt,
+                        'price': bp,
+                        'result': 'pending',
+                        'confidence': 15 if is_matches else (95 if is_differ else 70),
+                        'is_digit': is_digit,
+                        'is_differ': is_differ,
+                        'is_matches': is_matches,
+                        'digit_barrier': digit_barrier
+                    })
+                self.active_trades[cid] = {
+                    'contract_id': cid,
+                    'amount': amt,
+                    'buy_price': bp,
+                    'timestamp': time.time(),
+                    'action': action,
+                    'is_digit': is_digit,
+                    'is_differ': is_differ,
+                    'is_matches': is_matches,
+                    'digit_barrier': digit_barrier,
+                    'symbol': self.current_symbol
+                }
+                self._subscribe_contract(cid)
+                self.pending_trade = None
+
+    def _subscribe_contract(self, cid):
+        try:
+            self.ws.send(json.dumps({"proposal_open_contract": 1, "contract_id": cid, "subscribe": 1, "req_id": self._next_req()}))
+            logger.info(f"📎 Subscrição de contrato enviada: {cid}")
+        except Exception as e:
+            logger.error(f"Erro subs. contrato {cid}: {e}")
+
+    def _resubscribe_active_trades(self):
+        if not self.active_trades:
+            return
+        now = time.time()
+        expired = [cid for cid, t in self.active_trades.items()
+                   if now - t.get('timestamp', now) > 300]
+        for cid in expired:
+            logger.warning(f"⚠️ Trade {cid} expirado após reconexão — removido")
+            del self.active_trades[cid]
+        if not self.active_trades:
+            return
+        logger.info(f"🔄 Reassinar {len(self.active_trades)} contrato(s)...")
+        for cid in list(self.active_trades.keys()):
+            try:
+                self.ws.send(json.dumps({
+                    "proposal_open_contract": 1,
+                    "contract_id": cid,
+                    "subscribe": 1,
+                    "req_id": self._next_req()
+                }))
+                logger.info(f"📎 Reassinar contrato {cid}")
+            except Exception as e:
+                logger.error(f"Falha ao reassinar {cid}: {e}")
+
+    def _on_poc(self, data):
+        c = data.get('proposal_open_contract', {})
+        cid = c.get('contract_id')
+        if not cid:
+            logger.debug(f"📨 POC sem contract_id: {data}")
+            return
+        if not c.get('is_sold'):
+            logger.debug(f"📨 POC recebido mas ainda não vendido: {cid}")
+            return
+        logger.info(f"📦 POC recebido: contract_id={cid}, is_sold={c.get('is_sold')}")
+        with self._processed_lock:
+            if cid in self._processed_contracts:
+                logger.debug(f"📦 POC já processado: {cid}")
+                return
+            self._processed_contracts.append(cid)
+
+        bp, sp = c.get('buy_price', 0), c.get('sell_price', 0)
+        profit = sp - bp
+        is_win = profit > 0
+        logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}")
+
+        trade_info = self.active_trades.get(cid, {})
+        if not trade_info:
+            logger.warning(f"⚠️ POC para contrato desconhecido: {cid} (talvez já removido)")
+
+        is_digit = trade_info.get('is_digit', False)
+        is_differ = trade_info.get('is_differ', False)
+        is_matches = trade_info.get('is_matches', False)
+        digit_barrier = trade_info.get('digit_barrier')
+
+        if is_matches and digit_barrier is not None:
+            logger.info(f"🎯 DIGITMATCH [{cid}]: Dígito={digit_barrier}, "
+                       f"{'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f} (payout 9x)")
+        elif is_differ and digit_barrier is not None:
+            logger.info(f"🎯 DIGITDIFF [{cid}]: Barreira={digit_barrier}, "
+                       f"{'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f}")
+        else:
+            logger.info(f"📊 RESULTADO [{cid}]: {'✅ GANHO' if is_win else '❌ PERDA'} ${abs(profit):.2f}")
+
+        if self.trading_bot:
+            self.trading_bot.on_trade_result({
+                'contract_id': cid,
+                'buy_price': bp,
+                'sell_price': sp,
+                'profit': profit,
+                'amount': trade_info.get('amount', bp),
+                'is_win': is_win
+            })
+        if self.on_result_callback:
+            self.on_result_callback({
+                'contract_id': cid,
+                'symbol': trade_info.get('symbol', self.current_symbol),
+                'action': trade_info.get('action', ''),
+                'amount': trade_info.get('amount', bp),
+                'buy_price': bp,
+                'sell_price': sp,
+                'profit': profit,
+                'is_win': is_win,
+                'is_digit': is_digit,
+                'is_differ': is_differ,
+                'is_matches': is_matches,
+                'digit_barrier': digit_barrier
+            })
+        if cid in self.active_trades:
+            del self.active_trades[cid]
+
+    def _on_api_error(self, data):
+        err = data.get('error', {})
+        code = err.get('code', 'N/A')
+        msg = err.get('message', 'desconhecido')
+        self.auth_error = err
+        logger.error(f"❌ API Error: {msg} (código: {code})")
+        if code == 'InvalidToken':
+            logger.error("🔑 Token inválido — utilizador deve refazer OAuth")
+        elif code == 'AuthorizationRequired':
+            logger.error("🔒 Autorização necessária — token pode ter expirado")
+        elif code == 'RateLimit':
+            logger.warning("⏱️ Rate limit — aguardar antes de reconectar")
+
+    def request_candles(self, symbol=None, granularity=60, count=50):
+        symbol = symbol or self.current_symbol
+        try:
+            self.ws.send(json.dumps({
+                "ticks_history": symbol,
+                "style": "candles",
+                "granularity": granularity,
+                "count": count,
+                "end": "latest",
+                "req_id": self._next_req()
+            }))
+            logger.info(f"📊 Pedido de velas enviado para {symbol}")
+        except Exception as e:
+            logger.error(f"Erro ao pedir velas: {e}")
+
+    def _on_candles(self, data):
+        candles = data.get('candles', [])
+        if candles:
+            with self._candles_cache_lock:
+                self._candles_cache = {
+                    'data': candles,
+                    'timestamp': time.time()
+                }
+            if self.trading_bot and hasattr(self.trading_bot, 'feed_candle_data'):
+                for candle in candles[-20:]:
+                    high = float(candle.get('high', 0))
+                    low = float(candle.get('low', 0))
+                    close = float(candle.get('close', 0))
+                    if high and low and close:
+                        self.trading_bot.feed_candle_data(high, low, close)
+            if self.on_candles_callback:
+                self.on_candles_callback(candles)
+
+    def get_cached_candles(self, max_age=None):
+        if max_age is None:
+            max_age = config.CANDLE_CACHE_TTL
+        with self._candles_cache_lock:
+            if not self._candles_cache:
+                return None
+            age = time.time() - self._candles_cache.get('timestamp', 0)
+            if age > max_age:
+                return None
+            return self._candles_cache['data']
+
+    def request_deposit(self, amount, currency, method):
+        return {'status': 'pending', 'message': f'Depósito ${amount} solicitado.', 'amount': amount, 'method': method}
+
+    def request_withdrawal(self, amount, currency, method):
+        if amount > self.balance:
+            return {'error': 'Saldo insuficiente'}
+        return {'status': 'pending', 'message': f'Saque ${amount} solicitado.', 'amount': amount, 'method': method}
