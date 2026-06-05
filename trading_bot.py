@@ -56,8 +56,6 @@ class TradingBot:
         self.on_signal_result_callback = None
         self._last_signal_id = None
 
-        self._last_emitted_signal = None
-
     def start(self, client):
         self.client = client
         self.daily_stats['start_balance'] = self.balance
@@ -121,7 +119,9 @@ class TradingBot:
 
     def get_status(self):
         self.check_pending_trades()
-        digit_action, digit_conf = self.get_digit_signal()
+        # Correção urgente: get_digit_signal() foi removido
+        digit_action = None
+        digit_conf = 0
         if self.client:
             conn = self.client.connected
             auth = self.client.authorized
@@ -271,10 +271,9 @@ class TradingBot:
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
                 is_digit = trade.get('is_digit', False)
-                timeout = 30 if is_digit else 180   # Bug #7: timeout específico
+                timeout = 30 if is_digit else 180
                 if elapsed > timeout:
                     with self._state_lock:
-                        # Guarda contra recontagem
                         if trade.get('result') == 'expired':
                             continue
                         trade['result'] = 'expired'
@@ -311,7 +310,6 @@ class TradingBot:
                         logger.warning(f"⚠️ Nenhum trade pendente para contract_id {contract_id}. Ignorando.")
                         return
 
-            # Bug #7: Ignorar trade já expirado
             if target_trade.get('result') == 'expired':
                 logger.warning(f"Trade {contract_id} já estava expirado. Ignorando resultado tardio.")
                 return
@@ -344,9 +342,6 @@ class TradingBot:
             self.update_stats()
             if self.client:
                 self.client.get_balance()
-
-            # Bug #1 CORRIGIDO: Notificação movida exclusivamente para o callback do app.py
-            # O strategy.notify_result() é chamado no app.py via on_result_callback
 
             if self.on_signal_result_callback and self._last_signal_id:
                 try:
