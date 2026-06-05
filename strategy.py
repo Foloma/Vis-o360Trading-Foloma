@@ -6,7 +6,8 @@ logger = logging.getLogger(__name__)
 
 class StrategyManager:
     """
-    Implementa os três módulos da Foloma Visão 360 Safe Flow.
+    Implementa os três módulos da Foloma Visão 360 Smart Flow.
+    Thresholds ajustados para maior fluidez operacional.
     """
 
     def __init__(self, client, analyzer):
@@ -19,13 +20,15 @@ class StrategyManager:
         self._global_stop_until = 0
         self._cooldown_until = 0
         self._differ_sequence_used = set()
-        # Separar estado de paridade
-        self._parity_odd_used = False   # streak de ímpares usado
-        self._parity_even_used = False  # streak de pares usado
-        self._parity_martingale_used = False  # segunda entrada (Martingale) já foi usada?
-        self._last_parity_streak_type = None  # 'odd' ou 'even'
+        # Paridade — estados separados
+        self._parity_odd_used = False
+        self._parity_even_used = False
+        self._parity_martingale_used = False
+        self._last_parity_streak_type = None
         self._matches_sequence_used = False
         self._matches_cooldown_until = 0
+        # Histórico de preços para deteção de spikes
+        self._price_history = []
 
     # -----------------------------------------------------------------
     # Propriedades de estado
@@ -56,7 +59,34 @@ class StrategyManager:
             return False, "Reconexão recente"
         if getattr(self.client, '_ping_ms', 0) > 250:
             return False, f"Latência alta ({self.client._ping_ms}ms)"
+        # Verificar estabilidade de mercado
+        stable, reason = self.is_market_stable()
+        if not stable:
+            return False, reason
         return True, "OK"
+
+    def is_market_stable(self):
+        """
+        Verifica se o mercado está estável para operar.
+        Bloqueia em caso de spikes de volatilidade.
+        """
+        # Verificar spikes nos últimos 5 ticks
+        if len(self._price_history) >= 5:
+            recent = self._price_history[-5:]
+            avg_price = sum(recent) / len(recent)
+            for price in recent:
+                variation = abs(price - avg_price) / avg_price
+                if variation > 0.05:  # 5% de variação num tick é um spike
+                    return False, f"Spike detetado (variação {variation:.1%})"
+        return True, "OK"
+
+    def on_tick(self, tick):
+        """Regista preço para análise de estabilidade."""
+        price = tick.get('price', 0)
+        if price:
+            self._price_history.append(price)
+            if len(self._price_history) > 20:
+                self._price_history.pop(0)
 
     def _apply_cooldown(self, ticks):
         self._cooldown_until = time.time() + ticks
@@ -79,14 +109,11 @@ class StrategyManager:
                 self._consecutive_losses = 0
                 self.reset_sequence_state()
                 return
-            # cooldown específico por módulo
             if action.startswith('DIFFER'):
                 self._apply_cooldown(5)
             elif action in ('CALL', 'PUT', 'BUY', 'SELL'):
-                # Em paridade, se perdemos e o Martingale ainda não foi usado, NÃO aplicar cooldown longo
-                # Apenas um cooldown curto para permitir reentrada rápida
                 if not self._parity_martingale_used and self._last_parity_streak_type:
-                    self._apply_cooldown(1)  # quase sem espera para reentrada
+                    self._apply_cooldown(1)
                 else:
                     self._apply_cooldown(5)
             elif action.startswith('MATCH'):
@@ -110,15 +137,18 @@ class StrategyManager:
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 3:
             return False, None
-        last_three = recent[-3:]
-        if len(set(last_three)) == 1:
-            digit = last_three[0]
-            available = digit not in self._differ_sequence_used
-            return available, digit if available else None
+        # Novo threshold: 2 dígitos iguais consecutivos + dominância nos últimos 10
+        last_two = recent[-2:]
+        if last_two[0] == last_two[1]:
+            digit = last_two[0]
+            # Verificar dominância: apareceu ≥3 vezes nos últimos 10?
+            last_ten = recent[-10:] if len(recent) >= 10 else recent
+            if last_ten.count(digit) >= 3:
+                available = digit not in self._differ_sequence_used
+                return available, digit if available else None
         return False, None
 
     def _peek_parity(self):
-        """Retorna (disponível, direção_recomendada, motivo)."""
         ok, _ = self.can_trade
         if not ok:
             return False, None, "Condições básicas não satisfeitas"
@@ -126,25 +156,26 @@ class StrategyManager:
         if len(recent) < 4:
             return False, None, "Aguardando dados"
 
+        # Novo threshold: 3 pares nos últimos 4 ticks OU 3 ímpares nos últimos 4 ticks
         last_four = [d % 2 != 0 for d in recent[-4:]]
+        odd_count = sum(last_four)
+        even_count = 4 - odd_count
 
-        # Verificar streak de ímpares
-        if all(p == True for p in last_four):
-            # Disponível se ainda não usado ou se Martingale permitido
+        # 3 ou 4 ímpares → apostar PAR
+        if odd_count >= 3:
             can_enter = not self._parity_odd_used or (
                 self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd'
             )
-            return can_enter, 'even', "Streak de 4 ÍMPARES → apostar PAR"
+            return can_enter, 'even', f"Tendência ÍMPAR ({odd_count}/4) → apostar PAR"
 
-        # Verificar streak de pares
-        if all(p == False for p in last_four):
+        # 3 ou 4 pares → apostar ÍMPAR
+        if even_count >= 3:
             can_enter = not self._parity_even_used or (
                 self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even'
             )
-            return can_enter, 'odd', "Streak de 4 PARES → apostar ÍMPAR"
+            return can_enter, 'odd', f"Tendência PAR ({even_count}/4) → apostar ÍMPAR"
 
-        # Sem streak
-        return False, None, "Nenhum streak de 4"
+        return False, None, "Nenhuma tendência clara"
 
     def _peek_matches(self):
         ok, _ = self.can_trade
@@ -156,12 +187,12 @@ class StrategyManager:
         if not absence:
             return False
         for digit, count in absence().items():
-            if count >= 25 and not self._matches_sequence_used:
+            if count >= 15 and not self._matches_sequence_used:
                 return True
         return False
 
     # -----------------------------------------------------------------
-    # Módulo 1: DIFFER
+    # Módulo 1: DIFFER (thresholds flexibilizados)
     # -----------------------------------------------------------------
     def evaluate_differ(self):
         ok, reason = self.can_trade
@@ -172,20 +203,25 @@ class StrategyManager:
         if len(recent) < 3:
             return None, "Aguardando dados"
 
-        last_three = recent[-3:]
-        if len(set(last_three)) == 1:
-            digit = last_three[0]
-            if digit in self._differ_sequence_used:
-                return None, f"Dígito {digit} já utilizado nesta sequência"
-            self._differ_sequence_used.add(digit)
-            self._last_differ_digit = digit
-            return digit, f"Repetição detetada: {digit}{digit}{digit}"
-        else:
+        # Nova regra: 2 dígitos iguais consecutivos + dominância ≥3 nos últimos 10
+        last_two = recent[-2:]
+        if last_two[0] == last_two[1]:
+            digit = last_two[0]
+            last_ten = recent[-10:] if len(recent) >= 10 else recent
+            if last_ten.count(digit) >= 3:
+                if digit in self._differ_sequence_used:
+                    return None, f"Dígito {digit} já utilizado nesta sequência"
+                self._differ_sequence_used.add(digit)
+                self._last_differ_digit = digit
+                logger.info(f"🎯 DIFFER: dígito {digit} — {last_two[0]}{last_two[1]} consecutivos + {last_ten.count(digit)}/10 dominância")
+                return digit, f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos + dominância {last_ten.count(digit)}/10"
+        # Reset se sequência quebrou
+        if len(recent) >= 3 and recent[-3] != recent[-2]:
             self._differ_sequence_used.clear()
-            return None, "Nenhuma repetição tripla"
+        return None, "Nenhum padrão DIFFER"
 
     # -----------------------------------------------------------------
-    # Módulo 2: PAR/ÍMPAR com suporte a Martingale
+    # Módulo 2: PAR/ÍMPAR (thresholds flexibilizados + logs)
     # -----------------------------------------------------------------
     def evaluate_parity(self):
         ok, reason = self.can_trade
@@ -197,42 +233,48 @@ class StrategyManager:
             return None, "Aguardando dados"
 
         last_four = [d % 2 != 0 for d in recent[-4:]]
+        odd_count = sum(last_four)
+        even_count = 4 - odd_count
 
-        # Streak de ímpares
-        if all(p == True for p in last_four):
-            # Primeira entrada
+        logger.info(f"🔍 PAR/ÍMPAR: últimos 4 dígitos={recent[-4:]}, ímpares={odd_count}, pares={even_count}")
+
+        # 3 ou 4 ímpares → apostar PAR
+        if odd_count >= 3:
             if not self._parity_odd_used:
                 self._parity_odd_used = True
                 self._last_parity_streak_type = 'odd'
                 self._parity_martingale_used = False
-                return 'even', "Streak de 4 ÍMPARES → apostar PAR"
-            # Martingale (segunda entrada) — permitir se streak continuar e ainda não usado
-            if self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
+                logger.info(f"🎯 PAR/ÍMPAR: {odd_count}/4 ímpares → ENTRAR PAR (primeira entrada)")
+                return 'even', f"Tendência ÍMPAR ({odd_count}/4) → apostar PAR"
+            if not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
                 self._parity_martingale_used = True
+                logger.info(f"🎯 PAR/ÍMPAR: Martingale ativado — streak ÍMPAR continua → apostar PAR novamente")
                 return 'even', "Martingale: streak ÍMPAR continua → apostar PAR novamente"
             return None, "Streak ÍMPAR já utilizado"
 
-        # Streak de pares
-        if all(p == False for p in last_four):
+        # 3 ou 4 pares → apostar ÍMPAR
+        if even_count >= 3:
             if not self._parity_even_used:
                 self._parity_even_used = True
                 self._last_parity_streak_type = 'even'
                 self._parity_martingale_used = False
-                return 'odd', "Streak de 4 PARES → apostar ÍMPAR"
-            if self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even':
+                logger.info(f"🎯 PAR/ÍMPAR: {even_count}/4 pares → ENTRAR ÍMPAR (primeira entrada)")
+                return 'odd', f"Tendência PAR ({even_count}/4) → apostar ÍMPAR"
+            if not self._parity_martingale_used and self._last_parity_streak_type == 'even':
                 self._parity_martingale_used = True
+                logger.info(f"🎯 PAR/ÍMPAR: Martingale ativado — streak PAR continua → apostar ÍMPAR novamente")
                 return 'odd', "Martingale: streak PAR continua → apostar ÍMPAR novamente"
             return None, "Streak PAR já utilizado"
 
-        # Se o streak quebrou, resetar os estados de paridade
+        # Reset se não há tendência
         self._parity_odd_used = False
         self._parity_even_used = False
         self._parity_martingale_used = False
         self._last_parity_streak_type = None
-        return None, "Nenhum streak de 4"
+        return None, "Nenhuma tendência clara"
 
     # -----------------------------------------------------------------
-    # Módulo 3: MATCHES
+    # Módulo 3: MATCHES (threshold reduzido)
     # -----------------------------------------------------------------
     def evaluate_matches(self):
         ok, reason = self.can_trade
@@ -247,12 +289,13 @@ class StrategyManager:
             return None, "Contador de ausência indisponível"
 
         for digit, count in absence().items():
-            if count >= 25 and not self._matches_sequence_used:
+            if count >= 15 and not self._matches_sequence_used:
                 self._matches_sequence_used = True
                 self._last_matches_digit = digit
+                logger.info(f"🎯 MATCHES: dígito {digit} ausente há {count} ticks")
                 return digit, f"Dígito {digit} ausente há {count} ticks"
         self._matches_sequence_used = False
-        return None, "Nenhum dígito ausente ≥25 ticks"
+        return None, "Nenhum dígito ausente ≥15 ticks"
 
     # -----------------------------------------------------------------
     # Status para o frontend
@@ -269,7 +312,7 @@ class StrategyManager:
             'differ_available': differ_avail,
             'differ_digit': differ_digit,
             'parity_available': parity_avail,
-            'parity_direction': parity_dir,       # 'odd' ou 'even' (direção da aposta)
+            'parity_direction': parity_dir,
             'parity_reason': parity_reason,
             'matches_available': matches_avail,
         }
