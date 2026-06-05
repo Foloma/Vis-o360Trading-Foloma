@@ -486,32 +486,40 @@ def create_session(user_id, user, force=False):
     bot.client = client
     bot.digit_analyzer = analyzer
 
-    # Instanciar o strategy e injetar no bot (Bug #5)
     strategy = StrategyManager(client, analyzer)
     bot.strategy = strategy
 
     def on_trade_result(trade):
         try:
             result = 'win' if trade.get('is_win') else 'loss'
+            action = trade.get('action', '')
+            is_win = trade.get('is_win', False)
+            contract_id = trade.get('contract_id', 'N/A')
+            profit = trade.get('profit', 0)
+
+            # Log detalhado para diagnóstico PAR/ÍMPAR
+            logger.info(f"📊 RESULTADO: ação={action}, is_win={is_win}, profit={profit}, contract_id={contract_id}")
+
             persist_trade(user_id, {
-                'contract_id': trade.get('contract_id'),
+                'contract_id': contract_id,
                 'symbol': trade.get('symbol', 'R_100'),
-                'action': trade.get('action', ''),
+                'action': action,
                 'amount': trade.get('amount', 0),
                 'buy_price': trade.get('buy_price', 0),
                 'sell_price': trade.get('sell_price', 0),
-                'profit': trade.get('profit', 0),
+                'profit': profit,
                 'result': result
             })
             _save_martingale_state(user_id, bot)
-            # Notificar o strategy (única notificação, bug #1 corrigido)
-            strategy.notify_result(trade.get('action', ''), trade.get('is_win', False))
+            strategy.notify_result(action, is_win)
         except Exception as e:
             logger.error(f"Callback de trade falhou: {e}")
 
-    # Callbacks de tick e resultado para o cliente
     def tick_callback(tick):
         bot.on_tick(tick)
+        # Integração do on_tick do strategy (para análise de estabilidade)
+        if strategy:
+            strategy.on_tick(tick)
 
     client.on_tick_callback = tick_callback
     client.on_result_callback = on_trade_result
@@ -566,7 +574,6 @@ def create_session(user_id, user, force=False):
         'digit_analyzer': analyzer,
         'strategy': strategy,
         'candles': []
-        # Bug #4: matches_cooldown_until removido — gestão exclusiva do StrategyManager
     }
 
     def on_candles(candles):
@@ -1187,7 +1194,6 @@ def trade_digit():
             if not action:
                 return jsonify({'error': f'⛔ {reason}'}), 400
         else:
-            # fallback antigo
             d = request.json
             pred = d.get('prediction')
             if pred not in ('odd', 'even'):
@@ -1204,7 +1210,11 @@ def trade_digit():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        ok = sess['client'].place_trade('CALL' if action == 'odd' else 'PUT', amt, True)
+        # Log detalhado antes de enviar
+        contract = 'CALL' if action == 'odd' else 'PUT'
+        logger.info(f"🎲 TRADE PAR/ÍMPAR: ação recomendada={action}, contrato={contract}, valor=${amt:.2f}, ticks_restantes={tr}")
+
+        ok = sess['client'].place_trade(contract, amt, True)
         if ok:
             credit_affiliate_commission(session['user_email'], amt)
             label = 'ÍMPAR' if action == 'odd' else 'PAR'
@@ -1212,7 +1222,7 @@ def trade_digit():
                 'status': 'ok',
                 'message': f'✅ {label} por ${amt:.2f}',
                 'ticks_remaining': tr,
-                'executed_action': action   # Bug #13: devolve a direção real executada
+                'executed_action': action
             })
         return jsonify({'error': 'Falha no trade'}), 500
     except Exception:
@@ -1280,7 +1290,6 @@ def trade_matches():
 
         strategy = sess.get('strategy')
         if strategy:
-            # Bug #4: cooldown MATCHES agora gerido exclusivamente pelo strategy
             digit, reason = strategy.evaluate_matches()
             if digit is None:
                 return jsonify({'error': f'⛔ {reason}'}), 400
