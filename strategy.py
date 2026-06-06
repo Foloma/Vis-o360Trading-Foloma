@@ -7,7 +7,6 @@ logger = logging.getLogger(__name__)
 class StrategyManager:
     """
     Implementa os três módulos da Foloma Visão 360 Smart Flow.
-    Thresholds ajustados para maior fluidez operacional.
     """
 
     def __init__(self, client, analyzer):
@@ -20,18 +19,21 @@ class StrategyManager:
         self._global_stop_until = 0
         self._cooldown_until = 0
         self._differ_sequence_used = set()
-        # Paridade — estados separados
         self._parity_odd_used = False
         self._parity_even_used = False
         self._parity_martingale_used = False
         self._last_parity_streak_type = None
         self._matches_sequence_used = False
         self._matches_cooldown_until = 0
-        # Histórico de preços para deteção de spikes
         self._price_history = []
 
+        # Entry Window: timestamp do último sinal gerado
+        self._differ_signal_at = 0
+        self._parity_signal_at = 0
+        self._matches_signal_at = 0
+
     # -----------------------------------------------------------------
-    # Propriedades de estado
+    # Propriedades
     # -----------------------------------------------------------------
     @property
     def is_global_stop(self):
@@ -48,36 +50,36 @@ class StrategyManager:
     @property
     def can_trade(self):
         if self.is_global_stop:
+            logger.debug("⛔ Bloqueio: STOP GLOBAL ATIVO")
             return False, "STOP GLOBAL ATIVO"
         if self.is_cooldown:
+            logger.debug(f"⛔ Bloqueio: Cooldown ativo até {self._cooldown_until - time.time():.0f}s")
             return False, "Cooldown ativo"
         if not self.client or not self.client.authorized:
             return False, "Não autorizado"
         if not self.client.streaming:
             return False, "Sem streaming"
         if time.time() - getattr(self.client, '_last_reconnect_time', 0) < 10:
+            logger.debug("⛔ Bloqueio: Reconexão recente")
             return False, "Reconexão recente"
         if getattr(self.client, '_ping_ms', 0) > 250:
+            logger.debug(f"⛔ Bloqueio: Latência alta ({self.client._ping_ms}ms)")
             return False, f"Latência alta ({self.client._ping_ms}ms)"
-        # Verificar estabilidade de mercado
         stable, reason = self.is_market_stable()
         if not stable:
+            logger.debug(f"⛔ Bloqueio: Mercado instável — {reason}")
             return False, reason
         return True, "OK"
 
     def is_market_stable(self):
-        """
-        Verifica se o mercado está estável para operar.
-        Bloqueia em caso de spikes de volatilidade.
-        """
-        # Verificar spikes nos últimos 5 ticks
+        """Verifica estabilidade com threshold de 0.2% (0.002)."""
         if len(self._price_history) >= 5:
             recent = self._price_history[-5:]
             avg_price = sum(recent) / len(recent)
             for price in recent:
-                variation = abs(price - avg_price) / avg_price
-                if variation > 0.05:  # 5% de variação num tick é um spike
-                    return False, f"Spike detetado (variação {variation:.1%})"
+                variation = abs(price - avg_price) / avg_price if avg_price > 0 else 0
+                if variation > 0.002:  # 0.2% — mais sensível a spikes reais
+                    return False, f"Spike detetado (variação {variation:.3%})"
         return True, "OK"
 
     def on_tick(self, tick):
@@ -98,6 +100,15 @@ class StrategyManager:
         self._parity_martingale_used = False
         self._last_parity_streak_type = None
         self._matches_sequence_used = False
+        self._differ_signal_at = 0
+        self._parity_signal_at = 0
+        self._matches_signal_at = 0
+
+    def _is_entry_window_valid(self, signal_at, max_age=20):
+        """Sinal expira após max_age segundos (≈2 ticks)."""
+        if signal_at == 0:
+            return True
+        return time.time() - signal_at <= max_age
 
     def notify_result(self, action, is_win):
         """Chamado pelo app.py após cada trade."""
@@ -105,20 +116,23 @@ class StrategyManager:
             self._consecutive_losses += 1
             if self._consecutive_losses >= 2:
                 self._global_stop_until = time.time() + 180
-                logger.warning("🛑 STOP GLOBAL: 2 perdas consecutivas")
+                logger.warning("🛑 STOP GLOBAL: 2 perdas consecutivas — pausa 3 min")
                 self._consecutive_losses = 0
                 self.reset_sequence_state()
                 return
             if action.startswith('DIFFER'):
                 self._apply_cooldown(5)
+                logger.info("⏳ Cooldown DIFFER pós-perda: 5s")
             elif action in ('CALL', 'PUT', 'BUY', 'SELL'):
                 if not self._parity_martingale_used and self._last_parity_streak_type:
                     self._apply_cooldown(1)
                 else:
                     self._apply_cooldown(5)
+                    logger.info("⏳ Cooldown PAR/ÍMPAR pós-perda: 5s")
             elif action.startswith('MATCH'):
                 self._matches_cooldown_until = time.time() + 150
                 self._apply_cooldown(10)
+                logger.info("⏳ Cooldown MATCHES pós-perda: 150s")
         else:
             self._consecutive_losses = 0
             self.reset_sequence_state()
@@ -134,14 +148,14 @@ class StrategyManager:
         ok, _ = self.can_trade
         if not ok:
             return False, None
+        if not self._is_entry_window_valid(self._differ_signal_at):
+            return False, None
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 3:
             return False, None
-        # Novo threshold: 2 dígitos iguais consecutivos + dominância nos últimos 10
         last_two = recent[-2:]
         if last_two[0] == last_two[1]:
             digit = last_two[0]
-            # Verificar dominância: apareceu ≥3 vezes nos últimos 10?
             last_ten = recent[-10:] if len(recent) >= 10 else recent
             if last_ten.count(digit) >= 3:
                 available = digit not in self._differ_sequence_used
@@ -152,29 +166,24 @@ class StrategyManager:
         ok, _ = self.can_trade
         if not ok:
             return False, None, "Condições básicas não satisfeitas"
+        if not self._is_entry_window_valid(self._parity_signal_at):
+            return False, None, "Janela de entrada expirada"
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 4:
             return False, None, "Aguardando dados"
-
-        # Novo threshold: 3 pares nos últimos 4 ticks OU 3 ímpares nos últimos 4 ticks
         last_four = [d % 2 != 0 for d in recent[-4:]]
         odd_count = sum(last_four)
         even_count = 4 - odd_count
-
-        # 3 ou 4 ímpares → apostar PAR
         if odd_count >= 3:
             can_enter = not self._parity_odd_used or (
                 self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd'
             )
-            return can_enter, 'even', f"Tendência ÍMPAR ({odd_count}/4) → apostar PAR"
-
-        # 3 ou 4 pares → apostar ÍMPAR
+            return can_enter, 'even', f"Tendência ÍMPAR ({odd_count}/4)"
         if even_count >= 3:
             can_enter = not self._parity_even_used or (
                 self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even'
             )
-            return can_enter, 'odd', f"Tendência PAR ({even_count}/4) → apostar ÍMPAR"
-
+            return can_enter, 'odd', f"Tendência PAR ({even_count}/4)"
         return False, None, "Nenhuma tendência clara"
 
     def _peek_matches(self):
@@ -192,41 +201,69 @@ class StrategyManager:
         return False
 
     # -----------------------------------------------------------------
-    # Módulo 1: DIFFER (thresholds flexibilizados)
+    # Módulo 1: DIFFER
     # -----------------------------------------------------------------
     def evaluate_differ(self):
         ok, reason = self.can_trade
         if not ok:
+            logger.info(f"⛔ DIFFER bloqueado: {reason}")
             return None, reason
+
+        if not self._is_entry_window_valid(self._differ_signal_at):
+            logger.info("⛔ DIFFER bloqueado: janela de entrada expirada")
+            return None, "Janela de entrada expirada"
 
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 3:
             return None, "Aguardando dados"
 
-        # Nova regra: 2 dígitos iguais consecutivos + dominância ≥3 nos últimos 10
         last_two = recent[-2:]
         if last_two[0] == last_two[1]:
             digit = last_two[0]
             last_ten = recent[-10:] if len(recent) >= 10 else recent
-            if last_ten.count(digit) >= 3:
+            count = last_ten.count(digit)
+            if count >= 3:
                 if digit in self._differ_sequence_used:
+                    logger.info(f"⛔ DIFFER bloqueado: dígito {digit} já utilizado")
                     return None, f"Dígito {digit} já utilizado nesta sequência"
                 self._differ_sequence_used.add(digit)
                 self._last_differ_digit = digit
-                logger.info(f"🎯 DIFFER: dígito {digit} — {last_two[0]}{last_two[1]} consecutivos + {last_ten.count(digit)}/10 dominância")
-                return digit, f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos + dominância {last_ten.count(digit)}/10"
-        # Reset se sequência quebrou
+                self._differ_signal_at = time.time()
+                logger.info(f"✅ DIFFER SINAL: dígito {digit} — {last_two[0]}{last_two[1]} consecutivos + {count}/10 dominância")
+                return digit, f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos + dominância {count}/10"
+
         if len(recent) >= 3 and recent[-3] != recent[-2]:
             self._differ_sequence_used.clear()
+        logger.debug(f"⛔ DIFFER: nenhum padrão — últimos 2: {last_two}")
         return None, "Nenhum padrão DIFFER"
 
     # -----------------------------------------------------------------
-    # Módulo 2: PAR/ÍMPAR (thresholds flexibilizados + logs)
+    # Módulo 2: PAR/ÍMPAR com martingale condicional
     # -----------------------------------------------------------------
+    def _can_martingale(self):
+        """Verifica condições para autorizar martingale."""
+        ping = getattr(self.client, '_ping_ms', 0)
+        if ping >= 150:
+            logger.info(f"⛔ Martingale bloqueado: ping alto ({ping}ms)")
+            return False
+        stable, _ = self.is_market_stable()
+        if not stable:
+            logger.info("⛔ Martingale bloqueado: mercado instável")
+            return False
+        if time.time() - getattr(self.client, '_last_reconnect_time', 0) < 10:
+            logger.info("⛔ Martingale bloqueado: reconexão recente")
+            return False
+        return True
+
     def evaluate_parity(self):
         ok, reason = self.can_trade
         if not ok:
+            logger.info(f"⛔ PAR/ÍMPAR bloqueado: {reason}")
             return None, reason
+
+        if not self._is_entry_window_valid(self._parity_signal_at):
+            logger.info("⛔ PAR/ÍMPAR bloqueado: janela de entrada expirada")
+            return None, "Janela de entrada expirada"
 
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 4:
@@ -235,8 +272,7 @@ class StrategyManager:
         last_four = [d % 2 != 0 for d in recent[-4:]]
         odd_count = sum(last_four)
         even_count = 4 - odd_count
-
-        logger.info(f"🔍 PAR/ÍMPAR: últimos 4 dígitos={recent[-4:]}, ímpares={odd_count}, pares={even_count}")
+        logger.info(f"🔍 PAR/ÍMPAR: últimos 4={recent[-4:]}, ímpares={odd_count}, pares={even_count}")
 
         # 3 ou 4 ímpares → apostar PAR
         if odd_count >= 3:
@@ -244,12 +280,17 @@ class StrategyManager:
                 self._parity_odd_used = True
                 self._last_parity_streak_type = 'odd'
                 self._parity_martingale_used = False
-                logger.info(f"🎯 PAR/ÍMPAR: {odd_count}/4 ímpares → ENTRAR PAR (primeira entrada)")
+                self._parity_signal_at = time.time()
+                logger.info(f"✅ PAR/ÍMPAR SINAL: {odd_count}/4 ímpares → ENTRAR PAR")
                 return 'even', f"Tendência ÍMPAR ({odd_count}/4) → apostar PAR"
             if not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
-                self._parity_martingale_used = True
-                logger.info(f"🎯 PAR/ÍMPAR: Martingale ativado — streak ÍMPAR continua → apostar PAR novamente")
-                return 'even', "Martingale: streak ÍMPAR continua → apostar PAR novamente"
+                if self._can_martingale():
+                    self._parity_martingale_used = True
+                    self._parity_signal_at = time.time()
+                    logger.info("✅ PAR/ÍMPAR MARTINGALE: autorizado")
+                    return 'even', "Martingale: streak ÍMPAR continua → apostar PAR novamente"
+                else:
+                    return None, "Martingale bloqueado por condições de mercado"
             return None, "Streak ÍMPAR já utilizado"
 
         # 3 ou 4 pares → apostar ÍMPAR
@@ -258,12 +299,17 @@ class StrategyManager:
                 self._parity_even_used = True
                 self._last_parity_streak_type = 'even'
                 self._parity_martingale_used = False
-                logger.info(f"🎯 PAR/ÍMPAR: {even_count}/4 pares → ENTRAR ÍMPAR (primeira entrada)")
+                self._parity_signal_at = time.time()
+                logger.info(f"✅ PAR/ÍMPAR SINAL: {even_count}/4 pares → ENTRAR ÍMPAR")
                 return 'odd', f"Tendência PAR ({even_count}/4) → apostar ÍMPAR"
             if not self._parity_martingale_used and self._last_parity_streak_type == 'even':
-                self._parity_martingale_used = True
-                logger.info(f"🎯 PAR/ÍMPAR: Martingale ativado — streak PAR continua → apostar ÍMPAR novamente")
-                return 'odd', "Martingale: streak PAR continua → apostar ÍMPAR novamente"
+                if self._can_martingale():
+                    self._parity_martingale_used = True
+                    self._parity_signal_at = time.time()
+                    logger.info("✅ PAR/ÍMPAR MARTINGALE: autorizado")
+                    return 'odd', "Martingale: streak PAR continua → apostar ÍMPAR novamente"
+                else:
+                    return None, "Martingale bloqueado por condições de mercado"
             return None, "Streak PAR já utilizado"
 
         # Reset se não há tendência
@@ -271,17 +317,20 @@ class StrategyManager:
         self._parity_even_used = False
         self._parity_martingale_used = False
         self._last_parity_streak_type = None
+        logger.debug("⛔ PAR/ÍMPAR: nenhuma tendência clara")
         return None, "Nenhuma tendência clara"
 
     # -----------------------------------------------------------------
-    # Módulo 3: MATCHES (threshold reduzido)
+    # Módulo 3: MATCHES
     # -----------------------------------------------------------------
     def evaluate_matches(self):
         ok, reason = self.can_trade
         if not ok:
+            logger.info(f"⛔ MATCHES bloqueado: {reason}")
             return None, reason
 
         if self.is_matches_cooldown:
+            logger.info(f"⛔ MATCHES bloqueado: cooldown ativo ({self._matches_cooldown_until - time.time():.0f}s restantes)")
             return None, "Cooldown MATCHES ativo"
 
         absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
@@ -292,9 +341,11 @@ class StrategyManager:
             if count >= 15 and not self._matches_sequence_used:
                 self._matches_sequence_used = True
                 self._last_matches_digit = digit
-                logger.info(f"🎯 MATCHES: dígito {digit} ausente há {count} ticks")
+                self._matches_signal_at = time.time()
+                logger.info(f"✅ MATCHES SINAL: dígito {digit} ausente há {count} ticks")
                 return digit, f"Dígito {digit} ausente há {count} ticks"
         self._matches_sequence_used = False
+        logger.debug("⛔ MATCHES: nenhum dígito ausente ≥15 ticks")
         return None, "Nenhum dígito ausente ≥15 ticks"
 
     # -----------------------------------------------------------------
