@@ -137,7 +137,7 @@ class DerivWebSocketClient:
                     self.request_candles(self.current_symbol)
 
                 self._resubscribe_active_trades()
-                self._start_poller()  # 🔥 NOVO: polling ativo
+                self._start_poller()
 
                 if self._had_gap and not self._first_connect and self.trading_bot:
                     logger.warning("🕳️ Gap detetado – a limpar dados históricos do bot")
@@ -171,7 +171,7 @@ class DerivWebSocketClient:
                 break
 
     # -----------------------------------------------------------------
-    # 🔥 NOVO: Polling ativo para contratos pendentes
+    # Polling ativo para contratos pendentes
     # -----------------------------------------------------------------
     def _start_poller(self):
         self._stop_poller()
@@ -185,7 +185,6 @@ class DerivWebSocketClient:
         self._poller_thread = None
 
     def _poller_loop(self):
-        """A cada 5 segundos verifica contratos pendentes e força atualização."""
         while not self._stop_event.is_set() and self.authorized and self.ws:
             if self._stop_event.wait(timeout=5):
                 break
@@ -205,8 +204,6 @@ class DerivWebSocketClient:
                     except Exception as e:
                         logger.error(f"Erro no poller para {cid}: {e}")
 
-    # -----------------------------------------------------------------
-    # Métodos existentes (inalterados exceto onde indicado)
     # -----------------------------------------------------------------
     def _reset_state(self):
         self.subscribed_symbols.clear()
@@ -440,7 +437,7 @@ class DerivWebSocketClient:
             return self._req_counter
 
     # -----------------------------------------------------------------
-    # Métodos de trade (com logs e proteções)
+    # Métodos de trade
     # -----------------------------------------------------------------
     def place_trade(self, contract_type, amount, is_digit=False):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
@@ -678,8 +675,13 @@ class DerivWebSocketClient:
                     'is_matches': is_matches, 'digit_barrier': digit_barrier,
                     'symbol': self.current_symbol
                 }
-                self._subscribe_contract(cid)
-                self.pending_trade = None
+                # 🔥 CORREÇÃO: usar try/finally para garantir limpeza do pending_trade
+                try:
+                    self._subscribe_contract(cid)
+                except Exception as e:
+                    logger.error(f"Erro ao subscrever contrato {cid}: {e}")
+                finally:
+                    self.pending_trade = None
 
     def _subscribe_contract(self, cid):
         try:
@@ -690,15 +692,17 @@ class DerivWebSocketClient:
             logger.info(f"📎 Subscrição de contrato enviada: {cid}")
         except Exception as e:
             logger.error(f"Erro subs. contrato {cid}: {e}")
+            raise  # Relança para o try/finally do _on_buy_response
 
     def _resubscribe_active_trades(self):
         if not self.active_trades:
             return
         now = time.time()
+        # 🔥 CORREÇÃO: expirar contratos com mais de 120 segundos
         expired = [cid for cid, t in self.active_trades.items()
-                   if now - t.get('timestamp', now) > 300]
+                   if now - t.get('timestamp', now) > 120]
         for cid in expired:
-            logger.warning(f"⚠️ Trade {cid} expirado após reconexão — removido")
+            logger.warning(f"⚠️ Trade {cid} expirado (120s+) — removido")
             del self.active_trades[cid]
         if not self.active_trades:
             return
@@ -723,7 +727,13 @@ class DerivWebSocketClient:
                 return
             self._processed_contracts.append(cid)
 
-        bp, sp = c.get('buy_price', 0), c.get('sell_price', 0)
+        bp = c.get('buy_price', 0)
+        sp = c.get('sell_price', 0)
+
+        if sp is None or sp == 0:
+            logger.warning(f"⚠️ POC ignorado: sell_price inválido para {cid} (sp={sp})")
+            return
+
         profit = sp - bp
         is_win = profit > 0
         logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}")
