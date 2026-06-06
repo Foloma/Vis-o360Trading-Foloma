@@ -27,14 +27,10 @@ class StrategyManager:
         self._matches_cooldown_until = 0
         self._price_history = []
 
-        # Entry Window: timestamp do último sinal gerado
         self._differ_signal_at = 0
         self._parity_signal_at = 0
         self._matches_signal_at = 0
 
-    # -----------------------------------------------------------------
-    # Propriedades
-    # -----------------------------------------------------------------
     @property
     def is_global_stop(self):
         return time.time() < self._global_stop_until
@@ -50,40 +46,33 @@ class StrategyManager:
     @property
     def can_trade(self):
         if self.is_global_stop:
-            logger.debug("⛔ Bloqueio: STOP GLOBAL ATIVO")
             return False, "STOP GLOBAL ATIVO"
         if self.is_cooldown:
-            logger.debug(f"⛔ Bloqueio: Cooldown ativo até {self._cooldown_until - time.time():.0f}s")
-            return False, "Cooldown ativo"
+            return False, f"Cooldown ativo ({self._cooldown_until - time.time():.0f}s)"
         if not self.client or not self.client.authorized:
             return False, "Não autorizado"
         if not self.client.streaming:
             return False, "Sem streaming"
         if time.time() - getattr(self.client, '_last_reconnect_time', 0) < 10:
-            logger.debug("⛔ Bloqueio: Reconexão recente")
             return False, "Reconexão recente"
         if getattr(self.client, '_ping_ms', 0) > 250:
-            logger.debug(f"⛔ Bloqueio: Latência alta ({self.client._ping_ms}ms)")
             return False, f"Latência alta ({self.client._ping_ms}ms)"
         stable, reason = self.is_market_stable()
         if not stable:
-            logger.debug(f"⛔ Bloqueio: Mercado instável — {reason}")
             return False, reason
         return True, "OK"
 
     def is_market_stable(self):
-        """Verifica estabilidade com threshold de 0.2% (0.002)."""
         if len(self._price_history) >= 5:
             recent = self._price_history[-5:]
             avg_price = sum(recent) / len(recent)
             for price in recent:
                 variation = abs(price - avg_price) / avg_price if avg_price > 0 else 0
-                if variation > 0.002:  # 0.2% — mais sensível a spikes reais
+                if variation > 0.002:
                     return False, f"Spike detetado (variação {variation:.3%})"
         return True, "OK"
 
     def on_tick(self, tick):
-        """Regista preço para análise de estabilidade."""
         price = tick.get('price', 0)
         if price:
             self._price_history.append(price)
@@ -105,13 +94,11 @@ class StrategyManager:
         self._matches_signal_at = 0
 
     def _is_entry_window_valid(self, signal_at, max_age=20):
-        """Sinal expira após max_age segundos (≈2 ticks)."""
         if signal_at == 0:
             return True
         return time.time() - signal_at <= max_age
 
     def notify_result(self, action, is_win):
-        """Chamado pelo app.py após cada trade."""
         if not is_win:
             self._consecutive_losses += 1
             if self._consecutive_losses >= 2:
@@ -122,17 +109,14 @@ class StrategyManager:
                 return
             if action.startswith('DIFFER'):
                 self._apply_cooldown(5)
-                logger.info("⏳ Cooldown DIFFER pós-perda: 5s")
             elif action in ('CALL', 'PUT', 'BUY', 'SELL'):
                 if not self._parity_martingale_used and self._last_parity_streak_type:
                     self._apply_cooldown(1)
                 else:
                     self._apply_cooldown(5)
-                    logger.info("⏳ Cooldown PAR/ÍMPAR pós-perda: 5s")
             elif action.startswith('MATCH'):
                 self._matches_cooldown_until = time.time() + 150
                 self._apply_cooldown(10)
-                logger.info("⏳ Cooldown MATCHES pós-perda: 150s")
         else:
             self._consecutive_losses = 0
             self.reset_sequence_state()
@@ -151,21 +135,22 @@ class StrategyManager:
         if not self._is_entry_window_valid(self._differ_signal_at):
             return False, None
         recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 3:
+        if len(recent) < 2:
             return False, None
         last_two = recent[-2:]
         if last_two[0] == last_two[1]:
             digit = last_two[0]
             last_ten = recent[-10:] if len(recent) >= 10 else recent
-            if last_ten.count(digit) >= 3:
+            # 🔥 CORREÇÃO: dominância mínima reduzida para 2
+            if last_ten.count(digit) >= 2:
                 available = digit not in self._differ_sequence_used
                 return available, digit if available else None
         return False, None
 
     def _peek_parity(self):
-        ok, _ = self.can_trade
+        ok, reason = self.can_trade
         if not ok:
-            return False, None, "Condições básicas não satisfeitas"
+            return False, None, reason
         if not self._is_entry_window_valid(self._parity_signal_at):
             return False, None, "Janela de entrada expirada"
         recent = self.analyzer.get_recent_digits(20)
@@ -214,7 +199,7 @@ class StrategyManager:
             return None, "Janela de entrada expirada"
 
         recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 3:
+        if len(recent) < 2:
             return None, "Aguardando dados"
 
         last_two = recent[-2:]
@@ -222,7 +207,8 @@ class StrategyManager:
             digit = last_two[0]
             last_ten = recent[-10:] if len(recent) >= 10 else recent
             count = last_ten.count(digit)
-            if count >= 3:
+            # 🔥 CORREÇÃO: dominância mínima = 2
+            if count >= 2:
                 if digit in self._differ_sequence_used:
                     logger.info(f"⛔ DIFFER bloqueado: dígito {digit} já utilizado")
                     return None, f"Dígito {digit} já utilizado nesta sequência"
@@ -241,7 +227,6 @@ class StrategyManager:
     # Módulo 2: PAR/ÍMPAR com martingale condicional
     # -----------------------------------------------------------------
     def _can_martingale(self):
-        """Verifica condições para autorizar martingale."""
         ping = getattr(self.client, '_ping_ms', 0)
         if ping >= 150:
             logger.info(f"⛔ Martingale bloqueado: ping alto ({ping}ms)")
@@ -274,7 +259,6 @@ class StrategyManager:
         even_count = 4 - odd_count
         logger.info(f"🔍 PAR/ÍMPAR: últimos 4={recent[-4:]}, ímpares={odd_count}, pares={even_count}")
 
-        # 3 ou 4 ímpares → apostar PAR
         if odd_count >= 3:
             if not self._parity_odd_used:
                 self._parity_odd_used = True
@@ -293,7 +277,6 @@ class StrategyManager:
                     return None, "Martingale bloqueado por condições de mercado"
             return None, "Streak ÍMPAR já utilizado"
 
-        # 3 ou 4 pares → apostar ÍMPAR
         if even_count >= 3:
             if not self._parity_even_used:
                 self._parity_even_used = True
@@ -312,7 +295,6 @@ class StrategyManager:
                     return None, "Martingale bloqueado por condições de mercado"
             return None, "Streak PAR já utilizado"
 
-        # Reset se não há tendência
         self._parity_odd_used = False
         self._parity_even_used = False
         self._parity_martingale_used = False
@@ -330,7 +312,8 @@ class StrategyManager:
             return None, reason
 
         if self.is_matches_cooldown:
-            logger.info(f"⛔ MATCHES bloqueado: cooldown ativo ({self._matches_cooldown_until - time.time():.0f}s restantes)")
+            remaining = self._matches_cooldown_until - time.time()
+            logger.info(f"⛔ MATCHES bloqueado: cooldown ativo ({remaining:.0f}s restantes)")
             return None, "Cooldown MATCHES ativo"
 
         absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
