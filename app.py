@@ -497,7 +497,6 @@ def create_session(user_id, user, force=False):
             contract_id = trade.get('contract_id', 'N/A')
             profit = trade.get('profit', 0)
 
-            # Log detalhado para diagnóstico PAR/ÍMPAR
             logger.info(f"📊 RESULTADO: ação={action}, is_win={is_win}, profit={profit}, contract_id={contract_id}")
 
             persist_trade(user_id, {
@@ -517,7 +516,6 @@ def create_session(user_id, user, force=False):
 
     def tick_callback(tick):
         bot.on_tick(tick)
-        # Integração do on_tick do strategy (para análise de estabilidade)
         if strategy:
             strategy.on_tick(tick)
 
@@ -1210,7 +1208,6 @@ def trade_digit():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        # Log detalhado antes de enviar
         contract = 'CALL' if action == 'odd' else 'PUT'
         logger.info(f"🎲 TRADE PAR/ÍMPAR: ação recomendada={action}, contrato={contract}, valor=${amt:.2f}, ticks_restantes={tr}")
 
@@ -1292,7 +1289,8 @@ def trade_matches():
         if strategy:
             digit, reason = strategy.evaluate_matches()
             if digit is None:
-                return jsonify({'error': f'⛔ {reason}'}), 400
+                # 🔥 Mensagem melhorada
+                return jsonify({'error': f'⛔ MATCHES bloqueado: {reason}'}), 400
         else:
             analyzer = sess['digit_analyzer']
             most = analyzer.get_most_frequent_digit()
