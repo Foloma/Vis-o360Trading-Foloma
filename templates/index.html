@@ -482,7 +482,8 @@ function scrollToSection(id){const el=document.getElementById(id);if(el)el.scrol
 
 function startPolling(){if(_updateInterval)return;scheduleNextPoll();}
 function stopPolling(){if(_updateInterval){clearTimeout(_updateInterval);_updateInterval=null;}}
-function scheduleNextPoll(){const d=isConnected?1500:5000;_updateInterval=setTimeout(()=>{updateAll();scheduleNextPoll();},d);}
+// 🔥 Polling ajustado para 3s (conectado) / 8s (desconectado)
+function scheduleNextPoll(){const d=isConnected?3000:8000;_updateInterval=setTimeout(()=>{updateAll();scheduleNextPoll();},d);}
 
 function updateScoreboard(){fetch('/api/signals/scoreboard').then(r=>r.json()).then(d=>{if(d.today_signals>0){document.getElementById('signalScoreboard').style.display='block';document.getElementById('sigTotal').textContent=d.today_signals;document.getElementById('sigWins').textContent=d.would_have_won;document.getElementById('sigWinRate').textContent=d.simulated_win_rate+'%';}}).catch(()=>{});}
 async function autoConnect(){
