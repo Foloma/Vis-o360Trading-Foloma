@@ -111,6 +111,8 @@
     .strat-badge.ready { background: var(--accent); color: #000; }
     .strat-badge.blocked { background: var(--danger); color: #fff; }
     .strat-badge.warning { background: var(--warning); color: #000; }
+    .strat-info { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+    .strat-info .dot { width: 6px; height: 6px; }
   </style>
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -371,6 +373,8 @@
       </div>
       <button class="differ-btn" id="btnDiffer" onclick="tradeDiffer()">🎯 DIFFER (dígito menos frequente)</button>
       <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (dígito mais frequente) — payout ~9x</button>
+      <!-- 🔥 Razão do bloqueio MATCHES -->
+      <div id="matchesReason" style="font-size:9px; color: var(--muted); text-align:center; margin-top:2px;"></div>
       <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
       <div class="ms">
         Martingale: <span id="mgtActDig">INATIVO</span> | Próx: <span id="mgtNxtDig">$0.35</span>
@@ -455,23 +459,22 @@ function toast(msg,type='info',ms=3500){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
   clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',ms);
 }
-
-// Beep usando Web Audio API (sem dependência externa)
+// 🔥 CORREÇÃO: som com Web Audio API (sem dependência externa)
 function playBeep(){
-  try{
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = 800;
-    gain.gain.value = 0.1;
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    setTimeout(()=>{ osc.stop(); ctx.close(); }, 150);
-  }catch(e){}
+    try{
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, ctx.currentTime);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+    }catch(e){}
 }
-
 function openGuide(){document.getElementById('guideModal').style.display='flex';document.body.classList.add('modal-open');}
 function closeGuide(){document.getElementById('guideModal').style.display='none';document.body.classList.remove('modal-open');}
 function closeAuthModal(){document.getElementById('authModal').style.display='none';document.body.classList.remove('modal-open');}
@@ -479,11 +482,7 @@ function scrollToSection(id){const el=document.getElementById(id);if(el)el.scrol
 
 function startPolling(){if(_updateInterval)return;scheduleNextPoll();}
 function stopPolling(){if(_updateInterval){clearTimeout(_updateInterval);_updateInterval=null;}}
-function scheduleNextPoll(){
-  // Polling mais lento (5s conectado, 10s desconectado)
-  const d = isConnected ? 5000 : 10000;
-  _updateInterval = setTimeout(()=>{ updateAll(); scheduleNextPoll(); }, d);
-}
+function scheduleNextPoll(){const d=isConnected?1500:5000;_updateInterval=setTimeout(()=>{updateAll();scheduleNextPoll();},d);}
 
 function updateScoreboard(){fetch('/api/signals/scoreboard').then(r=>r.json()).then(d=>{if(d.today_signals>0){document.getElementById('signalScoreboard').style.display='block';document.getElementById('sigTotal').textContent=d.today_signals;document.getElementById('sigWins').textContent=d.would_have_won;document.getElementById('sigWinRate').textContent=d.simulated_win_rate+'%';}}).catch(()=>{});}
 async function autoConnect(){
@@ -534,6 +533,7 @@ document.addEventListener('click',(e)=>{if(e.target.classList.contains('tf-btn')
 
 function updateAll(){
   fetch('/api/status').then(r=>r.json()).then(data=>{
+    document.getElementById('debugPoll').textContent='poll: '+new Date().toLocaleTimeString()+' | conn='+(data.bot?.connected)+' auth='+(data.bot?.authorized);
     if(data.error)return;
     const bot=data.bot;if(!bot)return;
     const conn=bot.connected&&bot.authorized;isConnected=conn;
@@ -563,7 +563,7 @@ function updateAll(){
     updateHistSummary(bot);
     if(!candleChart)initCandleChart();
 
-    // Atualizar estado da estratégia (usa _peek, sem efeitos laterais)
+    // 🔥 Atualizar estado da estratégia
     if(data.strategy){
       updateStrategyDisplay(data.strategy);
     }
@@ -642,6 +642,12 @@ function updateStrategyDisplay(strategy){
   document.getElementById('btnMatches').disabled = !strategy.matches_available;
   document.getElementById('btnOdd').disabled = !strategy.parity_available;
   document.getElementById('btnEven').disabled = !strategy.parity_available;
+
+  // 🔥 Mostrar razão do bloqueio MATCHES
+  const matchesReasonEl = document.getElementById('matchesReason');
+  if (matchesReasonEl) {
+    matchesReasonEl.textContent = strategy.matches_reason || '';
+  }
 }
 
 async function conectar(){
@@ -682,17 +688,7 @@ async function reconnectManual(){try{const resp=await fetch('/api/connect',{meth
 async function disconnectWebSocket(){try{await fetch('/api/disconnect',{method:'POST'});toast('🔌 Desconectado','info');isConnected=false;document.getElementById('sDot').className='dot';document.getElementById('connStatus').textContent='Desconectado';document.getElementById('connectOAuthBtn').disabled=false;document.getElementById('connectTokenBtn').disabled=false;}catch(e){toast('❌ Erro','loss');}}
 async function selAcct(a){selectedAcct=a;document.getElementById('btnDemo').classList.toggle('active',a==='demo');document.getElementById('btnReal').classList.toggle('active',a==='real');try{const r=await fetch('/api/auth/switch-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:a})});const d=await r.json();if(d.error){toast('❌ '+d.error,'loss');return;}toast(`✅ Conta ${a.toUpperCase()} activa`,'win');document.getElementById('conSt').textContent='🔄 A trocar conta...';}catch(e){toast('❌ Erro','loss');}}
 
-function tradeDigit(pred){
-  const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
-  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
-  .then(r=>r.json()).then(d=>{
-    if(d.error){toast('❌ '+d.error,'loss');return;}
-    // Mostrar ação executada, se disponível
-    const actionMsg = d.executed_action ? (d.executed_action==='odd'?'ÍMPAR':'PAR') : (pred==='odd'?'ÍMPAR':'PAR');
-    toast(`⏳ ${actionMsg} apostado! Aguarde...`,'info');
-    setTimeout(loadHistory,5000);
-  }).catch(()=>toast('❌ Erro de rede','loss'));
-}
+function tradeDigit(pred){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})}).then(r=>r.json()).then(d=>{if(d.error)toast('❌ '+d.error,'loss');else{toast('⏳ Aposta enviada!','info');setTimeout(loadHistory,5000);}}).catch(()=>toast('❌ Erro de rede','loss'));}
 async function tradeDiffer(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();setTimeout(loadHistory,5000);}}catch(e){toast('❌ Erro de rede','loss');}}
 async function tradeMatches(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();setTimeout(loadHistory,5000);}}catch(e){toast('❌ Erro de rede','loss');}}
 
@@ -743,7 +739,7 @@ setInterval(updatePingDisplay, 10000);
 (function(){const p=new URLSearchParams(location.search);const ref=p.get('ref');if(ref){const el=document.getElementById('rRef');if(el)el.value=ref;}})();
 fetch('/api/auth/status').then(r=>r.json()).then(d=>{if(d.authenticated){if(d.user?.active_account)selectedAcct=d.user.active_account;document.getElementById('btnDemo').classList.toggle('active',selectedAcct==='demo');document.getElementById('btnReal').classList.toggle('active',selectedAcct==='real');if(d.user?.name)document.getElementById('userNameDisplay').textContent='👤 '+d.user.name;document.getElementById('authModal').style.display='none';document.body.classList.remove('modal-open');document.getElementById('mainContent').style.display='block';if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';initSyms();loadAffiliate();loadHistory();initCandleChart();setTimeout(loadCandles,3000);startPolling();if(d.user?.has_deriv_token)setTimeout(autoConnect,1500);updateTokenDisplay();}});
 </script>
-<!-- debugPoll escondido em produção -->
-<div id="debugPoll" style="display:none;position:fixed;bottom:5px;right:5px;background:#000;color:#0f0;font-size:10px;padding:4px;z-index:9999;opacity:0.8"></div>
+<!-- 🔥 CORREÇÃO: debugPoll escondido em produção -->
+<div id="debugPoll" style="display:none;"></div>
 </body>
 </html>
