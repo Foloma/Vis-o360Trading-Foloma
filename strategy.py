@@ -141,7 +141,6 @@ class StrategyManager:
         if last_two[0] == last_two[1]:
             digit = last_two[0]
             last_ten = recent[-10:] if len(recent) >= 10 else recent
-            # 🔥 CORREÇÃO: dominância mínima reduzida para 2
             if last_ten.count(digit) >= 2:
                 available = digit not in self._differ_sequence_used
                 return available, digit if available else None
@@ -207,7 +206,6 @@ class StrategyManager:
             digit = last_two[0]
             last_ten = recent[-10:] if len(recent) >= 10 else recent
             count = last_ten.count(digit)
-            # 🔥 CORREÇÃO: dominância mínima = 2
             if count >= 2:
                 if digit in self._differ_sequence_used:
                     logger.info(f"⛔ DIFFER bloqueado: dígito {digit} já utilizado")
@@ -314,7 +312,7 @@ class StrategyManager:
         if self.is_matches_cooldown:
             remaining = self._matches_cooldown_until - time.time()
             logger.info(f"⛔ MATCHES bloqueado: cooldown ativo ({remaining:.0f}s restantes)")
-            return None, "Cooldown MATCHES ativo"
+            return None, f"Cooldown MATCHES ativo ({remaining:.0f}s)"
 
         absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
         if not absence:
@@ -332,12 +330,21 @@ class StrategyManager:
         return None, "Nenhum dígito ausente ≥15 ticks"
 
     # -----------------------------------------------------------------
-    # Status para o frontend
+    # Status para o frontend — com matches_reason
     # -----------------------------------------------------------------
     def get_status(self):
         differ_avail, differ_digit = self._peek_differ()
         parity_avail, parity_dir, parity_reason = self._peek_parity()
         matches_avail = self._peek_matches()
+
+        # Razão do MATCHES
+        if self.is_matches_cooldown:
+            matches_reason = f"Cooldown {self._matches_cooldown_until - time.time():.0f}s"
+        elif not matches_avail:
+            matches_reason = "Nenhum dígito ausente ≥15 ticks"
+        else:
+            matches_reason = "Disponível"
+
         return {
             'global_stop': self.is_global_stop,
             'cooldown': self.is_cooldown,
@@ -349,4 +356,5 @@ class StrategyManager:
             'parity_direction': parity_dir,
             'parity_reason': parity_reason,
             'matches_available': matches_avail,
+            'matches_reason': matches_reason,
         }
