@@ -643,11 +643,12 @@ app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'norep
 if EMAIL_ENABLED:
     mail.init_app(app)
 
+# 🔥 Rate limit ajustado — 120 pedidos/minuto, generoso para SPA de trading
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
     limiter = Limiter(get_remote_address, app=app,
-                      default_limits=["200 per day", "50 per hour"],
+                      default_limits=["120 per minute", "10000 per day"],
                       storage_uri="memory://")
 except ImportError:
     logger.warning("Flask-Limiter não instalado. Rate limiting desativado.")
@@ -1289,7 +1290,6 @@ def trade_matches():
         if strategy:
             digit, reason = strategy.evaluate_matches()
             if digit is None:
-                # 🔥 Mensagem melhorada
                 return jsonify({'error': f'⛔ MATCHES bloqueado: {reason}'}), 400
         else:
             analyzer = sess['digit_analyzer']
