@@ -171,7 +171,7 @@ class DerivWebSocketClient:
                 break
 
     # -----------------------------------------------------------------
-    # Polling ativo para contratos pendentes
+    # Polling ativo para contratos pendentes (intervalo aumentado)
     # -----------------------------------------------------------------
     def _start_poller(self):
         self._stop_poller()
@@ -186,13 +186,13 @@ class DerivWebSocketClient:
 
     def _poller_loop(self):
         while not self._stop_event.is_set() and self.authorized and self.ws:
-            if self._stop_event.wait(timeout=5):
+            if self._stop_event.wait(timeout=30):       # 30 segundos (era 5)
                 break
             if not self.active_trades:
                 continue
             now = time.time()
             for cid, trade in list(self.active_trades.items()):
-                if now - trade.get('timestamp', now) > 10:
+                if now - trade.get('timestamp', now) > 30:
                     logger.info(f"🔍 Poller: a forçar verificação do contrato {cid}")
                     try:
                         self.ws.send(json.dumps({
@@ -675,7 +675,6 @@ class DerivWebSocketClient:
                     'is_matches': is_matches, 'digit_barrier': digit_barrier,
                     'symbol': self.current_symbol
                 }
-                # 🔥 CORREÇÃO: usar try/finally para garantir limpeza do pending_trade
                 try:
                     self._subscribe_contract(cid)
                 except Exception as e:
@@ -692,13 +691,12 @@ class DerivWebSocketClient:
             logger.info(f"📎 Subscrição de contrato enviada: {cid}")
         except Exception as e:
             logger.error(f"Erro subs. contrato {cid}: {e}")
-            raise  # Relança para o try/finally do _on_buy_response
+            raise
 
     def _resubscribe_active_trades(self):
         if not self.active_trades:
             return
         now = time.time()
-        # 🔥 CORREÇÃO: expirar contratos com mais de 120 segundos
         expired = [cid for cid, t in self.active_trades.items()
                    if now - t.get('timestamp', now) > 120]
         for cid in expired:
@@ -722,17 +720,23 @@ class DerivWebSocketClient:
         if not cid or not c.get('is_sold'):
             return
         logger.info(f"📦 POC recebido: contract_id={cid}, is_sold=True")
-        with self._processed_lock:
-            if cid in self._processed_contracts:
-                return
-            self._processed_contracts.append(cid)
 
         bp = c.get('buy_price', 0)
         sp = c.get('sell_price', 0)
 
-        if sp is None or sp == 0:
-            logger.warning(f"⚠️ POC ignorado: sell_price inválido para {cid} (sp={sp})")
+        # GUARDA CORRIGIDA: sp=None → ignorar e permitir reprocessamento
+        if sp is None:
+            with self._processed_lock:
+                if cid in self._processed_contracts:
+                    self._processed_contracts.remove(cid)
+            logger.warning(f"⚠️ POC ignorado: sell_price ausente para {cid} — permitindo reprocessamento")
             return
+
+        # sp=0 é perda legítima — processar normalmente
+        with self._processed_lock:
+            if cid in self._processed_contracts:
+                return
+            self._processed_contracts.append(cid)
 
         profit = sp - bp
         is_win = profit > 0
