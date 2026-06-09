@@ -85,13 +85,13 @@
     .freq-bar { height: 20px; border-radius: 3px; margin-bottom: 2px; background: var(--accent); transition: height 0.5s; }
     .freq-item.most { border: 2px solid var(--purple); }
     .freq-item.least { border: 2px solid var(--accent); }
-    .differ-btn { background: var(--accent); color: #000; width: 100%; margin-top: 6px; padding: 12px; font-weight: bold; }
-    .matches-btn { background: var(--purple); color: #fff; width: 100%; margin-top: 4px; padding: 12px; font-weight: bold; }
+    .differ-btn { background: var(--accent); color: #000; width: 100%; margin-top: 6px; padding: 12px; font-weight: bold; touch-action: manipulation; }
+    .matches-btn { background: var(--purple); color: #fff; width: 100%; margin-top: 10px; padding: 12px; font-weight: bold; touch-action: manipulation; }
     .trade-row { display: flex; gap: 8px; align-items: center; }
     .trade-row input { flex: 1; }
-    .trade-row button { flex: 0; white-space: nowrap; padding: 8px 12px; }
+    .trade-row button { flex: 0; white-space: nowrap; padding: 8px 12px; touch-action: manipulation; }
     .inline-actions { display: flex; gap: 4px; margin-top: 6px; }
-    .inline-actions button { padding: 5px 8px; font-size: 11px; border-radius: 6px; }
+    .inline-actions button { padding: 5px 8px; font-size: 11px; border-radius: 6px; touch-action: manipulation; }
     .token-display { background: #020617; border-radius: 6px; padding: 8px; margin-top: 6px; font-size: 11px; }
     .token-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
     .token-row:last-child { border-bottom: none; }
@@ -100,9 +100,9 @@
     .token-dot.missing { background: var(--muted); }
     .token-dot.active { box-shadow: 0 0 5px var(--accent); }
     .sym-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
-    .sym-btn { background: #020617; border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 14px; cursor: pointer; font-size: 11px; }
+    .sym-btn { background: #020617; border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 14px; cursor: pointer; font-size: 11px; touch-action: manipulation; }
     .sym-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
-    .tf-btn { padding: 3px 8px; background: #020617; border: 1px solid var(--border); color: var(--text); border-radius: 10px; font-size: 10px; cursor: pointer; }
+    .tf-btn { padding: 3px 8px; background: #020617; border: 1px solid var(--border); color: var(--text); border-radius: 10px; font-size: 10px; cursor: pointer; touch-action: manipulation; }
     .tf-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
 
@@ -454,8 +454,8 @@ let currentGranularity = 60;
 let resizeObserver = null;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 let candleChart = null, candleSeries = null;
-let _pollRunning = false;                    // 🔴 Correção 1
-let _historyDebounceTimer = null;            // 🟡 Correção 4
+let _pollRunning = false;
+let _historyDebounceTimer = null;
 
 function toast(msg,type='info',ms=3500){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
@@ -484,7 +484,6 @@ function scrollToSection(id){const el=document.getElementById(id);if(el)el.scrol
 
 function startPolling(){if(_updateInterval)return;scheduleNextPoll();}
 function stopPolling(){if(_updateInterval){clearTimeout(_updateInterval);_updateInterval=null;}}
-// 🔴 Correção 1 – scheduleNextPoll com proteção de sobreposição
 function scheduleNextPoll(){
   const d = isConnected ? 3000 : 8000;
   _updateInterval = setTimeout(async () => {
@@ -542,7 +541,7 @@ async function loadCandles(){
 
 document.addEventListener('click',(e)=>{if(e.target.classList.contains('tf-btn')&&!e.target.closest('.guide-nav')){document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));e.target.classList.add('active');currentGranularity=parseInt(e.target.dataset.tf);loadCandles();}});
 
-// 🔴 Correção 2 – updateAll com fetchs independentes (Promise.allSettled)
+// Correção 2 – updateAll com fetchs independentes (Promise.allSettled)
 async function updateAll(){
   const [statusResp, martingaleResp] = await Promise.allSettled([
     fetch('/api/status').then(r=>r.json()),
@@ -551,7 +550,6 @@ async function updateAll(){
 
   if(statusResp.status === 'fulfilled'){
     const data = statusResp.value;
-    // guard no debugPoll (Correção 6)
     const debugPoll = document.getElementById('debugPoll');
     if(debugPoll) debugPoll.textContent = 'poll: '+new Date().toLocaleTimeString()+' | conn='+(data.bot?.connected)+' auth='+(data.bot?.authorized);
     if(data.error) return;
@@ -575,7 +573,7 @@ async function updateAll(){
 
     if(data.strategy){
       const tr = data.digits?.ticks_remaining;
-      updateStrategyDisplay(data.strategy, tr);   // 🟡 Correção 3
+      updateStrategyDisplay(data.strategy, tr);
     }
   }
 
@@ -633,7 +631,7 @@ function updateHistSummary(bot){
   sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${s.total||0}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WIN RATE</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${s.win_rate||0}%</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">P/L</div><div style="font-size:16px;font-weight:bold;color:${cor}">${sinal}$${Math.abs(pl).toFixed(2)}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${d?d.trades:0}</div></div>`;
 }
 
-// 🟡 Correção 3 – centralização dos disables com ticks
+// Correção 3 – centralização dos disables com ticks
 function updateStrategyDisplay(strategy, ticksRemaining){
   if(!strategy) return;
   const el = document.getElementById('strategyStatus');
@@ -689,7 +687,7 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   }
 }
 
-// 🟡 Correção 4 – debounce no histórico
+// Correção 4 – debounce no histórico
 function scheduleHistoryLoad(delay=5000){
   if(_historyDebounceTimer) clearTimeout(_historyDebounceTimer);
   _historyDebounceTimer = setTimeout(()=>{ loadHistory(); _historyDebounceTimer=null; }, delay);
@@ -733,7 +731,7 @@ async function reconnectManual(){try{const resp=await fetch('/api/connect',{meth
 async function disconnectWebSocket(){try{await fetch('/api/disconnect',{method:'POST'});toast('🔌 Desconectado','info');isConnected=false;document.getElementById('sDot').className='dot';document.getElementById('connStatus').textContent='Desconectado';document.getElementById('connectOAuthBtn').disabled=false;document.getElementById('connectTokenBtn').disabled=false;}catch(e){toast('❌ Erro','loss');}}
 async function selAcct(a){selectedAcct=a;document.getElementById('btnDemo').classList.toggle('active',a==='demo');document.getElementById('btnReal').classList.toggle('active',a==='real');try{const r=await fetch('/api/auth/switch-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:a})});const d=await r.json();if(d.error){toast('❌ '+d.error,'loss');return;}toast(`✅ Conta ${a.toUpperCase()} activa`,'win');document.getElementById('conSt').textContent='🔄 A trocar conta...';}catch(e){toast('❌ Erro','loss');}}
 
-// 🟡 Correção 4 aplicada nas três funções de trade
+// Correção 4 aplicada nas três funções de trade
 function tradeDigit(pred){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})}).then(r=>r.json()).then(d=>{if(d.error)toast('❌ '+d.error,'loss');else{toast('⏳ Aposta enviada!','info');scheduleHistoryLoad(5000);}}).catch(()=>toast('❌ Erro de rede','loss'));}
 async function tradeDiffer(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();scheduleHistoryLoad(5000);}}catch(e){toast('❌ Erro de rede','loss');}}
 async function tradeMatches(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();scheduleHistoryLoad(5000);}}catch(e){toast('❌ Erro de rede','loss');}}
@@ -744,7 +742,7 @@ async function rstMgt(){await fetch('/api/martingale/reset',{method:'POST'});doc
 async function clearHistory(){await fetch('/api/clear_history',{method:'POST'});toast('🗑️ Histórico limpo','info');loadHistory();}
 
 function loadAffiliate(){fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{if(d.link)document.getElementById('refLink').value=d.link;});fetch('/api/affiliate/earnings').then(r=>r.json()).then(d=>{const el=document.getElementById('affiliateEarnings');if(d.error){el.innerHTML='';return;}el.innerHTML=`<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px"><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">GANHOS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">$${d.earnings?.toFixed(2)||'0.00'}</div></div><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">REFERIDOS</div><div style="font-size:16px;font-weight:bold">${d.referred_count||0}</div></div></div>`;});}
-// 🟢 Correção 5 – clipboard moderno
+// Correção 5 – clipboard moderno
 function cpLink(){const el=document.getElementById('refLink');const text=el.value;navigator.clipboard.writeText(text).then(()=>{toast('📋 Copiado!','win');}).catch(()=>{el.select();document.execCommand('copy');toast('📋 Copiado!','win');});}
 
 function loadHistory(){fetch('/api/report').then(r=>r.json()).then(d=>{const sum=document.getElementById('histSummary2'),list=document.getElementById('histList2'),miniList=document.getElementById('histList');if(d.error){if(sum)sum.innerHTML='';if(list)list.innerHTML='';if(miniList)miniList.innerHTML='';return;}const r=d.resumo;if(sum)sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${r.total_trades}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${r.trades_hoje}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WINS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${r.wins}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">LOSSES</div><div style="font-size:16px;font-weight:bold;color:var(--danger)">${r.losses}</div></div>`;const html=d.historico.map(t=>{const win=t.result==='win',lose=t.result==='loss',cor=win?'var(--accent)':lose?'var(--danger)':'#ffaa00',icon=win?'✅':lose?'❌':'⏳';let actionLabel=t.action||'';if(t.is_digit){actionLabel=(t.action==='BUY'||t.action==='CALL')?'ÍMPAR 🎲':'PAR 🎲';}const profitText=t.profit?`<div style="color:${t.profit>0?'var(--accent)':'var(--danger)'}">${t.profit>0?'+':''}$${t.profit.toFixed(2)}</div>`:'';return`<div style="padding:6px;background:#020617;border-radius:6px;margin-bottom:4px;font-size:11px"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">${t.time}</span><span style="font-weight:700;color:${cor}">${icon} ${t.result.toUpperCase()}</span></div><div>${actionLabel} ${t.symbol} $${t.amount.toFixed(2)}</div>${profitText}</div>`;}).join('');if(list)list.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';if(miniList)miniList.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';}).catch(()=>toast('❌ Erro histórico','loss'));}
