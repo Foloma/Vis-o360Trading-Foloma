@@ -41,6 +41,7 @@ class DerivWebSocketClient:
         self._stop_event = threading.Event()
         self._keep_alive_stop = threading.Event()
         self._watchdog_stop = threading.Event()
+        self._poller_stop = threading.Event()        # dedicado ao poller
         self._last_tick_time = None
         self._last_trade_time = 0
         self._processed_contracts = deque(maxlen=1000)
@@ -67,6 +68,8 @@ class DerivWebSocketClient:
         self._ping_ms = 0
         self._reconnect_count = 0
         self._ping_sent_at = 0
+        self._ping_pending = False
+        self._ping_timer = None
 
         self._consecutive_failures = 0
         self._max_failures = 5
@@ -171,22 +174,24 @@ class DerivWebSocketClient:
                 break
 
     # -----------------------------------------------------------------
-    # Polling ativo para contratos pendentes (intervalo aumentado)
+    # Polling ativo para contratos pendentes (com evento dedicado)
     # -----------------------------------------------------------------
     def _start_poller(self):
         self._stop_poller()
+        self._poller_stop.clear()
         self._poller_thread = threading.Thread(target=self._poller_loop, daemon=True)
         self._poller_thread.start()
         logger.info("🔄 Poller de contratos iniciado")
 
     def _stop_poller(self):
         if self._poller_thread and self._poller_thread.is_alive():
+            self._poller_stop.set()
             self._poller_thread.join(timeout=2)
         self._poller_thread = None
 
     def _poller_loop(self):
         while not self._stop_event.is_set() and self.authorized and self.ws:
-            if self._stop_event.wait(timeout=30):       # 30 segundos (era 5)
+            if self._poller_stop.wait(timeout=30):
                 break
             if not self.active_trades:
                 continue
@@ -322,6 +327,7 @@ class DerivWebSocketClient:
         self._keep_alive_stop.set()
         if self._keep_alive_thread and self._keep_alive_thread.is_alive():
             self._keep_alive_thread.join(timeout=2)
+        self._cancel_ping_timer()
 
     def _keep_alive_loop(self):
         while not self._stop_event.is_set() and not self._keep_alive_stop.is_set():
@@ -330,15 +336,36 @@ class DerivWebSocketClient:
             if self.ws and self.connected:
                 try:
                     self._ping_sent_at = time.time()
+                    self._ping_pending = True
                     self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
+                    self._start_ping_timer()
                 except Exception:
                     break
             else:
                 break
 
+    def _start_ping_timer(self):
+        self._cancel_ping_timer()
+        self._ping_timer = threading.Timer(2.0, self._ping_timeout)
+        self._ping_timer.daemon = True
+        self._ping_timer.start()
+
+    def _cancel_ping_timer(self):
+        if self._ping_timer:
+            self._ping_timer.cancel()
+            self._ping_timer = None
+
+    def _ping_timeout(self):
+        if self._ping_pending:
+            self._ping_ms = 9999
+            self._ping_pending = False
+            logger.warning("🏓 Pong não recebido — latência >2000ms")
+
     def _on_pong(self, data):
-        if self._ping_sent_at:
+        self._cancel_ping_timer()
+        if self._ping_sent_at and self._ping_pending:
             self._ping_ms = round((time.time() - self._ping_sent_at) * 1000)
+            self._ping_pending = False
             logger.debug(f"🏓 Ping: {self._ping_ms}ms")
 
     def _start_watchdog(self):
@@ -724,7 +751,6 @@ class DerivWebSocketClient:
         bp = c.get('buy_price', 0)
         sp = c.get('sell_price', 0)
 
-        # GUARDA CORRIGIDA: sp=None → ignorar e permitir reprocessamento
         if sp is None:
             with self._processed_lock:
                 if cid in self._processed_contracts:
@@ -732,7 +758,6 @@ class DerivWebSocketClient:
             logger.warning(f"⚠️ POC ignorado: sell_price ausente para {cid} — permitindo reprocessamento")
             return
 
-        # sp=0 é perda legítima — processar normalmente
         with self._processed_lock:
             if cid in self._processed_contracts:
                 return
