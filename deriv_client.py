@@ -41,7 +41,7 @@ class DerivWebSocketClient:
         self._stop_event = threading.Event()
         self._keep_alive_stop = threading.Event()
         self._watchdog_stop = threading.Event()
-        self._poller_stop = threading.Event()        # dedicado ao poller
+        self._poller_stop = threading.Event()
         self._last_tick_time = None
         self._last_trade_time = 0
         self._processed_contracts = deque(maxlen=1000)
@@ -70,6 +70,7 @@ class DerivWebSocketClient:
         self._ping_sent_at = 0
         self._ping_pending = False
         self._ping_timer = None
+        self._ping_failures = 0                 # contador de falhas consecutivas
 
         self._consecutive_failures = 0
         self._max_failures = 5
@@ -320,6 +321,7 @@ class DerivWebSocketClient:
     def _start_keep_alive(self):
         self._stop_keep_alive()
         self._keep_alive_stop.clear()
+        self._ping_failures = 0               # reset do contador de falhas
         self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
         self._keep_alive_thread.start()
 
@@ -330,23 +332,30 @@ class DerivWebSocketClient:
         self._cancel_ping_timer()
 
     def _keep_alive_loop(self):
+        """Loop de keep‑alive resiliente — nunca termina inesperadamente."""
+        consecutive_failures = 0
         while not self._stop_event.is_set() and not self._keep_alive_stop.is_set():
             if self._keep_alive_stop.wait(timeout=30):
                 break
-            if self.ws and self.connected:
-                try:
-                    self._ping_sent_at = time.time()
-                    self._ping_pending = True
-                    self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
-                    self._start_ping_timer()
-                except Exception:
-                    break
-            else:
+            if not self.ws or not self.connected:
                 break
+            try:
+                self._ping_sent_at = time.time()
+                self._ping_pending = True
+                self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
+                self._start_ping_timer()
+                consecutive_failures = 0     # sucesso, resetar contador
+            except Exception as e:
+                consecutive_failures += 1
+                logger.error(f"Erro ao enviar ping ({consecutive_failures} falha(s)): {e}")
+                if consecutive_failures >= 3:
+                    logger.warning("🛑 Keep‑alive falhou 3x — a forçar reconexão")
+                    self._close_connection()
+                    break
 
     def _start_ping_timer(self):
         self._cancel_ping_timer()
-        self._ping_timer = threading.Timer(2.0, self._ping_timeout)
+        self._ping_timer = threading.Timer(5.0, self._ping_timeout)
         self._ping_timer.daemon = True
         self._ping_timer.start()
 
