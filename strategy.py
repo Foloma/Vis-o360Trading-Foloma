@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 class StrategyManager:
     """
-    Implementa os três módulos da Foloma Visão 360 Smart Flow.
+    Implementa os três módulos da Foloma Visão 360 Smart Flow + Z‑Score.
     """
 
     def __init__(self, client, analyzer):
@@ -15,6 +15,8 @@ class StrategyManager:
         self._last_differ_digit = None
         self._last_parity_action = None
         self._last_matches_digit = None
+        self._last_zscore_digit = None
+        self._last_zscore_action = None   # 'Z_DIFFER' ou 'Z_MATCH'
         self._consecutive_losses = 0
         self._global_stop_until = 0
         self._cooldown_until = 0
@@ -25,11 +27,14 @@ class StrategyManager:
         self._last_parity_streak_type = None
         self._matches_sequence_used = False
         self._matches_cooldown_until = 0
+        self._zscore_sequence_used = False
+        self._zscore_cooldown_until = 0
         self._price_history = []
 
         self._differ_signal_at = 0
         self._parity_signal_at = 0
         self._matches_signal_at = 0
+        self._zscore_signal_at = 0
 
     @property
     def is_global_stop(self):
@@ -104,9 +109,11 @@ class StrategyManager:
         self._parity_martingale_used = False
         self._last_parity_streak_type = None
         self._matches_sequence_used = False
+        self._zscore_sequence_used = False
         self._differ_signal_at = 0
         self._parity_signal_at = 0
         self._matches_signal_at = 0
+        self._zscore_signal_at = 0
 
     def _is_entry_window_valid(self, signal_at, max_age=20):
         if signal_at == 0:
@@ -122,20 +129,20 @@ class StrategyManager:
                 self._consecutive_losses = 0
                 self.reset_sequence_state()
                 return
-            if action.startswith('DIFFER'):
+            if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
                 self._apply_cooldown(5)
             elif action in ('CALL', 'PUT', 'BUY', 'SELL'):
                 if not self._parity_martingale_used and self._last_parity_streak_type:
                     self._apply_cooldown(1)
                 else:
                     self._apply_cooldown(5)
-            elif action.startswith('MATCH'):
+            elif action.startswith('MATCH') or action.startswith('Z_MATCH'):
                 self._matches_cooldown_until = time.time() + 150
                 self._apply_cooldown(10)
         else:
             self._consecutive_losses = 0
             self.reset_sequence_state()
-            if action.startswith('DIFFER'):
+            if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
                 self._apply_cooldown(1)
             elif action in ('CALL', 'PUT', 'BUY', 'SELL'):
                 self._apply_cooldown(2)
@@ -199,6 +206,23 @@ class StrategyManager:
                 return True
         return False
 
+    def _peek_zscore(self):
+        """Retorna (disponível, ação_recomendada, dígito, motivo)."""
+        ok, _ = self.can_trade
+        if not ok:
+            return False, None, None, "Condições básicas não satisfeitas"
+        if self._zscore_sequence_used:
+            return False, None, None, "Sinal Z‑Score já utilizado"
+        if time.time() < self._zscore_cooldown_until:
+            remaining = self._zscore_cooldown_until - time.time()
+            return False, None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
+        z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
+        if z_diff is not None and digit_diff is not None:
+            return True, 'DIFFER', digit_diff, f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"
+        if z_match is not None and digit_match is not None:
+            return True, 'MATCHES', digit_match, f"Z‑Score {z_match:.2f} → MATCHES {digit_match}"
+        return False, None, None, "Nenhum desvio estatístico significativo"
+
     # -----------------------------------------------------------------
     # Módulo 1: DIFFER
     # -----------------------------------------------------------------
@@ -240,7 +264,6 @@ class StrategyManager:
     # Módulo 2: PAR/ÍMPAR com martingale condicional
     # -----------------------------------------------------------------
     def _can_martingale(self):
-        # 🔥 CORREÇÃO: ignora ping sentinela se o stream estiver saudável
         raw = getattr(self.client, '_ping_ms', 0)
         ping = 0 if (raw >= 9999 and self.client.streaming
                      and self.client._last_tick_time
@@ -349,12 +372,47 @@ class StrategyManager:
         return None, "Nenhum dígito ausente ≥15 ticks"
 
     # -----------------------------------------------------------------
+    # Módulo 4: Z-Score (alta assertividade)
+    # -----------------------------------------------------------------
+    def evaluate_zscore(self):
+        """Avalia Z‑Score e retorna (action, digit, reason)."""
+        ok, reason = self.can_trade
+        if not ok:
+            logger.info(f"⛔ Z‑Score bloqueado: {reason}")
+            return None, None, reason
+
+        if self._zscore_sequence_used:
+            return None, None, "Sinal Z‑Score já utilizado"
+
+        if time.time() < self._zscore_cooldown_until:
+            remaining = self._zscore_cooldown_until - time.time()
+            return None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
+
+        z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
+        if z_diff is not None and digit_diff is not None:
+            self._zscore_sequence_used = True
+            self._last_zscore_digit = digit_diff
+            self._last_zscore_action = 'Z_DIFFER'
+            self._zscore_signal_at = time.time()
+            logger.info(f"✅ Z‑Score SINAL: +{z_diff:.2f} → DIFFER {digit_diff}")
+            return 'DIFFER', digit_diff, f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"
+        if z_match is not None and digit_match is not None:
+            self._zscore_sequence_used = True
+            self._last_zscore_digit = digit_match
+            self._last_zscore_action = 'Z_MATCH'
+            self._zscore_signal_at = time.time()
+            logger.info(f"✅ Z‑Score SINAL: {z_match:.2f} → MATCHES {digit_match}")
+            return 'MATCHES', digit_match, f"Z‑Score {z_match:.2f} → MATCHES {digit_match}"
+        return None, None, "Nenhum desvio estatístico significativo"
+
+    # -----------------------------------------------------------------
     # Status para o frontend
     # -----------------------------------------------------------------
     def get_status(self):
         differ_avail, differ_digit = self._peek_differ()
         parity_avail, parity_dir, parity_reason = self._peek_parity()
         matches_avail = self._peek_matches()
+        zscore_avail, zscore_action, zscore_digit, zscore_reason = self._peek_zscore()
 
         if self.is_matches_cooldown:
             matches_reason = f"Cooldown {self._matches_cooldown_until - time.time():.0f}s"
@@ -375,4 +433,8 @@ class StrategyManager:
             'parity_reason': parity_reason,
             'matches_available': matches_avail,
             'matches_reason': matches_reason,
+            'zscore_available': zscore_avail,
+            'zscore_action': zscore_action,
+            'zscore_digit': zscore_digit,
+            'zscore_reason': zscore_reason,
         }
