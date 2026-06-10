@@ -198,6 +198,8 @@ class StrategyManager:
             return False
         if self.is_matches_cooldown:
             return False
+        if self._matches_signal_at > 0 and time.time() - self._matches_signal_at > 300:
+            return False
         absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
         if not absence:
             return False
@@ -207,7 +209,6 @@ class StrategyManager:
         return False
 
     def _peek_zscore(self):
-        """Retorna (disponível, ação_recomendada, dígito, motivo)."""
         ok, _ = self.can_trade
         if not ok:
             return False, None, None, "Condições básicas não satisfeitas"
@@ -216,6 +217,8 @@ class StrategyManager:
         if time.time() < self._zscore_cooldown_until:
             remaining = self._zscore_cooldown_until - time.time()
             return False, None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
+        if self._zscore_signal_at > 0 and time.time() - self._zscore_signal_at > 300:
+            return False, None, None, "Sinal Z‑Score expirado"
         z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
         if z_diff is not None and digit_diff is not None:
             return True, 'DIFFER', digit_diff, f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"
@@ -375,7 +378,10 @@ class StrategyManager:
     # Módulo 4: Z-Score (alta assertividade)
     # -----------------------------------------------------------------
     def evaluate_zscore(self):
-        """Avalia Z‑Score e retorna (action, digit, reason)."""
+        """
+        Avalia Z‑Score. ATENÇÃO: este método NÃO marca o sinal como utilizado.
+        A marcação é feita pela rota /api/trade/zscore APÓS a ordem ser executada.
+        """
         ok, reason = self.can_trade
         if not ok:
             logger.info(f"⛔ Z‑Score bloqueado: {reason}")
@@ -390,14 +396,12 @@ class StrategyManager:
 
         z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
         if z_diff is not None and digit_diff is not None:
-            self._zscore_sequence_used = True
             self._last_zscore_digit = digit_diff
             self._last_zscore_action = 'Z_DIFFER'
             self._zscore_signal_at = time.time()
             logger.info(f"✅ Z‑Score SINAL: +{z_diff:.2f} → DIFFER {digit_diff}")
             return 'DIFFER', digit_diff, f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"
         if z_match is not None and digit_match is not None:
-            self._zscore_sequence_used = True
             self._last_zscore_digit = digit_match
             self._last_zscore_action = 'Z_MATCH'
             self._zscore_signal_at = time.time()
