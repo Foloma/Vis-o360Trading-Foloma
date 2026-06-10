@@ -32,14 +32,12 @@ class DigitAnalyzer:
         self._digit_window = deque(maxlen=70)
         self._digit_counts = {i: 0 for i in range(10)}
 
-        # Parâmetros configuráveis
         self.diff_min_window = diff_min_window
         self.diff_max_pct = diff_max_pct
         self.diff_absent_ticks = diff_absent_ticks
         self.volatile_unique = volatile_unique
 
-        # Contador de ausência (para MATCHES por ausência)
-        self._last_seen = {i: 0 for i in range(10)}   # timestamp do último tick que teve o dígito
+        self._last_seen = {i: 0 for i in range(10)}
         self._current_time = time.time()
 
         self.last_analysis = {
@@ -115,7 +113,6 @@ class DigitAnalyzer:
                 self.last_analysis['ticks_remaining'] = ticks_remaining
                 self.last_analysis['ticks_in_cycle']  = self._ticks_in_cycle
 
-                # Atualizar ausências
                 self._current_time = time.time()
                 self._last_seen[digit] = self._current_time
 
@@ -211,17 +208,11 @@ class DigitAnalyzer:
             return most_digit
 
     def get_digit_absence_counts(self):
-        """
-        Retorna um dicionário {digit: número_de_ticks_ausente}.
-        Para a estratégia MATCHES por ausência.
-        """
         with self._lock:
             absence = {}
-            # usa o número de ticks lentos (slow_digits) para contar ausência
             total_slow = len(self.slow_digits)
             if total_slow == 0:
                 return {i: 0 for i in range(10)}
-            # percorre do fim para o início até encontrar o dígito
             for digit in range(10):
                 count = 0
                 for d in reversed(self.slow_digits):
@@ -229,7 +220,6 @@ class DigitAnalyzer:
                         break
                     count += 1
                 else:
-                    # não encontrado em toda a lista
                     count = total_slow
                 absence[digit] = count
             return absence
@@ -477,3 +467,52 @@ class DigitAnalyzer:
         return {'total':total,'odd_pct':round(odd_c/total*100,1),
                 'even_pct':round((total-odd_c)/total*100,1),
                 'current_streak':streak,'streak_parity':sp,'recent':snap[-20:]}
+
+    # 🔥 NOVO: Z-Score para estratégia de alta assertividade
+    def get_zscore_digit(self):
+        """
+        Calcula o Z-Score para cada dígito com base nos últimos 100 dígitos lentos.
+        Retorna uma tupla (zscore_diff, digit_diff, zscore_match, digit_match)
+        onde:
+          - zscore_diff > 2.5 → dígito sobrerrepresentado (DIFFER)
+          - zscore_match < -2.5 → dígito sub-representado (MATCHES)
+        Se não houver sinal significativo, retorna None para o respetivo.
+        """
+        with self._lock:
+            window = list(self.slow_digits)[-100:]
+            if len(window) < 100:
+                return None, None, None, None
+
+            counts = {i: 0 for i in range(10)}
+            for d in window:
+                counts[d] = counts.get(d, 0) + 1
+
+            expected = 10
+            std_dev = math.sqrt(100 * 0.1 * 0.9)
+
+            z_scores = {}
+            for d in range(10):
+                if std_dev > 0:
+                    z_scores[d] = (counts[d] - expected) / std_dev
+                else:
+                    z_scores[d] = 0
+
+            max_z = max(z_scores.values())
+            max_digit = max(z_scores, key=z_scores.get)
+            if max_z > 2.5:
+                zscore_diff = max_z
+                diff_digit = max_digit
+            else:
+                zscore_diff = None
+                diff_digit = None
+
+            min_z = min(z_scores.values())
+            min_digit = min(z_scores, key=z_scores.get)
+            if min_z < -2.5:
+                zscore_match = min_z
+                match_digit = min_digit
+            else:
+                zscore_match = None
+                match_digit = None
+
+            return zscore_diff, diff_digit, zscore_match, match_digit
