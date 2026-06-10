@@ -55,8 +55,23 @@ class StrategyManager:
             return False, "Sem streaming"
         if time.time() - getattr(self.client, '_last_reconnect_time', 0) < 10:
             return False, "Reconexão recente"
-        if getattr(self.client, '_ping_ms', 0) > 250:
-            return False, f"Latência alta ({self.client._ping_ms}ms)"
+
+        # Ignora o ping sentinela (9999) se o stream estiver saudável
+        raw_ping = getattr(self.client, '_ping_ms', 0)
+        if raw_ping >= 9999:
+            if self.client.streaming and self.client._last_tick_time:
+                if time.time() - self.client._last_tick_time < 10:
+                    effective_ping = 0
+                else:
+                    effective_ping = 9999
+            else:
+                effective_ping = 9999
+        else:
+            effective_ping = raw_ping
+
+        if effective_ping > 250:
+            return False, f"Latência alta ({effective_ping}ms)"
+
         stable, reason = self.is_market_stable()
         if not stable:
             return False, reason
@@ -225,7 +240,11 @@ class StrategyManager:
     # Módulo 2: PAR/ÍMPAR com martingale condicional
     # -----------------------------------------------------------------
     def _can_martingale(self):
-        ping = getattr(self.client, '_ping_ms', 0)
+        # 🔥 CORREÇÃO: ignora ping sentinela se o stream estiver saudável
+        raw = getattr(self.client, '_ping_ms', 0)
+        ping = 0 if (raw >= 9999 and self.client.streaming
+                     and self.client._last_tick_time
+                     and time.time() - self.client._last_tick_time < 10) else raw
         if ping >= 150:
             logger.info(f"⛔ Martingale bloqueado: ping alto ({ping}ms)")
             return False
@@ -330,14 +349,13 @@ class StrategyManager:
         return None, "Nenhum dígito ausente ≥15 ticks"
 
     # -----------------------------------------------------------------
-    # Status para o frontend — com matches_reason
+    # Status para o frontend
     # -----------------------------------------------------------------
     def get_status(self):
         differ_avail, differ_digit = self._peek_differ()
         parity_avail, parity_dir, parity_reason = self._peek_parity()
         matches_avail = self._peek_matches()
 
-        # Razão do MATCHES
         if self.is_matches_cooldown:
             matches_reason = f"Cooldown {self._matches_cooldown_until - time.time():.0f}s"
         elif not matches_avail:
