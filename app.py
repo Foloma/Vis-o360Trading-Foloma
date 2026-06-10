@@ -643,7 +643,6 @@ app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'norep
 if EMAIL_ENABLED:
     mail.init_app(app)
 
-# 🔥 Rate limit ajustado — 120 pedidos/minuto, generoso para SPA de trading
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
@@ -1319,6 +1318,60 @@ def trade_matches():
         return jsonify({'error': 'Falha no trade MATCHES'}), 500
     except Exception:
         logger.exception("Erro trade matches")
+        return jsonify({'error': 'Erro interno'}), 500
+
+# 🔥 NOVA ROTA: Z‑Score
+@app.route('/api/trade/zscore', methods=['POST'])
+@require_auth
+@limit_if_available("10 per minute")
+def trade_zscore():
+    try:
+        sess = get_session(session['user_id'])
+        if not sess or not sess['client'].authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        bot = sess['trading_bot']
+        if bot.stop_loss_active:
+            return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+
+        strategy = sess.get('strategy')
+        if not strategy:
+            return jsonify({'error': 'Estratégia não disponível'}), 400
+
+        action, digit, reason = strategy.evaluate_zscore()
+        if action is None:
+            return jsonify({'error': f'⛔ Z‑Score bloqueado: {reason}'}), 400
+
+        d = request.json
+        amt = float(d.get('amount', 0.35))
+        if amt < 0.35 or amt > 100:
+            return jsonify({'error': 'Valor inválido'}), 400
+
+        analyzer = sess['digit_analyzer']
+        tr = analyzer.get_ticks_remaining()
+        if tr < 2:
+            return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
+
+        if action == 'DIFFER':
+            ok = sess['client'].place_differ_trade(digit, amt)
+            if ok:
+                credit_affiliate_commission(session['user_email'], amt)
+                return jsonify({
+                    'status': 'ok',
+                    'message': f'🎯 Z‑Score DIFFER no dígito {digit} por ${amt:.2f}',
+                    'digit': digit
+                })
+        elif action == 'MATCHES':
+            ok = sess['client'].place_matches_trade(digit, amt)
+            if ok:
+                credit_affiliate_commission(session['user_email'], amt)
+                return jsonify({
+                    'status': 'ok',
+                    'message': f'🎯 Z‑Score MATCHES no dígito {digit} por ${amt:.2f}',
+                    'digit': digit
+                })
+        return jsonify({'error': 'Falha no trade Z‑Score'}), 500
+    except Exception:
+        logger.exception("Erro trade zscore")
         return jsonify({'error': 'Erro interno'}), 500
 
 @app.route('/api/symbol/change', methods=['POST'])
