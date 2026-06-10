@@ -1320,7 +1320,7 @@ def trade_matches():
         logger.exception("Erro trade matches")
         return jsonify({'error': 'Erro interno'}), 500
 
-# 🔥 NOVA ROTA: Z‑Score
+# 🔥 Z‑Score — marca o sinal como utilizado apenas após execução bem‑sucedida
 @app.route('/api/trade/zscore', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1354,6 +1354,7 @@ def trade_zscore():
         if action == 'DIFFER':
             ok = sess['client'].place_differ_trade(digit, amt)
             if ok:
+                strategy._zscore_sequence_used = True   # marca como utilizado só agora
                 credit_affiliate_commission(session['user_email'], amt)
                 return jsonify({
                     'status': 'ok',
@@ -1363,6 +1364,7 @@ def trade_zscore():
         elif action == 'MATCHES':
             ok = sess['client'].place_matches_trade(digit, amt)
             if ok:
+                strategy._zscore_sequence_used = True   # marca como utilizado só agora
                 credit_affiliate_commission(session['user_email'], amt)
                 return jsonify({
                     'status': 'ok',
