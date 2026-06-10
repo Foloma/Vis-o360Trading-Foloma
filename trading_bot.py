@@ -270,7 +270,7 @@ class TradingBot:
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
                 is_digit = trade.get('is_digit', False)
-                timeout = 60 if is_digit else 180     # ← 60 segundos (era 120)
+                timeout = 60 if is_digit else 180   # 🔥 60 segundos — sincronizado com o deriv_client
                 if elapsed > timeout:
                     with self._state_lock:
                         if trade.get('result') == 'expired':
@@ -309,11 +309,17 @@ class TradingBot:
                         logger.warning(f"⚠️ Nenhum trade pendente para contract_id {contract_id}. Ignorando.")
                         return
 
+            # 🔥 NOVO: se o trade já estava expirado, reverte a expiração e aplica o resultado real
             if target_trade.get('result') == 'expired':
-                logger.warning(f"Trade {contract_id} já estava expirado. Ignorando resultado tardio.")
-                return
+                logger.info(f"🔄 Trade {contract_id} foi expirado mas o POC chegou — a aplicar resultado real")
+                with self._state_lock:
+                    # reverter a perda da expiração
+                    self.daily_stats['losses'] -= 1
+                    self.daily_stats['profit_loss'] += target_trade.get('amount', 0)
+                    self.stats['expired_trades'] -= 1
+                    self.daily_stats['expired_trades'] -= 1
 
-            if target_trade.get('result') != 'pending':
+            if target_trade.get('result') not in ('pending', 'expired'):
                 logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
                 return
 
