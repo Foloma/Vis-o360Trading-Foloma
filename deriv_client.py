@@ -70,7 +70,7 @@ class DerivWebSocketClient:
         self._ping_sent_at = 0
         self._ping_pending = False
         self._ping_timer = None
-        self._ping_failures = 0                 # contador de falhas consecutivas
+        self._ping_failures = 0
 
         self._consecutive_failures = 0
         self._max_failures = 5
@@ -185,10 +185,11 @@ class DerivWebSocketClient:
         logger.info("🔄 Poller de contratos iniciado")
 
     def _stop_poller(self):
+        self._poller_stop.set()
         if self._poller_thread and self._poller_thread.is_alive():
-            self._poller_stop.set()
             self._poller_thread.join(timeout=2)
         self._poller_thread = None
+        self._poller_stop.clear()   # 🔥 CORREÇÃO: limpa o evento para o próximo start
 
     def _poller_loop(self):
         while not self._stop_event.is_set() and self.authorized and self.ws:
@@ -321,7 +322,7 @@ class DerivWebSocketClient:
     def _start_keep_alive(self):
         self._stop_keep_alive()
         self._keep_alive_stop.clear()
-        self._ping_failures = 0               # reset do contador de falhas
+        self._ping_failures = 0
         self._keep_alive_thread = threading.Thread(target=self._keep_alive_loop, daemon=True)
         self._keep_alive_thread.start()
 
@@ -332,7 +333,6 @@ class DerivWebSocketClient:
         self._cancel_ping_timer()
 
     def _keep_alive_loop(self):
-        """Loop de keep‑alive resiliente — nunca termina inesperadamente."""
         consecutive_failures = 0
         while not self._stop_event.is_set() and not self._keep_alive_stop.is_set():
             if self._keep_alive_stop.wait(timeout=30):
@@ -344,7 +344,7 @@ class DerivWebSocketClient:
                 self._ping_pending = True
                 self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
                 self._start_ping_timer()
-                consecutive_failures = 0     # sucesso, resetar contador
+                consecutive_failures = 0
             except Exception as e:
                 consecutive_failures += 1
                 logger.error(f"Erro ao enviar ping ({consecutive_failures} falha(s)): {e}")
