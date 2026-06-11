@@ -514,6 +514,10 @@ let candleChart = null, candleSeries = null;
 let _pollRunning = false;
 let _historyDebounceTimer = null;
 
+// Estado de trade pendente
+let _tradePending = false;
+let _lastProcessedContractId = null;
+
 function toast(msg,type='info',ms=3500){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
   clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',ms);
@@ -632,6 +636,25 @@ async function updateAll(){
       const tr = data.digits?.ticks_remaining;
       updateStrategyDisplay(data.strategy, tr);
     }
+
+    // 🆕 Processar resultado do último trade
+    if(bot.last_trade_result){
+      const ltr = bot.last_trade_result;
+      if(ltr.contract_id && ltr.contract_id !== _lastProcessedContractId){
+        _lastProcessedContractId = ltr.contract_id;
+        _tradePending = false;
+        // Atualizar o dígito grande com o resultado real
+        const bd = document.getElementById('bigD');
+        const bp = document.getElementById('bigP');
+        bd.textContent = ltr.digit !== undefined ? ltr.digit : '?';
+        bd.className = 'big-d ' + (ltr.is_win ? 'odd' : 'even');
+        bp.textContent = (ltr.is_win ? 'GANHOU' : 'PERDEU');
+        const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
+        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}`, ltr.is_win ? 'win' : 'loss', 5000);
+        // Libertar dígito após 3 segundos (voltar a atualizar normalmente)
+        setTimeout(() => { _lastProcessedContractId = null; }, 3000);
+      }
+    }
   }
 
   if(martingaleResp.status === 'fulfilled'){
@@ -650,6 +673,16 @@ function updateDigits(digits){
   document.getElementById('tBar').style.width=Math.min(100,(tr/tpd)*100)+'%';
   document.getElementById('cdown').textContent=`⏱ ${tr} tick${tr!==1?'s':''}`;
   const recent=digits.recent||[],counter=digits.digit_counter||0;
+
+  // Se trade pendente, não atualizar o dígito grande (mostrar estado pendente)
+  if(_tradePending){
+    document.getElementById('bigD').textContent = '⏳';
+    document.getElementById('bigD').className = 'big-d wait';
+    document.getElementById('bigP').textContent = 'AGUARDANDO RESULTADO';
+    document.getElementById('histRow').innerHTML = ''; // opcional: não mostrar histórico recente
+    return;
+  }
+
   if(recent.length>0&&(recent.length!==lastDigitCount||counter!==lastDigitCounter)){
     lastDigitCount=recent.length;lastDigitCounter=counter;
     const newest=recent[recent.length-1],isOdd=newest%2!==0;
@@ -841,10 +874,49 @@ async function reconnectManual(){try{const resp=await fetch('/api/connect',{meth
 async function disconnectWebSocket(){try{await fetch('/api/disconnect',{method:'POST'});toast('🔌 Desconectado','info');isConnected=false;document.getElementById('sDot').className='dot';document.getElementById('connStatus').textContent='Desconectado';document.getElementById('connectOAuthBtn').disabled=false;document.getElementById('connectTokenBtn').disabled=false;}catch(e){toast('❌ Erro','loss');}}
 async function selAcct(a){selectedAcct=a;document.getElementById('btnDemo').classList.toggle('active',a==='demo');document.getElementById('btnReal').classList.toggle('active',a==='real');try{const r=await fetch('/api/auth/switch-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:a})});const d=await r.json();if(d.error){toast('❌ '+d.error,'loss');return;}toast(`✅ Conta ${a.toUpperCase()} activa`,'win');document.getElementById('conSt').textContent='🔄 A trocar conta...';}catch(e){toast('❌ Erro','loss');}}
 
-function tradeDigit(pred){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})}).then(r=>r.json()).then(d=>{if(d.error)toast('❌ '+d.error,'loss');else{toast('⏳ Aposta enviada!','info');scheduleHistoryLoad(5000);}}).catch(()=>toast('❌ Erro de rede','loss'));}
-async function tradeDiffer(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();scheduleHistoryLoad(5000);}}catch(e){toast('❌ Erro de rede','loss');}}
-async function tradeMatches(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();scheduleHistoryLoad(5000);}}catch(e){toast('❌ Erro de rede','loss');}}
-async function tradeZscore(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();scheduleHistoryLoad(5000);}}catch(e){toast('❌ Erro de rede','loss');}}
+function tradeDigit(pred){
+  if(_tradePending){ toast('⏳ Aguarde o resultado do trade anterior','warning'); return; }
+  const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
+  _tradePending = true;
+  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
+  .then(r=>r.json()).then(d=>{
+    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending=false; }
+    else{ toast('⏳ Aposta enviada!','info'); scheduleHistoryLoad(5000); }
+  }).catch(()=>{ toast('❌ Erro de rede','loss'); _tradePending=false; });
+}
+async function tradeDiffer(){
+  if(_tradePending){ toast('⏳ Aguarde o resultado do trade anterior','warning'); return; }
+  const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
+  _tradePending = true;
+  try{
+    const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+    const d=await r.json();
+    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending=false; }
+    else{ toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); }
+  }catch(e){ toast('❌ Erro de rede','loss'); _tradePending=false; }
+}
+async function tradeMatches(){
+  if(_tradePending){ toast('⏳ Aguarde o resultado do trade anterior','warning'); return; }
+  const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
+  _tradePending = true;
+  try{
+    const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+    const d=await r.json();
+    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending=false; }
+    else{ toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); }
+  }catch(e){ toast('❌ Erro de rede','loss'); _tradePending=false; }
+}
+async function tradeZscore(){
+  if(_tradePending){ toast('⏳ Aguarde o resultado do trade anterior','warning'); return; }
+  const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
+  _tradePending = true;
+  try{
+    const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+    const d=await r.json();
+    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending=false; }
+    else{ toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); }
+  }catch(e){ toast('❌ Erro de rede','loss'); _tradePending=false; }
+}
 async function ignoreZscore(){
     try {
         const r = await fetch('/api/zscore/ignore', { method: 'POST' });
