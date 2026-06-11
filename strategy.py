@@ -115,12 +115,13 @@ class StrategyManager:
         self._matches_signal_at = 0
         self._zscore_signal_at = 0
 
-    def _is_entry_window_valid(self, signal_at, max_age=20):
+    def _is_entry_window_valid(self, signal_at, max_age=8):
         if signal_at == 0:
             return True
         return time.time() - signal_at <= max_age
 
     def notify_result(self, action, is_win):
+        logger.info(f"📊 notify_result: action='{action}', is_win={is_win}")
         if not is_win:
             self._consecutive_losses += 1
             if self._consecutive_losses >= 2:
@@ -131,7 +132,7 @@ class StrategyManager:
                 return
             if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
                 self._apply_cooldown(5)
-            elif action in ('CALL', 'PUT', 'BUY', 'SELL'):
+            elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
                 if not self._parity_martingale_used and self._last_parity_streak_type:
                     self._apply_cooldown(1)
                 else:
@@ -144,7 +145,7 @@ class StrategyManager:
             self.reset_sequence_state()
             if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
                 self._apply_cooldown(1)
-            elif action in ('CALL', 'PUT', 'BUY', 'SELL'):
+            elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
                 self._apply_cooldown(2)
 
     # -----------------------------------------------------------------
@@ -363,6 +364,7 @@ class StrategyManager:
         if not absence:
             return None, "Contador de ausência indisponível"
 
+        # threshold >= 15 dígitos lentos = 150 ticks reais (~2.5 minutos a 1 tick/s)
         for digit, count in absence().items():
             if count >= 15 and not self._matches_sequence_used:
                 self._matches_sequence_used = True
