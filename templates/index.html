@@ -754,29 +754,62 @@ async function connectWithDeriv() {
         const r = await fetch('/api/auth/deriv_oauth_url');
         const d = await r.json();
         if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
+
+        // Limpar resultado anterior
+        localStorage.removeItem('oauth_result');
+
         const popup = window.open(d.url, 'derivOAuth', 'width=800,height=700');
-        const checkPopup = setInterval(async () => {
-            if (!popup || popup.closed) {
+
+        // Polling por localStorage (funciona cross-tab, incluindo mobile)
+        const checkResult = setInterval(async () => {
+            const result = localStorage.getItem('oauth_result');
+            const ts = parseInt(localStorage.getItem('oauth_ts') || '0');
+            const fresh = (Date.now() - ts) < 30000;
+
+            if (result === 'connected' && fresh) {
+                clearInterval(checkResult);
                 clearInterval(checkPopup);
-                toast('🔄 A processar...', 'info', 2000);
-                await new Promise(r => setTimeout(r, 2000));
+                localStorage.removeItem('oauth_result');
+                localStorage.removeItem('oauth_ts');
+                toast('✅ Deriv conectada!', 'win', 4000);
+                document.getElementById('conSt').textContent = '🔄 A ligar...';
                 try {
-                    const connResp = await fetch('/api/connect', { method: 'POST' });
-                    const connData = await connResp.json();
-                    if (connData.status === 'connecting' || connData.status === 'connecting_already') {
-                        document.getElementById('conSt').textContent = '🔄 A ligar...';
-                        let attempts = 0;
-                        const check = setInterval(() => {
-                            attempts++;
-                            updateAll();
-                            if (isConnected || attempts >= 5) clearInterval(check);
-                        }, 2000);
-                    } else if (connData.error) {
-                        toast('❌ ' + connData.error, 'loss');
-                    }
-                } catch(e) { toast('❌ Erro ao conectar', 'loss'); }
+                    await fetch('/api/connect', { method: 'POST' });
+                } catch(e) {}
+                let attempts = 0;
+                const check = setInterval(() => {
+                    attempts++;
+                    updateAll();
+                    if (isConnected || attempts >= 5) clearInterval(check);
+                }, 2000);
+            } else if (result === 'error' && fresh) {
+                clearInterval(checkResult);
+                clearInterval(checkPopup);
+                localStorage.removeItem('oauth_result');
+                localStorage.removeItem('oauth_ts');
+                toast('❌ OAuth falhou', 'loss');
             }
         }, 500);
+
+        // Fallback: popup fechou sem resultado
+        const checkPopup = setInterval(() => {
+            if (!popup || popup.closed) {
+                clearInterval(checkPopup);
+                setTimeout(() => {
+                    if (localStorage.getItem('oauth_result') !== 'connected') {
+                        clearInterval(checkResult);
+                        toast('❌ OAuth cancelado ou falhou', 'loss');
+                    }
+                }, 3000);
+            }
+        }, 500);
+
+        // Timeout geral
+        setTimeout(() => {
+            clearInterval(checkResult);
+            clearInterval(checkPopup);
+        }, 300000);
+
     } catch(e) { toast('❌ Erro OAuth', 'loss'); }
 }
 async function reconnectManual(){try{const resp=await fetch('/api/connect',{method:'POST'});const data=await resp.json();if(data.status==='connecting'){toast('🔄 A tentar ligar...','info');document.getElementById('conSt').textContent='🔄 A ligar...';setTimeout(updateAll,3000);}else if(data.error)toast('❌ '+data.error,'loss');}catch(e){toast('❌ Erro de rede','loss');}}
@@ -831,8 +864,17 @@ function updatePingDisplay(){
 setInterval(()=>{if(isConnected)loadCandles();},10000);
 setInterval(updateScoreboard,30000);updateScoreboard();
 setInterval(updatePingDisplay, 10000);
-(function(){const p=new URLSearchParams(location.search);if(p.get('connected')==='true'){toast('✅ Deriv conectada!','win',4000);if(!_updateInterval)startPolling();setTimeout(()=>{fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{if(d.status==='connecting'){document.getElementById('conSt').textContent='🔄 A ligar...';setTimeout(updateAll,2000);}}).catch(()=>{});},3000);setTimeout(updateAll,6000);history.replaceState({},'',location.pathname);}})();
-(function(){const p=new URLSearchParams(location.search);const ref=p.get('ref');if(ref){const el=document.getElementById('rRef');if(el)el.value=ref;}})();
+
+// Processamento do parâmetro ?ref= (mantido)
+(function(){
+    const p=new URLSearchParams(location.search);
+    const ref=p.get('ref');
+    if(ref){
+        const el=document.getElementById('rRef');
+        if(el)el.value=ref;
+    }
+})();
+
 fetch('/api/auth/status').then(r=>r.json()).then(d=>{if(d.authenticated){if(d.user?.active_account)selectedAcct=d.user.active_account;document.getElementById('btnDemo').classList.toggle('active',selectedAcct==='demo');document.getElementById('btnReal').classList.toggle('active',selectedAcct==='real');if(d.user?.name)document.getElementById('userNameDisplay').textContent='👤 '+d.user.name;document.getElementById('authModal').style.display='none';document.body.classList.remove('modal-open');document.getElementById('mainContent').style.display='block';if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';initSyms();loadAffiliate();loadHistory();initCandleChart();setTimeout(loadCandles,3000);startPolling();if(d.user?.has_deriv_token)setTimeout(autoConnect,1500);updateTokenDisplay();}});
 </script>
 <!-- debugPoll escondido em produção -->
