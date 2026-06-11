@@ -56,6 +56,9 @@ class TradingBot:
         self.on_signal_result_callback = None
         self._last_signal_id = None
 
+        # NOVO: resultado do último trade para o frontend
+        self.last_trade_result = None
+
     def start(self, client):
         self.client = client
         self.daily_stats['start_balance'] = self.balance
@@ -146,7 +149,8 @@ class TradingBot:
             'martingale': self.get_martingale_status(),
             'daily_stats': self.daily_stats,
             'consecutive_wins': self.consecutive_wins,
-            'consecutive_losses': self.consecutive_losses
+            'consecutive_losses': self.consecutive_losses,
+            'last_trade_result': self.last_trade_result
         }
 
     def get_martingale_status(self):
@@ -270,7 +274,7 @@ class TradingBot:
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
                 is_digit = trade.get('is_digit', False)
-                timeout = 60 if is_digit else 180   # 🔥 60 segundos — sincronizado com o deriv_client
+                timeout = 60 if is_digit else 180
                 if elapsed > timeout:
                     with self._state_lock:
                         if trade.get('result') == 'expired':
@@ -309,7 +313,7 @@ class TradingBot:
                         logger.warning(f"⚠️ Nenhum trade pendente para contract_id {contract_id}. Ignorando.")
                         return
 
-            # 🔥 Bloco único com lock para evitar race condition
+            # Bloco único com lock
             with self._state_lock:
                 # Reverter expiração se necessário
                 if target_trade.get('result') == 'expired':
@@ -343,7 +347,29 @@ class TradingBot:
                     self.consecutive_losses += 1
                     self.consecutive_wins = 0
                     logger.info(f"❌ PERDA! -${loss:.2f} | Contrato: {contract_id} | Ação: {target_trade.get('action')} | Perdas consecutivas: {self.consecutive_losses}")
+
                 self._daily_stats_dirty = True
+
+                # 🆕 Guardar resultado do último trade para o frontend
+                barrier = target_trade.get('digit_barrier', None)
+                action = target_trade.get('action', '')
+                if barrier is not None:
+                    if 'DIFFER' in action:
+                        won_digit = barrier if not is_win else '≠' + str(barrier)
+                    elif 'MATCH' in action:
+                        won_digit = barrier if is_win else '≠' + str(barrier)
+                    else:
+                        won_digit = '?'
+                else:
+                    won_digit = '?'
+                self.last_trade_result = {
+                    'contract_id': contract_id,
+                    'action': action,
+                    'barrier': barrier,
+                    'is_win': is_win,
+                    'profit': profit,
+                    'digit': won_digit
+                }
 
             self.update_stats()
             if self.client:
