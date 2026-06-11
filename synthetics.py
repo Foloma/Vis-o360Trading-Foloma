@@ -208,6 +208,10 @@ class DigitAnalyzer:
             return most_digit
 
     def get_digit_absence_counts(self):
+        """
+        Retorna contagem de AUSÊNCIAS em dígitos lentos (1 dígito lento = 10 ticks reais).
+        Exemplo: um dígito ausente há 150 ticks reais terá count=15.
+        """
         with self._lock:
             absence = {}
             total_slow = len(self.slow_digits)
@@ -449,7 +453,10 @@ class DigitAnalyzer:
 
     def get_recent_digits(self, count=500):
         with self._lock:
-            return list(self.slow_digits)
+            digits = list(self.slow_digits)
+            if count and count < len(digits):
+                return digits[-count:]
+            return digits
 
     def get_streak_info(self):
         with self._lock:
@@ -468,14 +475,13 @@ class DigitAnalyzer:
                 'even_pct':round((total-odd_c)/total*100,1),
                 'current_streak':streak,'streak_parity':sp,'recent':snap[-20:]}
 
-    # 🔥 NOVO: Z-Score para estratégia de alta assertividade
     def get_zscore_digit(self):
         """
         Calcula o Z-Score para cada dígito com base nos últimos 100 dígitos lentos.
         Retorna uma tupla (zscore_diff, digit_diff, zscore_match, digit_match)
         onde:
-          - zscore_diff > 2.5 → dígito sobrerrepresentado (DIFFER)
-          - zscore_match < -2.5 → dígito sub-representado (MATCHES)
+          - zscore_diff > 3.0 → dígito sobrerrepresentado (DIFFER)
+          - zscore_match < -3.0 → dígito sub-representado (MATCHES)
         Se não houver sinal significativo, retorna None para o respetivo.
         """
         with self._lock:
@@ -499,7 +505,7 @@ class DigitAnalyzer:
 
             max_z = max(z_scores.values())
             max_digit = max(z_scores, key=z_scores.get)
-            if max_z > 2.5:
+            if max_z > 3.0:
                 zscore_diff = max_z
                 diff_digit = max_digit
             else:
@@ -508,7 +514,7 @@ class DigitAnalyzer:
 
             min_z = min(z_scores.values())
             min_digit = min(z_scores, key=z_scores.get)
-            if min_z < -2.5:
+            if min_z < -3.0:
                 zscore_match = min_z
                 match_digit = min_digit
             else:
