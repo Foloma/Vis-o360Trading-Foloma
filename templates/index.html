@@ -103,16 +103,32 @@
       min-height: 48px;
       touch-action: manipulation;
     }
+    .zscore-container {
+      display: none;
+      margin-top: 15px;
+      gap: 6px;
+    }
+    .zscore-container.visible {
+      display: flex;
+      align-items: stretch;
+    }
     .zscore-btn {
       background: var(--warning); color: #000;
-      width: 100%; margin-top: 15px;
+      flex: 1;
       padding: 12px; font-weight: bold;
       position: relative; z-index: 1;
       min-height: 48px;
       touch-action: manipulation;
-      display: none;
     }
-    .zscore-btn.visible { display: block; }
+    .ignore-btn {
+      background: var(--card);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      font-size: 11px;
+      white-space: nowrap;
+      touch-action: manipulation;
+    }
 
     .trade-row { display: flex; gap: 8px; align-items: center; }
     .trade-row input { flex: 1; }
@@ -146,7 +162,8 @@
         padding: 10px 8px;
         font-size: 12px;
       }
-      .matches-btn, .zscore-btn { margin-top: 12px; }
+      .matches-btn { margin-top: 12px; }
+      .zscore-container { margin-top: 12px; }
     }
   </style>
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -176,7 +193,7 @@
 <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
 <div class="toast" id="toast"></div>
 
-<!-- Modal do Guia de Utilização — CONTEÚDO COMPLETO SUBSTITUÍDO -->
+<!-- Modal do Guia de Utilização -->
 <div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
   <div class="guide-modal" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeGuide()">✕</button>
@@ -241,7 +258,7 @@
       <tr><td>10%</td><td>90%</td><td>~12%</td></tr>
     </table>
 
-    <!-- ══════════ MATCHES (com limite de 10 tentativas) ══════════ -->
+    <!-- ══════════ MATCHES ══════════ -->
     <h3 id="g3">🎯 3. MATCHES (Digit Matches)</h3>
     <table>
       <tr><th>O que é</th><td>Aposta que o dígito mais frequente VAI ser o último dígito do tick.</td></tr>
@@ -408,9 +425,12 @@
       </div>
       <button class="differ-btn" id="btnDiffer" onclick="tradeDiffer()">🎯 DIFFER (dígito menos frequente)</button>
       <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (dígito mais frequente) — payout ~9x</button>
-      <!-- 🔥 Botão Z‑Score -->
-      <button class="zscore-btn" id="btnZscore" onclick="tradeZscore()">🎯 Z‑SCORE (alta assertividade)</button>
-      <!-- 🔥 Razão do bloqueio MATCHES -->
+      <!-- Container Z‑Score com botão Ignorar -->
+      <div class="zscore-container" id="zscoreContainer">
+        <button class="zscore-btn" id="btnZscore" onclick="tradeZscore()">🎯 Z‑SCORE</button>
+        <button class="ignore-btn" id="btnIgnoreZscore" onclick="ignoreZscore()">🚫 Ignorar</button>
+      </div>
+      <!-- Razão do bloqueio MATCHES -->
       <div id="matchesReason" style="font-size:9px; color: var(--muted); text-align:center; margin-top:2px;"></div>
       <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
       <div class="ms">
@@ -702,18 +722,23 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   document.getElementById('btnDiffer').disabled = !strategy.differ_available;
   document.getElementById('btnMatches').disabled = !strategy.matches_available;
 
-  // Z‑Score
+  // Z‑Score com container
+  const zContainer = document.getElementById('zscoreContainer');
   const btnZscore = document.getElementById('btnZscore');
-  btnZscore.disabled = !strategy.zscore_available;
-  if (strategy.zscore_available) {
-    btnZscore.classList.add('visible');
-    if (strategy.zscore_action === 'DIFFER') {
-      btnZscore.textContent = `🎯 Z‑Score DIFFER no dígito ${strategy.zscore_digit}`;
-    } else if (strategy.zscore_action === 'MATCHES') {
-      btnZscore.textContent = `🎯 Z‑Score MATCHES no dígito ${strategy.zscore_digit}`;
+  if (zContainer && btnZscore) {
+    if (strategy.zscore_available) {
+      zContainer.classList.add('visible');
+      btnZscore.disabled = false;
+      if (strategy.zscore_action === 'DIFFER') {
+        btnZscore.textContent = `🎯 Z‑Score DIFFER no dígito ${strategy.zscore_digit}`;
+      } else if (strategy.zscore_action === 'MATCHES') {
+        btnZscore.textContent = `🎯 Z‑Score MATCHES no dígito ${strategy.zscore_digit}`;
+      } else {
+        btnZscore.textContent = '🎯 Z‑SCORE';
+      }
+    } else {
+      zContainer.classList.remove('visible');
     }
-  } else {
-    btnZscore.classList.remove('visible');
   }
 
   if(blockerMsg){
@@ -820,6 +845,19 @@ function tradeDigit(pred){const amt=parseFloat(document.getElementById('amtDigit
 async function tradeDiffer(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();scheduleHistoryLoad(5000);}}catch(e){toast('❌ Erro de rede','loss');}}
 async function tradeMatches(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();scheduleHistoryLoad(5000);}}catch(e){toast('❌ Erro de rede','loss');}}
 async function tradeZscore(){const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;try{const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});const d=await r.json();if(d.error)toast('❌ '+d.error,'loss');else{toast(d.message,'win',4000);playBeep();scheduleHistoryLoad(5000);}}catch(e){toast('❌ Erro de rede','loss');}}
+async function ignoreZscore(){
+    try {
+        const r = await fetch('/api/zscore/ignore', { method: 'POST' });
+        const d = await r.json();
+        if (d.status === 'ok') {
+            toast('🚫 Sinal Z‑Score ignorado', 'info');
+        } else {
+            toast('❌ ' + (d.error || 'Erro ao ignorar'), 'loss');
+        }
+    } catch(e) {
+        toast('❌ Erro de rede', 'loss');
+    }
+}
 
 async function mgtMultiply(fieldId){const input=document.getElementById(fieldId);const currentAmount=parseFloat(input.value)||0.35;const r=await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:currentAmount})});const d=await r.json();if(d.error){toast('❌ '+d.error,'loss');}else{const nextAmount=d.martingale.next_amount;document.getElementById('amtDigit').value=nextAmount.toFixed(2);toast('📈 '+d.martingale.message,'info');}}
 async function mgtDivide(fieldId){const input=document.getElementById(fieldId);const currentAmount=parseFloat(input.value)||0.35;const nextAmount=Math.max(0.35,currentAmount/2);input.value=nextAmount.toFixed(2);toast('📉 $'+nextAmount.toFixed(2),'info');}
