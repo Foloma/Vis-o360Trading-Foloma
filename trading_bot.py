@@ -309,21 +309,22 @@ class TradingBot:
                         logger.warning(f"⚠️ Nenhum trade pendente para contract_id {contract_id}. Ignorando.")
                         return
 
-            # 🔥 NOVO: se o trade já estava expirado, reverte a expiração e aplica o resultado real
-            if target_trade.get('result') == 'expired':
-                logger.info(f"🔄 Trade {contract_id} foi expirado mas o POC chegou — a aplicar resultado real")
-                with self._state_lock:
-                    # reverter a perda da expiração
+            # 🔥 Bloco único com lock para evitar race condition
+            with self._state_lock:
+                # Reverter expiração se necessário
+                if target_trade.get('result') == 'expired':
+                    logger.info(f"🔄 Trade {contract_id} foi expirado mas o POC chegou — a aplicar resultado real")
                     self.daily_stats['losses'] -= 1
                     self.daily_stats['profit_loss'] += target_trade.get('amount', 0)
                     self.stats['expired_trades'] -= 1
                     self.daily_stats['expired_trades'] -= 1
 
-            if target_trade.get('result') not in ('pending', 'expired'):
-                logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
-                return
+                # Verificar se já não foi processado
+                if target_trade.get('result') not in ('pending', 'expired'):
+                    logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
+                    return
 
-            with self._state_lock:
+                # Aplicar resultado real
                 if is_win:
                     target_trade['result'] = 'win'
                     target_trade['profit'] = profit
