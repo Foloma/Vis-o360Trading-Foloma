@@ -178,8 +178,8 @@ class DerivWebSocketClient:
     # Polling ativo para contratos pendentes (com evento dedicado)
     # -----------------------------------------------------------------
     def _start_poller(self):
-        self._stop_poller()
-        self._poller_stop.clear()
+        self._stop_poller()                # garante que thread anterior morreu
+        self._poller_stop.clear()          # limpa o evento para o novo loop
         self._poller_thread = threading.Thread(target=self._poller_loop, daemon=True)
         self._poller_thread.start()
         logger.info("🔄 Poller de contratos iniciado")
@@ -189,11 +189,11 @@ class DerivWebSocketClient:
         if self._poller_thread and self._poller_thread.is_alive():
             self._poller_thread.join(timeout=2)
         self._poller_thread = None
-        self._poller_stop.clear()   # 🔥 CORREÇÃO: limpa o evento para o próximo start
+        # NÃO limpar o evento aqui; será limpo em _start_poller
 
     def _poller_loop(self):
-        while not self._stop_event.is_set() and self.authorized and self.ws:
-            if self._poller_stop.wait(timeout=30):
+        while not self._poller_stop.wait(timeout=8):
+            if self._stop_event.is_set() or not self.authorized:
                 break
             if not self.active_trades:
                 continue
@@ -473,6 +473,31 @@ class DerivWebSocketClient:
             return self._req_counter
 
     # -----------------------------------------------------------------
+    # Validação centralizada pré-trade
+    # -----------------------------------------------------------------
+    def _pre_trade_check(self):
+        """Retorna (True, None) se OK, (False, 'motivo') se bloqueado."""
+        if time.time() - self._last_reconnect_time < 10:
+            return False, "Reconexão recente"
+        if not self.streaming:
+            return False, "Sem streaming"
+        if self.balance <= 0:
+            return False, "Saldo não carregado"
+        if self.balance < 0.35:
+            return False, "Saldo insuficiente"
+        if time.time() - self._last_trade_time < 2:
+            return False, "Intervalo mínimo 2s"
+        if not self.authorized:
+            return False, "Não autorizado"
+        with self._pending_lock:
+            if self.pending_trade is not None:
+                if time.time() - self.pending_trade_time > 60:
+                    self.pending_trade = None
+                else:
+                    return False, "Trade pendente"
+        return True, None
+
+    # -----------------------------------------------------------------
     # Métodos de trade
     # -----------------------------------------------------------------
     def place_trade(self, contract_type, amount, is_digit=False):
@@ -481,25 +506,10 @@ class DerivWebSocketClient:
             return False
 
         with self._trade_lock:
-            if time.time() - self._last_reconnect_time < 10:
-                logger.warning("🚫 Reconexão recente")
+            ok, err = self._pre_trade_check()
+            if not ok:
+                logger.warning(f"🚫 Trade bloqueado: {err}")
                 return False
-            if not self.streaming:
-                logger.warning("🚫 Sem streaming"); return False
-            if self.balance <= 0:
-                logger.warning("🚫 Saldo não carregado"); return False
-            if self.balance < 0.35:
-                logger.warning("🚫 Saldo insuficiente"); return False
-            if time.time() - self._last_trade_time < 2:
-                logger.warning("⏱️ Intervalo mínimo 2s"); return False
-            if not self.authorized:
-                logger.warning("🚫 Não autorizado"); return False
-            with self._pending_lock:
-                if self.pending_trade is not None:
-                    if time.time() - self.pending_trade_time > 60:
-                        self.pending_trade = None
-                    else:
-                        logger.warning("Trade pendente"); return False
 
             self._last_trade_time = time.time()
 
@@ -543,25 +553,12 @@ class DerivWebSocketClient:
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
+
         with self._trade_lock:
-            if time.time() - self._last_reconnect_time < 10:
-                logger.warning("🚫 Reconexão recente"); return False
-            if not self.streaming:
-                logger.warning("🚫 Sem streaming"); return False
-            if self.balance <= 0:
-                logger.warning("🚫 Saldo não carregado"); return False
-            if self.balance < 0.35:
-                logger.warning("🚫 Saldo insuficiente"); return False
-            if time.time() - self._last_trade_time < 2:
-                logger.warning("⏱️ Intervalo mínimo 2s"); return False
-            if not self.authorized:
-                logger.warning("🚫 Não autorizado"); return False
-            with self._pending_lock:
-                if self.pending_trade is not None:
-                    if time.time() - self.pending_trade_time > 60:
-                        self.pending_trade = None
-                    else:
-                        logger.warning("Trade pendente"); return False
+            ok, err = self._pre_trade_check()
+            if not ok:
+                logger.warning(f"🚫 Trade bloqueado: {err}")
+                return False
 
             self._last_trade_time = time.time()
             duration = self.config.DIGIT_CONTRACT_DURATION
@@ -593,25 +590,12 @@ class DerivWebSocketClient:
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
+
         with self._trade_lock:
-            if time.time() - self._last_reconnect_time < 10:
-                logger.warning("🚫 Reconexão recente"); return False
-            if not self.streaming:
-                logger.warning("🚫 Sem streaming"); return False
-            if self.balance <= 0:
-                logger.warning("🚫 Saldo não carregado"); return False
-            if self.balance < 0.35:
-                logger.warning("🚫 Saldo insuficiente"); return False
-            if time.time() - self._last_trade_time < 2:
-                logger.warning("⏱️ Intervalo mínimo 2s"); return False
-            if not self.authorized:
-                logger.warning("🚫 Não autorizado"); return False
-            with self._pending_lock:
-                if self.pending_trade is not None:
-                    if time.time() - self.pending_trade_time > 60:
-                        self.pending_trade = None
-                    else:
-                        logger.warning("Trade pendente"); return False
+            ok, err = self._pre_trade_check()
+            if not ok:
+                logger.warning(f"🚫 Trade bloqueado: {err}")
+                return False
 
             self._last_trade_time = time.time()
             duration = self.config.DIGIT_CONTRACT_DURATION
