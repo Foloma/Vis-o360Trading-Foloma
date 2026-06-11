@@ -1018,7 +1018,6 @@ def oauth_callback():
         logger.error("🚫 Callback sem state!")
         return redirect('/?error=invalid_state')
 
-    # 🔥 NOVO HTML com comunicação via localStorage
     html = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>OAuth Callback</title></head>
@@ -1048,7 +1047,6 @@ def oauth_callback():
             .then(response => response.json())
             .then(data => {{
                 if (data.status === 'ok') {{
-                    // Novo mecanismo: localStorage em vez de window.opener
                     localStorage.setItem('oauth_result', 'connected');
                     localStorage.setItem('oauth_ts', Date.now().toString());
                     window.close();
@@ -1372,6 +1370,19 @@ def trade_zscore():
     except Exception:
         logger.exception("Erro trade zscore")
         return jsonify({'error': 'Erro interno'}), 500
+
+@app.route('/api/zscore/ignore', methods=['POST'])
+@require_auth
+def ignore_zscore():
+    """Marca o sinal Z‑Score atual como ignorado, libertando o ecrã."""
+    sess = get_session(session['user_id'])
+    if not sess:
+        return jsonify({'error': 'Sem sessão'}), 400
+    strategy = sess.get('strategy')
+    if strategy:
+        strategy._zscore_sequence_used = True
+        return jsonify({'status': 'ok', 'message': 'Sinal Z‑Score ignorado.'})
+    return jsonify({'error': 'Estratégia não disponível'}), 400
 
 @app.route('/api/symbol/change', methods=['POST'])
 @require_auth
