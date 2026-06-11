@@ -1018,6 +1018,7 @@ def oauth_callback():
         logger.error("🚫 Callback sem state!")
         return redirect('/?error=invalid_state')
 
+    # 🔥 NOVO HTML com comunicação via localStorage
     html = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>OAuth Callback</title></head>
@@ -1047,27 +1048,23 @@ def oauth_callback():
             .then(response => response.json())
             .then(data => {{
                 if (data.status === 'ok') {{
-                    if (window.opener && !window.opener.closed) {{
-                        window.opener.location.href = '/?connected=true';
-                    }} else {{
-                        window.location.href = '/?connected=true';
-                    }}
+                    // Novo mecanismo: localStorage em vez de window.opener
+                    localStorage.setItem('oauth_result', 'connected');
+                    localStorage.setItem('oauth_ts', Date.now().toString());
+                    window.close();
+                    setTimeout(function() {{ window.location.href = '/'; }}, 500);
                 }} else {{
-                    if (window.opener && !window.opener.closed) {{
-                        window.opener.location.href = '/?error=' + (data.error || 'oauth_failed');
-                    }} else {{
-                        window.location.href = '/?error=' + (data.error || 'oauth_failed');
-                    }}
+                    localStorage.setItem('oauth_result', 'error');
+                    localStorage.setItem('oauth_ts', Date.now().toString());
+                    window.close();
+                    setTimeout(function() {{ window.location.href = '/?error=' + (data.error || 'oauth_failed'); }}, 500);
                 }}
-                window.close();
             }})
-            .catch(() => {{
-                if (window.opener && !window.opener.closed) {{
-                    window.opener.location.href = '/?error=request_failed';
-                }} else {{
-                    window.location.href = '/?error=request_failed';
-                }}
+            .catch(function() {{
+                localStorage.setItem('oauth_result', 'error');
+                localStorage.setItem('oauth_ts', Date.now().toString());
                 window.close();
+                setTimeout(function() {{ window.location.href = '/?error=request_failed'; }}, 500);
             }});
         }})();
     </script>
