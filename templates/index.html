@@ -205,7 +205,7 @@
       <button class="tf-btn" onclick="scrollToSection('g4')">Plano $20→$100</button>
       <button class="tf-btn" onclick="scrollToSection('g5')">Emocional</button>
     </div>
-    <!-- conteúdo do guia omitido por brevidade, igual às versões anteriores -->
+    <!-- conteúdo do guia omitido por brevidade -->
   </div>
 </div>
 
@@ -227,7 +227,7 @@
       <div id="strategyStatus" style="margin-top:6px; font-size:10px;"></div>
     </div>
 
-    <!-- PLACAR DE SINAIS (agora com dados reais de trades) -->
+    <!-- PLACAR DE TRADES HOJE -->
     <div class="card" id="signalScoreboard" style="display:none">
       <div class="card-title">📡 PLACAR DE TRADES HOJE</div>
       <div class="scoreboard">
@@ -364,6 +364,9 @@ let _historyDebounceTimer = null;
 let _tradePending = false;
 let _lastProcessedContractId = null;
 let _tradePendingTimer = null;
+
+// Bloquear atualização do dígito enquanto o resultado é exibido
+let _showTradeResult = false;
 
 // Limite de auto-connect
 let _autoConnectAttempts = 0;
@@ -534,7 +537,9 @@ async function updateAll(){
         bp.textContent = (ltr.is_win ? 'GANHOU' : 'PERDEU');
         const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
         toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}`, ltr.is_win ? 'win' : 'loss', 5000);
-        setTimeout(() => { _lastProcessedContractId = null; }, 3000);
+        // 🔥 Bloquear atualização do dígito durante 5 segundos
+        _showTradeResult = true;
+        setTimeout(() => { _showTradeResult = false; }, 5000);
       }
     }
   }
@@ -561,6 +566,11 @@ function updateDigits(digits){
     document.getElementById('bigD').textContent = '⏳';
     document.getElementById('bigD').className = 'big-d wait';
     document.getElementById('bigP').textContent = 'AGUARDANDO RESULTADO';
+    return;
+  }
+
+  // 🔥 Se o resultado está a ser exibido, não atualizar o dígito
+  if(_showTradeResult){
     return;
   }
 
