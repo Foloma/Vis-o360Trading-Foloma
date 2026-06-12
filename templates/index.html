@@ -349,10 +349,8 @@ let selectedAcct='demo', curSym='R_100';
 let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
 let isConnected = false;
-let isConnecting = false;
 let _loggingIn = false;
 let _registering = false;
-let lastTradeCount = 0;
 let currentGranularity = 60;
 let resizeObserver = null;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
@@ -536,10 +534,10 @@ async function updateAll(){
         bd.className = 'big-d ' + (ltr.is_win ? 'odd' : 'even');
         bp.textContent = (ltr.is_win ? 'GANHOU' : 'PERDEU');
         const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
-        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}`, ltr.is_win ? 'win' : 'loss', 5000);
-        // 🔥 Bloquear atualização do dígito durante 5 segundos
+        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}`, ltr.is_win ? 'win' : 'loss', 4000);
+        // Bloquear atualização do dígito durante 2 segundos
         _showTradeResult = true;
-        setTimeout(() => { _showTradeResult = false; }, 5000);
+        setTimeout(() => { _showTradeResult = false; }, 2000);
       }
     }
   }
@@ -569,7 +567,7 @@ function updateDigits(digits){
     return;
   }
 
-  // 🔥 Se o resultado está a ser exibido, não atualizar o dígito
+  // Se o resultado está a ser exibido, não atualizar o dígito
   if(_showTradeResult){
     return;
   }
@@ -640,8 +638,25 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 2);
   const blockerMsg = document.getElementById('digitBlockerMsg');
 
-  document.getElementById('btnOdd').disabled  = !strategy.parity_available || ticksBlocked;
-  document.getElementById('btnEven').disabled = !strategy.parity_available || ticksBlocked;
+  // 🔥 Apenas o botão recomendado fica ativo no PAR/ÍMPAR
+  const btnOdd = document.getElementById('btnOdd');
+  const btnEven = document.getElementById('btnEven');
+  if (strategy.parity_available) {
+    if (strategy.parity_direction === 'odd') {
+      btnOdd.disabled = false;
+      btnEven.disabled = true;
+    } else if (strategy.parity_direction === 'even') {
+      btnOdd.disabled = true;
+      btnEven.disabled = false;
+    } else {
+      btnOdd.disabled = true;
+      btnEven.disabled = true;
+    }
+  } else {
+    btnOdd.disabled = true;
+    btnEven.disabled = true;
+  }
+
   document.getElementById('btnDiffer').disabled = !strategy.differ_available;
   document.getElementById('btnMatches').disabled = !strategy.matches_available;
 
@@ -757,7 +772,7 @@ function tradeDigit(pred){
       _tradePending = false;
       toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
     }
-  }, 60000);
+  }, 10000);   // timeout reduzido para 10 segundos
   fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
   .then(r=>r.json()).then(d=>{
     if(d.error){ toast('❌ '+d.error,'loss'); _tradePending=false; clearTimeout(_tradePendingTimer); }
@@ -775,7 +790,7 @@ async function tradeDiffer(){
       _tradePending = false;
       toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
     }
-  }, 60000);
+  }, 10000);
   try{
     const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
@@ -794,7 +809,7 @@ async function tradeMatches(){
       _tradePending = false;
       toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
     }
-  }, 60000);
+  }, 10000);
   try{
     const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
@@ -813,7 +828,7 @@ async function tradeZscore(){
       _tradePending = false;
       toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
     }
-  }, 60000);
+  }, 10000);
   try{
     const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
