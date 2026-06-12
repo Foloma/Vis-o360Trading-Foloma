@@ -461,6 +461,9 @@ def create_session(user_id, user, force=False):
             client = existing['client']
             if not force and client.authorized and client.connected:
                 return existing
+            # Avisar o bot que a sessão vai ser destruída
+            if 'trading_bot' in existing:
+                existing['trading_bot'].on_disconnect()
             client._stop_event.set()
             if client._ws_thread and client._ws_thread.is_alive():
                 client._ws_thread.join(timeout=5)
@@ -602,6 +605,7 @@ def create_session(user_id, user, force=False):
             if client.authorized:
                 if not validate_account_type(client.loginid, user.get('active_account', 'demo')):
                     logger.warning(f"Token inválido para {user['email']} – a remover sessão.")
+                    bot.on_disconnect()
                     client._stop_event.set()
                     with sessions_lock:
                         sessions.pop(user_id, None)
@@ -613,6 +617,7 @@ def create_session(user_id, user, force=False):
                 if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
                     UserStore.add_token(user['email'], user.get('active_account', 'demo'), '')
                     logger.warning(f"Token expirado para {user['email']} – removido.")
+                bot.on_disconnect()
 
         threading.Thread(target=connect_and_validate, daemon=True).start()
 
@@ -780,6 +785,7 @@ def logout():
     if user_id:
         sess = get_session(user_id)
         if sess:
+            sess['trading_bot'].on_disconnect()
             sess['client']._stop_event.set()
         with sessions_lock:
             sessions.pop(user_id, None)
@@ -792,6 +798,7 @@ def disconnect():
     user_id = session['user_id']
     sess = get_session(user_id)
     if sess:
+        sess['trading_bot'].on_disconnect()
         sess['client']._stop_event.set()
         with sessions_lock:
             sessions.pop(user_id, None)
@@ -913,7 +920,9 @@ def switch_account():
     user_id = session['user_id']
     with sessions_lock:
         if user_id in sessions:
-            old_client = sessions[user_id]['client']
+            old_sess = sessions[user_id]
+            old_sess['trading_bot'].on_disconnect()
+            old_client = old_sess['client']
             old_client._stop_event.set()
             if old_client._ws_thread and old_client._ws_thread.is_alive():
                 old_client._ws_thread.join(timeout=5)
@@ -1482,7 +1491,7 @@ def candles_data():
     sess['client'].request_candles(symbol, granularity=granularity, count=50)
     return jsonify({'candles': sess.get('candles', [])})
 
-# ==================== PLACAR DE SINAIS ====================
+# ==================== PLACAR DE SINAIS (AGORA USA TRADES REAIS) ====================
 @app.route('/api/signals/scoreboard')
 @require_auth
 def signals_scoreboard():
@@ -1490,22 +1499,27 @@ def signals_scoreboard():
     today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
-        total = conn.execute('SELECT COUNT(*) FROM signals WHERE user_id=? AND timestamp>=?',
-                             (user_id, today_start)).fetchone()[0]
-        wins = conn.execute('SELECT COUNT(*) FROM signals WHERE user_id=? AND timestamp>=? AND result="win"',
-                            (user_id, today_start)).fetchone()[0]
-        losses = conn.execute('SELECT COUNT(*) FROM signals WHERE user_id=? AND timestamp>=? AND result="loss"',
-                              (user_id, today_start)).fetchone()[0]
-        pending = total - wins - losses
+        total = conn.execute(
+            'SELECT COUNT(*) FROM trades WHERE user_id=? AND timestamp>=?',
+            (user_id, today_start)
+        ).fetchone()[0]
+        wins = conn.execute(
+            'SELECT COUNT(*) FROM trades WHERE user_id=? AND timestamp>=? AND result="win"',
+            (user_id, today_start)
+        ).fetchone()[0]
+        losses = conn.execute(
+            'SELECT COUNT(*) FROM trades WHERE user_id=? AND timestamp>=? AND result="loss"',
+            (user_id, today_start)
+        ).fetchone()[0]
     finally:
         conn.close()
-    win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
+    resolved = wins + losses
+    win_rate = (wins / resolved * 100) if resolved > 0 else 0
     return jsonify({
-        'today_signals': total,
-        'would_have_won': wins,
-        'would_have_lost': losses,
-        'pending': pending,
-        'simulated_win_rate': round(win_rate, 1)
+        'today_trades': total,
+        'wins': wins,
+        'losses': losses,
+        'win_rate': round(win_rate, 1)
     })
 
 # ==================== AFILIADOS / PAGAMENTOS ====================
@@ -1700,6 +1714,7 @@ def admin_clear_tokens():
     with sessions_lock:
         for uid, sess in list(sessions.items()):
             if (target_uid and uid == target_uid) or not target_uid:
+                sess['trading_bot'].on_disconnect()
                 sess['client']._stop_event.set()
                 del sessions[uid]
                 logger.info(f"Sessão de {uid} encerrada")
