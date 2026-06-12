@@ -56,7 +56,7 @@ class TradingBot:
         self.on_signal_result_callback = None
         self._last_signal_id = None
 
-        # NOVO: resultado do último trade para o frontend
+        # Resultado do último trade para o frontend
         self.last_trade_result = None
 
     def start(self, client):
@@ -72,6 +72,13 @@ class TradingBot:
     def resume(self):
         self.paused = False
         logger.info("▶️ Resumido")
+
+    def on_disconnect(self):
+        """Chamado quando a sessão WebSocket é destruída."""
+        self._client_connected = False
+        self._client_authorized = False
+        self.client = None
+        logger.info("🔌 Bot: sessão desconectada, flags resetadas")
 
     def check_risk_limits(self):
         max_loss_pct = config.RISK_LIMITS.get('max_daily_loss_percent', 5)
@@ -350,7 +357,7 @@ class TradingBot:
 
                 self._daily_stats_dirty = True
 
-                # 🆕 Guardar resultado do último trade para o frontend
+                # Guardar resultado do último trade para o frontend
                 barrier = target_trade.get('digit_barrier', None)
                 action = target_trade.get('action', '')
                 if barrier is not None:
