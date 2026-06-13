@@ -157,6 +157,20 @@
     .strat-info { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
     .strat-info .dot { width: 6px; height: 6px; }
 
+    /* Aviso de latência alta */
+    .latency-warning {
+      background: var(--warning);
+      color: #000;
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-weight: 700;
+      display: none;
+      text-align: center;
+      margin-top: 4px;
+    }
+    .latency-warning.visible { display: block; }
+
     @media (max-width: 400px) {
       .differ-btn, .matches-btn, .zscore-btn {
         padding: 10px 8px;
@@ -223,6 +237,7 @@
         </div>
       </div>
       <div id="conSt" style="text-align:center;font-size:10px;color:#ffaa00"></div>
+      <div class="latency-warning" id="latencyWarning">⚠️ Latência alta</div>
       <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:2px">Preço: <span id="priceEl" style="color:var(--accent)">---</span></div>
       <div id="strategyStatus" style="margin-top:6px; font-size:10px;"></div>
     </div>
@@ -373,6 +388,9 @@ const MAX_AUTO_CONNECT_ATTEMPTS = 3;
 // Debounce martingale
 let _mgtLocked = false;
 
+// Latência do último trade (lida diretamente do /api/status)
+let _lastTradeLatency = 0;
+
 function toast(msg,type='info',ms=3500){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
   clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',ms);
@@ -509,6 +527,27 @@ async function updateAll(){
     document.getElementById('cur').textContent=bot.currency||'USD';
     const priceEl=document.getElementById('priceEl');if(priceEl)priceEl.textContent=(bot.price||0).toFixed(4);
 
+    // Restaurar estado de trade pendente após reload
+    if (bot.has_pending_trade && !_tradePending) {
+        _tradePending = true;
+        document.getElementById('bigD').textContent = '⏳';
+        document.getElementById('bigD').className = 'big-d wait';
+        document.getElementById('bigP').textContent = 'AGUARDANDO RESULTADO';
+        // Iniciar timer de timeout também
+        clearTimeout(_tradePendingTimer);
+        _tradePendingTimer = setTimeout(() => {
+            if (_tradePending) {
+                _tradePending = false;
+                toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
+            }
+        }, 10000);
+    }
+
+    // Atualizar latência do último trade diretamente do status
+    if (bot.last_trade_latency_ms) {
+        _lastTradeLatency = bot.last_trade_latency_ms;
+    }
+
     if(data.digits){
       updateDigits(data.digits);
       if(data.digits.digit_frequencies)updateFreqGrid(data.digits.digit_frequencies,data.digits.least_frequent_digit,data.digits.most_frequent_digit);
@@ -534,7 +573,9 @@ async function updateAll(){
         bd.className = 'big-d ' + (ltr.is_win ? 'odd' : 'even');
         bp.textContent = (ltr.is_win ? 'GANHOU' : 'PERDEU');
         const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
-        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}`, ltr.is_win ? 'win' : 'loss', 4000);
+        // Incluir latência no toast (lida diretamente do status)
+        const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
+        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${latencyInfo}`, ltr.is_win ? 'win' : 'loss', 4000);
         // Bloquear atualização do dígito durante 2 segundos
         _showTradeResult = true;
         setTimeout(() => { _showTradeResult = false; }, 2000);
@@ -638,7 +679,7 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 2);
   const blockerMsg = document.getElementById('digitBlockerMsg');
 
-  // 🔥 Apenas o botão recomendado fica ativo no PAR/ÍMPAR
+  // Apenas o botão recomendado fica ativo no PAR/ÍMPAR
   const btnOdd = document.getElementById('btnOdd');
   const btnEven = document.getElementById('btnEven');
   if (strategy.parity_available) {
@@ -772,7 +813,7 @@ function tradeDigit(pred){
       _tradePending = false;
       toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
     }
-  }, 10000);   // timeout reduzido para 10 segundos
+  }, 10000);
   fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
   .then(r=>r.json()).then(d=>{
     if(d.error){ toast('❌ '+d.error,'loss'); _tradePending=false; clearTimeout(_tradePendingTimer); }
@@ -910,6 +951,16 @@ function updatePingDisplay(){
         const el = document.getElementById('conSt');
         if(el && isConnected){
             el.innerHTML = `✅ Ping: <span style="color:${cor}">${ping}ms</span> | Reconexões: ${d.reconnect_count}`;
+        }
+        // Mostrar/esconder aviso de latência alta
+        const latencyWarning = document.getElementById('latencyWarning');
+        if (latencyWarning) {
+            if (ping > 200) {
+                latencyWarning.classList.add('visible');
+                latencyWarning.textContent = `⚠️ Latência alta (${ping}ms)`;
+            } else {
+                latencyWarning.classList.remove('visible');
+            }
         }
     }).catch(()=>{});
 }
