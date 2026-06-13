@@ -957,6 +957,13 @@ def status():
         bot._client_authorized = client.authorized
     bot_status = bot.get_status()
     bot_status['streaming'] = client.streaming if client else False
+    # Novos campos para o frontend
+    bot_status['has_pending_trade'] = (
+        client.pending_trade is not None if client else False
+    )
+    bot_status['last_trade_latency_ms'] = getattr(
+        client, 'last_trade_latency_ms', 0
+    ) if client else 0
     analysis = analyzer.get_analysis()
     digit_frequencies = analyzer.get_digit_frequencies()
     least_frequent = analyzer.get_least_frequent_digit()
