@@ -77,6 +77,9 @@ class DerivWebSocketClient:
         self._cooldown_until = 0
         self._token_permanently_invalid = False
 
+        # Latência do último trade para o frontend
+        self.last_trade_latency_ms = 0
+
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
 
@@ -679,6 +682,9 @@ class DerivWebSocketClient:
                 logger.info(f"✅ Contrato comprado: cid={cid}, bp={bp}, action={action}, latency={latency_ms}ms")
                 if latency_ms > 300:
                     logger.warning(f"⚠️ Latência alta ({latency_ms}ms)")
+
+                # Guardar latência para o frontend
+                self.last_trade_latency_ms = latency_ms
 
                 if self.trading_bot:
                     self.trading_bot.register_trade({
