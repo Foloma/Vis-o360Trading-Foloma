@@ -171,6 +171,15 @@
     }
     .latency-warning.visible { display: block; }
 
+    /* Razão de bloqueio nos botões */
+    .block-reason {
+      font-size: 9px;
+      color: var(--warning);
+      text-align: center;
+      margin-top: 2px;
+      min-height: 14px;
+    }
+
     @media (max-width: 400px) {
       .differ-btn, .matches-btn, .zscore-btn {
         padding: 10px 8px;
@@ -286,13 +295,14 @@
         <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')" style="padding:10px 14px">ÍMPAR</button>
         <button class="btn-sell" id="btnEven" onclick="tradeDigit('even')" style="padding:10px 14px">PAR</button>
       </div>
+      <div class="block-reason" id="parityReason"></div>
       <button class="differ-btn" id="btnDiffer" onclick="tradeDiffer()">🎯 DIFFER (dígito menos frequente)</button>
       <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (dígito mais frequente) — payout ~9x</button>
+      <div id="matchesReason" style="font-size:9px; color: var(--muted); text-align:center; margin-top:2px;"></div>
       <div class="zscore-container" id="zscoreContainer">
         <button class="zscore-btn" id="btnZscore" onclick="tradeZscore()">🎯 Z‑SCORE</button>
         <button class="ignore-btn" id="btnIgnoreZscore" onclick="ignoreZscore()">🚫 Ignorar</button>
       </div>
-      <div id="matchesReason" style="font-size:9px; color: var(--muted); text-align:center; margin-top:2px;"></div>
       <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
       <div class="ms">
         Martingale: <span id="mgtActDig">INATIVO</span> | Próx: <span id="mgtNxtDig">$0.35</span>
@@ -390,6 +400,9 @@ let _mgtLocked = false;
 
 // Latência do último trade (lida diretamente do /api/status)
 let _lastTradeLatency = 0;
+
+// Timeout de trade pendente (15 segundos)
+const TRADE_TIMEOUT_MS = 15000;
 
 function toast(msg,type='info',ms=3500){
   const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
@@ -533,14 +546,13 @@ async function updateAll(){
         document.getElementById('bigD').textContent = '⏳';
         document.getElementById('bigD').className = 'big-d wait';
         document.getElementById('bigP').textContent = 'AGUARDANDO RESULTADO';
-        // Iniciar timer de timeout também
+        // Não iniciar timer novo — o backend mantém o estado real
+    }
+    // Se o backend já não tem trade pendente, libertar o estado local
+    if (!bot.has_pending_trade && _tradePending && !bot.last_trade_result) {
+        // Backend já resolveu mas frontend ainda está pendente (ex: POC perdido)
+        _tradePending = false;
         clearTimeout(_tradePendingTimer);
-        _tradePendingTimer = setTimeout(() => {
-            if (_tradePending) {
-                _tradePending = false;
-                toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
-            }
-        }, 10000);
     }
 
     // Atualizar latência do último trade diretamente do status
@@ -573,7 +585,6 @@ async function updateAll(){
         bd.className = 'big-d ' + (ltr.is_win ? 'odd' : 'even');
         bp.textContent = (ltr.is_win ? 'GANHOU' : 'PERDEU');
         const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
-        // Incluir latência no toast (lida diretamente do status)
         const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
         toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${latencyInfo}`, ltr.is_win ? 'win' : 'loss', 4000);
         // Bloquear atualização do dígito durante 2 segundos
@@ -682,6 +693,7 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   // Apenas o botão recomendado fica ativo no PAR/ÍMPAR
   const btnOdd = document.getElementById('btnOdd');
   const btnEven = document.getElementById('btnEven');
+  const parityReasonEl = document.getElementById('parityReason');
   if (strategy.parity_available) {
     if (strategy.parity_direction === 'odd') {
       btnOdd.disabled = false;
@@ -693,9 +705,12 @@ function updateStrategyDisplay(strategy, ticksRemaining){
       btnOdd.disabled = true;
       btnEven.disabled = true;
     }
+    parityReasonEl.textContent = '';
   } else {
     btnOdd.disabled = true;
     btnEven.disabled = true;
+    // Mostrar razão do bloqueio
+    parityReasonEl.textContent = strategy.parity_reason || '';
   }
 
   document.getElementById('btnDiffer').disabled = !strategy.differ_available;
@@ -810,10 +825,10 @@ function tradeDigit(pred){
   clearTimeout(_tradePendingTimer);
   _tradePendingTimer = setTimeout(() => {
     if (_tradePending) {
-      _tradePending = false;
-      toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
+      // Não libertar imediatamente — o backend ainda pode ter o trade pendente
+      toast('⚠️ Trade demorado. O resultado pode chegar em breve. Se expirar, verifique o histórico.', 'warning', 5000);
     }
-  }, 10000);
+  }, TRADE_TIMEOUT_MS);
   fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
   .then(r=>r.json()).then(d=>{
     if(d.error){ toast('❌ '+d.error,'loss'); _tradePending=false; clearTimeout(_tradePendingTimer); }
@@ -828,10 +843,9 @@ async function tradeDiffer(){
   clearTimeout(_tradePendingTimer);
   _tradePendingTimer = setTimeout(() => {
     if (_tradePending) {
-      _tradePending = false;
-      toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
+      toast('⚠️ Trade demorado. O resultado pode chegar em breve. Se expirar, verifique o histórico.', 'warning', 5000);
     }
-  }, 10000);
+  }, TRADE_TIMEOUT_MS);
   try{
     const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
@@ -847,10 +861,9 @@ async function tradeMatches(){
   clearTimeout(_tradePendingTimer);
   _tradePendingTimer = setTimeout(() => {
     if (_tradePending) {
-      _tradePending = false;
-      toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
+      toast('⚠️ Trade demorado. O resultado pode chegar em breve. Se expirar, verifique o histórico.', 'warning', 5000);
     }
-  }, 10000);
+  }, TRADE_TIMEOUT_MS);
   try{
     const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
@@ -866,10 +879,9 @@ async function tradeZscore(){
   clearTimeout(_tradePendingTimer);
   _tradePendingTimer = setTimeout(() => {
     if (_tradePending) {
-      _tradePending = false;
-      toast('⚠️ Trade pendente expirou. Verifique o resultado no histórico.', 'warning', 5000);
+      toast('⚠️ Trade demorado. O resultado pode chegar em breve. Se expirar, verifique o histórico.', 'warning', 5000);
     }
-  }, 10000);
+  }, TRADE_TIMEOUT_MS);
   try{
     const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
