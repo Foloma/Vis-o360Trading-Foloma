@@ -368,7 +368,13 @@ class TradingBot:
                     else:
                         won_digit = '?'
                 else:
-                    won_digit = '?'
+                    # Para PAR/ÍMPAR (DIGITODD/DIGITEVEN) inferir paridade
+                    if 'DIGITODD' in action or action == 'CALL':
+                        won_digit = 'Ímpar' if is_win else 'Par'
+                    elif 'DIGITEVEN' in action or action == 'PUT':
+                        won_digit = 'Par' if is_win else 'Ímpar'
+                    else:
+                        won_digit = '?'
                 self.last_trade_result = {
                     'contract_id': contract_id,
                     'action': action,
