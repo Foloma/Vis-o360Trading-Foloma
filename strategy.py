@@ -61,16 +61,17 @@ class StrategyManager:
         if time.time() - getattr(self.client, '_last_reconnect_time', 0) < 10:
             return False, "Reconexão recente"
 
-        # Ignora o ping sentinela (9999) se o stream estiver saudável
+        # Ping mais tolerante: Pong timeout isolado não bloqueia tudo
         raw_ping = getattr(self.client, '_ping_ms', 0)
         if raw_ping >= 9999:
+            # Se o último tick é recente (<10s), assumimos latência normal
             if self.client.streaming and self.client._last_tick_time:
                 if time.time() - self.client._last_tick_time < 10:
-                    effective_ping = 0
+                    effective_ping = 0  # Confiar no stream
                 else:
-                    effective_ping = 9999
+                    effective_ping = 250  # Valor moderado, não bloqueia tudo
             else:
-                effective_ping = 9999
+                effective_ping = 250
         else:
             effective_ping = raw_ping
 
@@ -115,7 +116,7 @@ class StrategyManager:
         self._matches_signal_at = 0
         self._zscore_signal_at = 0
 
-    def _is_entry_window_valid(self, signal_at, max_age=8):
+    def _is_entry_window_valid(self, signal_at, max_age=15):
         if signal_at == 0:
             return True
         return time.time() - signal_at <= max_age
