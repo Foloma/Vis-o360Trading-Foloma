@@ -1208,18 +1208,14 @@ def trade_digit():
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
 
         strategy = sess.get('strategy')
-        action = None
-        reason = None
-        if strategy:
-            action, reason = strategy.evaluate_parity()
-            if not action:
-                return jsonify({'error': f'⛔ {reason}'}), 400
-        else:
-            d = request.json
-            pred = d.get('prediction')
-            if pred not in ('odd', 'even'):
-                return jsonify({'error': 'Use "odd" ou "even"'}), 400
-            action = pred
+        if not strategy:
+            return jsonify({'error': 'Estratégia não disponível'}), 400
+        if strategy._trade_locked:
+            return jsonify({'error': 'Trade em curso — aguarde'}), 400
+
+        action, reason = strategy.evaluate_parity()
+        if not action:
+            return jsonify({'error': f'⛔ {reason}'}), 400
 
         d = request.json
         amt = float(d.get('amount', 0.35))
@@ -1236,6 +1232,7 @@ def trade_digit():
 
         ok = sess['client'].place_trade(contract, amt, True)
         if ok:
+            strategy.lock_trade()
             credit_affiliate_commission(session['user_email'], amt)
             label = 'ÍMPAR' if action == 'odd' else 'PAR'
             return jsonify({
@@ -1262,16 +1259,14 @@ def trade_differ():
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
 
         strategy = sess.get('strategy')
-        if strategy:
-            digit, reason = strategy.evaluate_differ()
-            if digit is None:
-                return jsonify({'error': f'⛔ {reason}'}), 400
-        else:
-            analyzer = sess['digit_analyzer']
-            least = analyzer.get_least_frequent_digit()
-            if least is None:
-                return jsonify({'error': 'Nenhum dígito sub‑representado. Aguarde.'}), 400
-            digit = least
+        if not strategy:
+            return jsonify({'error': 'Estratégia não disponível'}), 400
+        if strategy._trade_locked:
+            return jsonify({'error': 'Trade em curso — aguarde'}), 400
+
+        digit, reason = strategy.evaluate_differ()
+        if digit is None:
+            return jsonify({'error': f'⛔ {reason}'}), 400
 
         d = request.json
         amt = float(d.get('amount', 0.35))
@@ -1285,6 +1280,7 @@ def trade_differ():
 
         ok = sess['client'].place_differ_trade(digit, amt)
         if ok:
+            strategy.lock_trade()
             credit_affiliate_commission(session['user_email'], amt)
             return jsonify({
                 'status': 'ok',
@@ -1309,16 +1305,14 @@ def trade_matches():
             return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
 
         strategy = sess.get('strategy')
-        if strategy:
-            digit, reason = strategy.evaluate_matches()
-            if digit is None:
-                return jsonify({'error': f'⛔ MATCHES bloqueado: {reason}'}), 400
-        else:
-            analyzer = sess['digit_analyzer']
-            most = analyzer.get_most_frequent_digit()
-            if most is None:
-                return jsonify({'error': 'Condições para MATCHES não atingidas. Aguarde mais ticks.'}), 400
-            digit = most
+        if not strategy:
+            return jsonify({'error': 'Estratégia não disponível'}), 400
+        if strategy._trade_locked:
+            return jsonify({'error': 'Trade em curso — aguarde'}), 400
+
+        digit, reason = strategy.evaluate_matches()
+        if digit is None:
+            return jsonify({'error': f'⛔ {reason}'}), 400
 
         d = request.json
         amt = float(d.get('amount', 0.35))
@@ -1332,6 +1326,7 @@ def trade_matches():
 
         ok = sess['client'].place_matches_trade(digit, amt)
         if ok:
+            strategy.lock_trade()
             credit_affiliate_commission(session['user_email'], amt)
             return jsonify({
                 'status': 'ok',
@@ -1343,7 +1338,6 @@ def trade_matches():
         logger.exception("Erro trade matches")
         return jsonify({'error': 'Erro interno'}), 500
 
-# 🔥 Z‑Score — marca o sinal como utilizado apenas após execução bem‑sucedida
 @app.route('/api/trade/zscore', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1359,10 +1353,12 @@ def trade_zscore():
         strategy = sess.get('strategy')
         if not strategy:
             return jsonify({'error': 'Estratégia não disponível'}), 400
+        if strategy._trade_locked:
+            return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
         action, digit, reason = strategy.evaluate_zscore()
         if action is None:
-            return jsonify({'error': f'⛔ Z‑Score bloqueado: {reason}'}), 400
+            return jsonify({'error': f'⛔ {reason}'}), 400
 
         d = request.json
         amt = float(d.get('amount', 0.35))
@@ -1378,6 +1374,7 @@ def trade_zscore():
             ok = sess['client'].place_differ_trade(digit, amt)
             if ok:
                 strategy._zscore_sequence_used = True
+                strategy.lock_trade()
                 credit_affiliate_commission(session['user_email'], amt)
                 return jsonify({
                     'status': 'ok',
@@ -1388,6 +1385,7 @@ def trade_zscore():
             ok = sess['client'].place_matches_trade(digit, amt)
             if ok:
                 strategy._zscore_sequence_used = True
+                strategy.lock_trade()
                 credit_affiliate_commission(session['user_email'], amt)
                 return jsonify({
                     'status': 'ok',
