@@ -461,7 +461,6 @@ def create_session(user_id, user, force=False):
             client = existing['client']
             if not force and client.authorized and client.connected:
                 return existing
-            # Avisar o bot que a sessão vai ser destruída
             if 'trading_bot' in existing:
                 existing['trading_bot'].on_disconnect()
             client._stop_event.set()
@@ -957,12 +956,14 @@ def status():
         bot._client_authorized = client.authorized
     bot_status = bot.get_status()
     bot_status['streaming'] = client.streaming if client else False
-    # Novos campos para o frontend
     bot_status['has_pending_trade'] = (
         client.pending_trade is not None if client else False
     )
     bot_status['last_trade_latency_ms'] = getattr(
         client, 'last_trade_latency_ms', 0
+    ) if client else 0
+    bot_status['last_valid_ping_ms'] = getattr(
+        client, '_last_valid_ping_ms', 0
     ) if client else 0
     analysis = analyzer.get_analysis()
     digit_frequencies = analyzer.get_digit_frequencies()
@@ -1010,6 +1011,17 @@ def debug():
     if not sess:
         return jsonify({'error': 'Sessão não encontrada'}), 500
     c = sess['client']
+    
+    # Calcular ping efetivo (ignorar sentinela se stream estiver saudável)
+    raw_ping = getattr(c, '_ping_ms', 0)
+    if raw_ping >= 9999 and c.streaming and c._last_tick_time:
+        if time.time() - c._last_tick_time < 10:
+            effective_ping = 0
+        else:
+            effective_ping = 250
+    else:
+        effective_ping = raw_ping
+    
     return jsonify({
         'connected': c.connected,
         'authorized': c.authorized,
@@ -1020,7 +1032,7 @@ def debug():
         'ws_thread_alive': c._ws_thread.is_alive() if c._ws_thread else False,
         'pending_trade': c.pending_trade is not None,
         'last_tick_seconds_ago': round(time.time() - c._last_tick_time, 1) if c._last_tick_time else None,
-        'ping_ms': getattr(c, '_ping_ms', 0),
+        'ping_ms': effective_ping,
         'reconnect_count': getattr(c, '_reconnect_count', 0),
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
@@ -1365,7 +1377,7 @@ def trade_zscore():
         if action == 'DIFFER':
             ok = sess['client'].place_differ_trade(digit, amt)
             if ok:
-                strategy._zscore_sequence_used = True   # marca como utilizado só agora
+                strategy._zscore_sequence_used = True
                 credit_affiliate_commission(session['user_email'], amt)
                 return jsonify({
                     'status': 'ok',
@@ -1375,7 +1387,7 @@ def trade_zscore():
         elif action == 'MATCHES':
             ok = sess['client'].place_matches_trade(digit, amt)
             if ok:
-                strategy._zscore_sequence_used = True   # marca como utilizado só agora
+                strategy._zscore_sequence_used = True
                 credit_affiliate_commission(session['user_email'], amt)
                 return jsonify({
                     'status': 'ok',
