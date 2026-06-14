@@ -66,6 +66,7 @@ class DerivWebSocketClient:
 
         self._last_reconnect_time = 0
         self._ping_ms = 0
+        self._last_valid_ping_ms = 0   # último ping bem‑sucedido
         self._reconnect_count = 0
         self._ping_sent_at = 0
         self._ping_pending = False
@@ -378,6 +379,7 @@ class DerivWebSocketClient:
         if self._ping_sent_at and self._ping_pending:
             self._ping_ms = round((time.time() - self._ping_sent_at) * 1000)
             self._ping_pending = False
+            self._last_valid_ping_ms = self._ping_ms   # guardar último valor válido
             logger.debug(f"🏓 Ping: {self._ping_ms}ms")
 
     def _start_watchdog(self):
