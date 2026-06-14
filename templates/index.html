@@ -303,7 +303,6 @@
   let _lastTradeLatency = 0;
   let _lastValidPing = 0;
 
-  // Função helper para obter elemento de forma segura
   function $_(id) { return document.getElementById(id); }
 
   function toast(msg,type='info',ms=3500){
@@ -425,12 +424,21 @@
 
   document.addEventListener('click',(e)=>{if(e.target.classList.contains('tf-btn')&&!e.target.closest('.guide-nav')){document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));e.target.classList.add('active');currentGranularity=parseInt(e.target.dataset.tf);loadCandles();}});
 
+  // Função segura para mostrar ticks restantes
   function updateSignalTicks(strategy, ticksLeft) {
       const el = $_(strategy + 'Ticks');
       if (!el) return;
+      // Se ticksLeft é undefined ou null, assumimos que o backend antigo não envia este campo
+      if (ticksLeft === undefined || ticksLeft === null) {
+          el.textContent = '';
+          return;
+      }
       if (ticksLeft > 0) {
           el.textContent = `Sinal válido por ${ticksLeft} ticks`;
           el.className = 'signal-ticks';
+      } else if (ticksLeft === 0) {
+          el.textContent = 'Sinal expirado';
+          el.className = 'signal-ticks expired';
       } else {
           el.textContent = '';
           el.className = 'signal-ticks';
@@ -602,6 +610,7 @@
     const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 2);
     const blockerMsg=$_('digitBlockerMsg');
 
+    // PAR/ÍMPAR: usar parity_available para decidir
     const btnOdd=$_('btnOdd'); const btnEven=$_('btnEven'); const parityReasonEl=$_('parityReason');
     if (strategy.parity_available) {
       if (strategy.parity_direction === 'odd') {
@@ -611,8 +620,9 @@
         if(btnOdd) btnOdd.disabled = true;
         if(btnEven) btnEven.disabled = tradeLocked;
       } else {
-        if(btnOdd) btnOdd.disabled = true;
-        if(btnEven) btnEven.disabled = true;
+        // Caso de compatibilidade: se não há direção mas está disponível, libertar ambos
+        if(btnOdd) btnOdd.disabled = tradeLocked;
+        if(btnEven) btnEven.disabled = tradeLocked;
       }
       if(parityReasonEl) parityReasonEl.textContent = '';
     } else {
@@ -620,13 +630,16 @@
       if(btnEven) btnEven.disabled = true;
       if(parityReasonEl) parityReasonEl.textContent = strategy.parity_reason || '';
     }
-    updateSignalTicks('parity', (strategy.parity_ticks_left != null) ? strategy.parity_ticks_left : 0);
+    // Ticks: se o campo não existir, não mostra nada
+    updateSignalTicks('parity', strategy.parity_ticks_left);
 
-    const btnDiffer=$_('btnDiffer'); if(btnDiffer) btnDiffer.disabled = !strategy.differ_available || tradeLocked;
-    updateSignalTicks('differ', (strategy.differ_ticks_left != null) ? strategy.differ_ticks_left : 0);
+    const btnDiffer=$_('btnDiffer');
+    if(btnDiffer) btnDiffer.disabled = !strategy.differ_available || tradeLocked;
+    updateSignalTicks('differ', strategy.differ_ticks_left);
 
-    const btnMatches=$_('btnMatches'); if(btnMatches) btnMatches.disabled = !strategy.matches_available || tradeLocked;
-    updateSignalTicks('matches', (strategy.matches_ticks_left != null) ? strategy.matches_ticks_left : 0);
+    const btnMatches=$_('btnMatches');
+    if(btnMatches) btnMatches.disabled = !strategy.matches_available || tradeLocked;
+    updateSignalTicks('matches', strategy.matches_ticks_left);
 
     const zContainer=$_('zscoreContainer'); const btnZscore=$_('btnZscore');
     if (zContainer && btnZscore) {
@@ -644,7 +657,7 @@
         zContainer.classList.remove('visible');
       }
     }
-    updateSignalTicks('zscore', (strategy.zscore_ticks_left != null) ? strategy.zscore_ticks_left : 0);
+    updateSignalTicks('zscore', strategy.zscore_ticks_left);
 
     if(blockerMsg){
       blockerMsg.textContent = ticksBlocked ? `⏳ Aguarde ${ticksRemaining} tick(s)...` : '';
@@ -919,7 +932,6 @@
     }).catch(()=>{});
   }
 
-  // Inicialização
   setInterval(()=>{if(isConnected)loadCandles();},10000);
   setInterval(updateScoreboard,30000); updateScoreboard();
   setInterval(updatePingDisplay, 10000);
