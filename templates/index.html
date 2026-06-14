@@ -36,7 +36,7 @@
     .container { max-width: 500px; margin: auto; padding: 8px; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 8px; }
     .card-title { font-size: 10px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; display: flex; justify-content: space-between; align-items: center; }
-    input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #020617; color: white; font-size: 13px; }
+    input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #020617; color: white; font-size: 13px; transition: border 0.3s; }
     input:focus { border-color: var(--accent); }
     button { padding: 10px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; transition: .2s; font-size: 13px; }
     button:active { transform: scale(.97); }
@@ -180,6 +180,12 @@
       min-height: 14px;
     }
 
+    /* Indicador de martingale ativo */
+    .martingale-active {
+      border: 2px solid var(--warning) !important;
+      box-shadow: 0 0 8px var(--warning);
+    }
+
     @media (max-width: 400px) {
       .differ-btn, .matches-btn, .zscore-btn {
         padding: 10px 8px;
@@ -295,6 +301,7 @@
         <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')" style="padding:10px 14px">ÍMPAR</button>
         <button class="btn-sell" id="btnEven" onclick="tradeDigit('even')" style="padding:10px 14px">PAR</button>
       </div>
+      <div id="martingaleIndicator" style="font-size:10px;color:var(--warning);text-align:center;min-height:14px;margin-top:2px;"></div>
       <div class="block-reason" id="parityReason"></div>
       <button class="differ-btn" id="btnDiffer" onclick="tradeDiffer()">🎯 DIFFER (dígito menos frequente)</button>
       <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (dígito mais frequente) — payout ~9x</button>
@@ -597,7 +604,18 @@ async function updateAll(){
     const nxt = '$' + (m.next_amount || 0.35).toFixed(2);
     const dAct = document.getElementById('mgtActDig'); if(dAct) dAct.textContent = act;
     const dNxt = document.getElementById('mgtNxtDig'); if(dNxt) dNxt.textContent = nxt;
-    if(m.active){ const ad = document.getElementById('amtDigit'); if(ad) ad.value = (m.next_amount||0.35).toFixed(2); }
+    const ad = document.getElementById('amtDigit');
+    const indicator = document.getElementById('martingaleIndicator');
+    if(m.active){
+      if(ad) {
+        ad.value = (m.next_amount||0.35).toFixed(2);
+        ad.classList.add('martingale-active');
+      }
+      if(indicator) indicator.textContent = '🔄 Martingale pronto — clique no botão';
+    } else {
+      if(ad) ad.classList.remove('martingale-active');
+      if(indicator) indicator.textContent = '';
+    }
   }
 }
 
