@@ -624,13 +624,14 @@ function updateStrategyDisplay(strategy, ticksRemaining){
     btnEven.disabled = true;
     parityReasonEl.textContent = strategy.parity_reason || '';
   }
-  updateSignalTicks('parity', strategy.parity_ticks_left || 0);
+  // Usar fallback seguro para ticks_left
+  updateSignalTicks('parity', (strategy.parity_ticks_left != null) ? strategy.parity_ticks_left : 0);
 
   document.getElementById('btnDiffer').disabled = !strategy.differ_available || tradeLocked;
-  updateSignalTicks('differ', strategy.differ_ticks_left || 0);
+  updateSignalTicks('differ', (strategy.differ_ticks_left != null) ? strategy.differ_ticks_left : 0);
 
   document.getElementById('btnMatches').disabled = !strategy.matches_available || tradeLocked;
-  updateSignalTicks('matches', strategy.matches_ticks_left || 0);
+  updateSignalTicks('matches', (strategy.matches_ticks_left != null) ? strategy.matches_ticks_left : 0);
 
   const zContainer = document.getElementById('zscoreContainer');
   const btnZscore = document.getElementById('btnZscore');
@@ -649,7 +650,7 @@ function updateStrategyDisplay(strategy, ticksRemaining){
       zContainer.classList.remove('visible');
     }
   }
-  updateSignalTicks('zscore', strategy.zscore_ticks_left || 0);
+  updateSignalTicks('zscore', (strategy.zscore_ticks_left != null) ? strategy.zscore_ticks_left : 0);
 
   if(blockerMsg){
     blockerMsg.textContent = ticksBlocked ? `⏳ Aguarde ${ticksRemaining} tick(s)...` : '';
