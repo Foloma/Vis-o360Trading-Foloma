@@ -273,657 +273,683 @@
 </div>
 
 <script>
-// ══════════════ ESTADO GLOBAL ══════════════
-let selectedAcct='demo', curSym='R_100';
-let lastDigitCount=0, lastDigitCounter=0;
-let _updateInterval=null;
-let isConnected = false;
-let _loggingIn = false;
-let _registering = false;
-let currentGranularity = 60;
-let resizeObserver = null;
-const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
-let candleChart = null, candleSeries = null;
-let _pollRunning = false;
-let _historyDebounceTimer = null;
+(function() {
+  'use strict';
 
-let _tradeSubmitted = false;
-let _tradePending = false;
-let _tradeSubmittedTimer = null;
-let _lastProcessedContractId = null;
-let _showTradeResult = false;
-const TRADE_TIMEOUT_MS = 15000;
+  // ══════════════ ESTADO GLOBAL ══════════════
+  let selectedAcct='demo', curSym='R_100';
+  let lastDigitCount=0, lastDigitCounter=0;
+  let _updateInterval=null;
+  let isConnected = false;
+  let _loggingIn = false;
+  let _registering = false;
+  let currentGranularity = 60;
+  let resizeObserver = null;
+  const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
+  let candleChart = null, candleSeries = null;
+  let _pollRunning = false;
+  let _historyDebounceTimer = null;
 
-let _autoConnectAttempts = 0;
-const MAX_AUTO_CONNECT_ATTEMPTS = 3;
-let _mgtLocked = false;
-let _lastTradeLatency = 0;
-let _lastValidPing = 0;
+  let _tradeSubmitted = false;
+  let _tradePending = false;
+  let _tradeSubmittedTimer = null;
+  let _lastProcessedContractId = null;
+  let _showTradeResult = false;
+  const TRADE_TIMEOUT_MS = 15000;
 
-function toast(msg,type='info',ms=3500){
-  const t=document.getElementById('toast');t.className='toast show '+type;t.innerHTML=msg;
-  clearTimeout(t._t);t._t=setTimeout(()=>t.className='toast',ms);
-}
-function playBeep(){
-    try{
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(800, ctx.currentTime);
-        gain.gain.setValueAtTime(0.3, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.3);
-    }catch(e){}
-}
-function openGuide(){document.getElementById('guideModal').style.display='flex';document.body.classList.add('modal-open');}
-function closeGuide(){document.getElementById('guideModal').style.display='none';document.body.classList.remove('modal-open');}
-function closeAuthModal(){document.getElementById('authModal').style.display='none';document.body.classList.remove('modal-open');}
-function scrollToSection(id){const el=document.getElementById(id);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});document.querySelectorAll('.guide-nav .tf-btn').forEach(b=>b.classList.remove('active'));if(event&&event.target)event.target.classList.add('active');}
+  let _autoConnectAttempts = 0;
+  const MAX_AUTO_CONNECT_ATTEMPTS = 3;
+  let _mgtLocked = false;
+  let _lastTradeLatency = 0;
+  let _lastValidPing = 0;
 
-function startPolling(){if(_updateInterval)return;scheduleNextPoll();}
-function stopPolling(){if(_updateInterval){clearTimeout(_updateInterval);_updateInterval=null;}}
-function scheduleNextPoll(){
-  const d = isConnected ? 3000 : 8000;
-  _updateInterval = setTimeout(async () => {
-    if(_pollRunning){ scheduleNextPoll(); return; }
-    _pollRunning = true;
-    try { await updateAll(); } finally { _pollRunning = false; }
-    scheduleNextPoll();
-  }, d);
-}
+  // Função helper para obter elemento de forma segura
+  function $_(id) { return document.getElementById(id); }
 
-function updateScoreboard(){
-  fetch('/api/signals/scoreboard').then(r=>r.json()).then(d=>{
-    if(d.today_trades > 0){
-      document.getElementById('signalScoreboard').style.display='block';
-      document.getElementById('sigTotal').textContent = d.today_trades;
-      document.getElementById('sigWins').textContent = d.wins;
-      document.getElementById('sigWinRate').textContent = d.win_rate + '%';
-    }
-  }).catch(()=>{});
-}
+  function toast(msg,type='info',ms=3500){
+    const t=$_('toast'); if(!t) return;
+    t.className='toast show '+type; t.innerHTML=msg;
+    clearTimeout(t._t); t._t=setTimeout(()=>{t.className='toast';},ms);
+  }
+  function playBeep(){
+      try{
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(800, ctx.currentTime);
+          gain.gain.setValueAtTime(0.3, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.3);
+      }catch(e){}
+  }
+  function openGuide(){ const el=$_('guideModal'); if(el){ el.style.display='flex'; document.body.classList.add('modal-open'); } }
+  function closeGuide(){ const el=$_('guideModal'); if(el){ el.style.display='none'; document.body.classList.remove('modal-open'); } }
+  function closeAuthModal(){ const el=$_('authModal'); if(el){ el.style.display='none'; document.body.classList.remove('modal-open'); } }
+  function scrollToSection(id){ const el=$_(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); document.querySelectorAll('.guide-nav .tf-btn').forEach(b=>b.classList.remove('active')); if(event&&event.target) event.target.classList.add('active'); }
 
-async function autoConnect(){
-    if(_autoConnectAttempts >= MAX_AUTO_CONNECT_ATTEMPTS){
-        toast('⚠️ Token inválido ou expirado. Renove o token nas Configurações.', 'warning', 6000);
-        document.getElementById('conSt').textContent = '🔒 Token inválido';
-        return;
-    }
-    try{
-        const r=await fetch('/api/auth/auto-connect');
-        const d=await r.json();
-        if(d.status==='already_connected'){
-            document.getElementById('conSt').textContent='✅ Conectado';
-            isConnected=true;
-            _autoConnectAttempts = 0;
-        } else if (d.status === 'connecting') {
-            document.getElementById('conSt').textContent = '🔄 Auto-conectando...';
-            let attempts = 0;
-            const check = setInterval(() => {
-                attempts++;
-                updateAll();
-                if (isConnected){
-                    clearInterval(check);
-                    _autoConnectAttempts = 0;
-                }
-                if (attempts >= 5){
-                    clearInterval(check);
-                    _autoConnectAttempts++;
-                    if(_autoConnectAttempts >= MAX_AUTO_CONNECT_ATTEMPTS){
-                        document.getElementById('conSt').textContent = '🔒 Token inválido';
-                        toast('⚠️ Token inválido ou expirado. Renove o token nas Configurações.', 'warning', 6000);
-                    }
-                }
-            }, 2000);
-        } else if (d.status === 'no_token'){
-        } else {
-            _autoConnectAttempts++;
-        }
-    }catch(e){
-        _autoConnectAttempts++;
-    }
-}
+  function startPolling(){ if(_updateInterval) return; scheduleNextPoll(); }
+  function stopPolling(){ if(_updateInterval){ clearTimeout(_updateInterval); _updateInterval=null; } }
+  function scheduleNextPoll(){
+    const d = isConnected ? 3000 : 8000;
+    _updateInterval = setTimeout(async () => {
+      if(_pollRunning){ scheduleNextPoll(); return; }
+      _pollRunning = true;
+      try { await updateAll(); } catch(e){ console.error('updateAll error:', e); } finally { _pollRunning = false; }
+      scheduleNextPoll();
+    }, d);
+  }
 
-function initSyms(){
-  const el=document.getElementById('symSel');if(!el)return;
-  let h='';
-  for(const[k,v]of Object.entries(syms))h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}',this)">${v}</button>`;
-  el.innerHTML=h;
-}
-function chgSym(s,el){
-  curSym=s;
-  fetch('/api/symbol/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})});
-  document.querySelectorAll('.sym-btn').forEach(b=>b.classList.remove('active'));
-  el.classList.add('active');
-}
-
-function initCandleChart(){
-  const container=document.getElementById('priceChart');
-  if(!container||candleChart)return;
-  candleChart=LightweightCharts.createChart(container,{width:container.clientWidth,height:160,layout:{background:{color:'#020617'},textColor:'#e2e8f0'},grid:{vertLines:{color:'#1e293b'},horzLines:{color:'#1e293b'}},rightPriceScale:{borderColor:'#1e293b'},timeScale:{borderColor:'#1e293b',timeVisible:true}});
-  candleSeries=candleChart.addCandlestickSeries({upColor:'#00f0b5',downColor:'#ff4d4d',borderUpColor:'#00f0b5',borderDownColor:'#ff4d4d',wickUpColor:'#00f0b5',wickDownColor:'#ff4d4d'});
-  if(window.ResizeObserver){resizeObserver=new ResizeObserver(()=>{if(candleChart&&container)candleChart.applyOptions({width:container.clientWidth});});resizeObserver.observe(container);}
-}
-async function loadCandles(){
-  if(!candleChart)return;
-  try{const r=await fetch(`/api/candles/data?granularity=${currentGranularity}`);const d=await r.json();if(!d.candles||d.candles.length===0)return;const formatted=d.candles.map(c=>({time:c.epoch,open:parseFloat(c.open),high:parseFloat(c.high),low:parseFloat(c.low),close:parseFloat(c.close)})).sort((a,b)=>a.time-b.time);candleSeries.setData(formatted);candleChart.timeScale().fitContent();}catch(e){}
-}
-
-document.addEventListener('click',(e)=>{if(e.target.classList.contains('tf-btn')&&!e.target.closest('.guide-nav')){document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));e.target.classList.add('active');currentGranularity=parseInt(e.target.dataset.tf);loadCandles();}});
-
-function updateSignalTicks(strategy, ticksLeft) {
-    const el = document.getElementById(strategy + 'Ticks');
-    if (!el) return;
-    if (ticksLeft > 0) {
-        el.textContent = `Sinal válido por ${ticksLeft} ticks`;
-        el.className = 'signal-ticks';
-    } else {
-        el.textContent = '';
-        el.className = 'signal-ticks';
-    }
-}
-
-async function updateAll(){
-  const [statusResp, martingaleResp] = await Promise.allSettled([
-    fetch('/api/status').then(r=>r.json()),
-    fetch('/api/martingale/status').then(r=>r.json())
-  ]);
-
-  if(statusResp.status === 'fulfilled'){
-    const data = statusResp.value;
-    if(data.error) return;
-    const bot=data.bot;if(!bot)return;
-    const conn=bot.connected&&bot.authorized;isConnected=conn;
-    document.getElementById('connectOAuthBtn').disabled=conn;
-    document.getElementById('connectTokenBtn').disabled=conn;
-    document.getElementById('reconnectBtn').style.display=conn?'none':'inline-block';
-    document.getElementById('sDot').className='dot'+(conn?' on':'');
-    document.getElementById('connStatus').textContent=conn?'Conectado':'Desconectado';
-    document.getElementById('bal').textContent=(bot.balance||0).toFixed(2);
-    document.getElementById('cur').textContent=bot.currency||'USD';
-    const priceEl=document.getElementById('priceEl');if(priceEl)priceEl.textContent=(bot.price||0).toFixed(4);
-
-    if (bot.has_pending_trade && !_tradePending && !_tradeSubmitted) {
-        _tradePending = true;
-        document.getElementById('bigD').textContent = '⏳';
-        document.getElementById('bigD').className = 'big-d wait';
-        document.getElementById('bigP').textContent = 'AGUARDANDO RESULTADO';
-    }
-    if (!bot.has_pending_trade && _tradePending && !bot.last_trade_result) {
-        _tradePending = false;
-    }
-
-    if (bot.last_trade_latency_ms) {
-        _lastTradeLatency = bot.last_trade_latency_ms;
-    }
-    if (bot.last_valid_ping_ms) {
-        _lastValidPing = bot.last_valid_ping_ms;
-    }
-
-    if(data.digits){
-      updateDigits(data.digits);
-      if(data.digits.digit_frequencies)updateFreqGrid(data.digits.digit_frequencies,data.digits.least_frequent_digit,data.digits.most_frequent_digit);
-    }
-    updateHistSummary(bot);
-    if(!candleChart)initCandleChart();
-
-    if(data.strategy){
-      const tr = data.digits?.ticks_remaining;
-      updateStrategyDisplay(data.strategy, tr);
-    }
-
-    if(bot.last_trade_result){
-      const ltr = bot.last_trade_result;
-      if(ltr.contract_id && ltr.contract_id !== _lastProcessedContractId){
-        _lastProcessedContractId = ltr.contract_id;
-        _tradePending = false;
-        clearTimeout(_tradeSubmittedTimer);
-        const bd = document.getElementById('bigD');
-        const bp = document.getElementById('bigP');
-        bd.textContent = ltr.digit !== undefined ? ltr.digit : '?';
-        bd.className = 'big-d ' + (ltr.is_win ? 'odd' : 'even');
-        bp.textContent = (ltr.is_win ? 'GANHOU' : 'PERDEU');
-        const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
-        const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
-        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${latencyInfo}`, ltr.is_win ? 'win' : 'loss', 4000);
-        _showTradeResult = true;
-        setTimeout(() => { _showTradeResult = false; }, 2000);
+  function updateScoreboard(){
+    fetch('/api/signals/scoreboard').then(r=>r.json()).then(d=>{
+      if(d.today_trades > 0){
+        const el=$_('signalScoreboard'); if(el) el.style.display='block';
+        const t=$_('sigTotal'); if(t) t.textContent = d.today_trades;
+        const w=$_('sigWins'); if(w) w.textContent = d.wins;
+        const wr=$_('sigWinRate'); if(wr) wr.textContent = d.win_rate + '%';
       }
-    }
-  }
-
-  if(martingaleResp.status === 'fulfilled'){
-    const m = martingaleResp.value;
-    const act = m.active ? `ATIVO (passo ${m.step})` : 'INATIVO';
-    const nxt = '$' + (m.next_amount || 0.35).toFixed(2);
-    const dAct = document.getElementById('mgtActDig'); if(dAct) dAct.textContent = act;
-    const dNxt = document.getElementById('mgtNxtDig'); if(dNxt) dNxt.textContent = nxt;
-    const ad = document.getElementById('amtDigit');
-    const indicator = document.getElementById('martingaleIndicator');
-    if(m.active){
-      if(ad) {
-        ad.value = (m.next_amount||0.35).toFixed(2);
-        ad.classList.add('martingale-active');
-      }
-      if(indicator) indicator.textContent = '🔄 Martingale pronto — clique no botão';
-    } else {
-      if(ad) ad.classList.remove('martingale-active');
-      if(indicator) indicator.textContent = '';
-    }
-  }
-}
-
-function updateDigits(digits){
-  if(!digits)return;
-  const tpd=digits.ticks_per_digit||10,tr=Math.max(0,Math.round(digits.ticks_remaining||tpd));
-  document.getElementById('tBar').style.width=Math.min(100,(tr/tpd)*100)+'%';
-  document.getElementById('cdown').textContent=`⏱ ${tr} tick${tr!==1?'s':''}`;
-  const recent=digits.recent||[],counter=digits.digit_counter||0;
-
-  if(_tradePending && !_tradeSubmitted){
-    document.getElementById('bigD').textContent = '⏳';
-    document.getElementById('bigD').className = 'big-d wait';
-    document.getElementById('bigP').textContent = 'AGUARDANDO RESULTADO';
-    return;
-  }
-
-  if(_showTradeResult){
-    return;
-  }
-
-  if(recent.length>0&&(recent.length!==lastDigitCount||counter!==lastDigitCounter)){
-    lastDigitCount=recent.length;lastDigitCounter=counter;
-    const newest=recent[recent.length-1],isOdd=newest%2!==0;
-    const bd=document.getElementById('bigD'),bp=document.getElementById('bigP');
-    bd.textContent=newest;bd.className='big-d '+(isOdd?'odd':'even');
-    bp.textContent=isOdd?'ÍMPAR':'PAR';bp.className='big-p '+(isOdd?'odd':'even');
-    let html='';recent.forEach((d)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
-    document.getElementById('histRow').innerHTML=html;
-    document.getElementById('histScroll').scrollLeft=document.getElementById('histScroll').scrollWidth;
-  }
-  const analysis=digits.analysis;
-  if(analysis){
-    document.getElementById('seqInfo').textContent=(analysis.sequences?.descricao)||'';
-    if(analysis.entropy!==undefined)document.getElementById('entropyInfo').textContent=`Entropia: ${analysis.entropy.toFixed(2)} (${analysis.entropy_verdict||'---'})`;
-    else document.getElementById('entropyInfo').textContent='';
-  }
-}
-
-function updateFreqGrid(freqs,leastDigit,mostDigit){
-  const grid=document.getElementById('freqGrid');if(!grid)return;
-  let html='';
-  for(let d=0;d<10;d++){
-    const pct=freqs[d]||0;
-    let cls='';
-    if(d===leastDigit)cls='least';
-    if(d===mostDigit)cls=cls?'least most':'most';
-    html+=`<div class="freq-item${cls?' '+cls:''}"><div class="freq-bar" style="height:${Math.max(pct*2,2)}px;"></div><div>${d}</div><div style="font-size:8px;">${pct}%</div></div>`;
-  }
-  grid.innerHTML=html;
-}
-
-function updateHistSummary(bot){
-  const s=bot.stats,d=bot.daily_stats,sum=document.getElementById('histSummary');
-  if(!sum||!s)return;
-  const pl=s.profit_loss||0,cor=pl>=0?'var(--accent)':'var(--danger)',sinal=pl>=0?'+':'';
-  sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${s.total||0}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WIN RATE</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${s.win_rate||0}%</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">P/L</div><div style="font-size:16px;font-weight:bold;color:${cor}">${sinal}$${Math.abs(pl).toFixed(2)}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${d?d.trades:0}</div></div>`;
-}
-
-function updateStrategyDisplay(strategy, ticksRemaining){
-  if(!strategy) return;
-  const el = document.getElementById('strategyStatus');
-  if(!el) return;
-  let html = '<div class="strategy-indicators">';
-
-  if(strategy.global_stop){
-    html += '<span class="strat-badge blocked">🛑 STOP GLOBAL</span>';
-  } else if(strategy.cooldown){
-    html += '<span class="strat-badge warning">⏳ COOLDOWN</span>';
-  } else if(strategy.trade_locked){
-    html += '<span class="strat-badge warning">🔒 TRADE LOCK</span>';
-  } else {
-    html += '<span class="strat-badge ready">✅ ATIVO</span>';
-  }
-
-  html += '<span class="strat-badge ' + (strategy.differ_available ? 'ready' : 'blocked') + '">DIFFER</span>';
-  html += '<span class="strat-badge ' + (strategy.parity_available ? 'ready' : 'blocked') + '">PAR/ÍMPAR</span>';
-  html += '<span class="strat-badge ' + (strategy.matches_available ? 'ready' : 'blocked') + '">MATCHES</span>';
-  html += '<span class="strat-badge ' + (strategy.zscore_available ? 'ready' : 'blocked') + '">Z‑SCORE</span>';
-  html += '</div>';
-
-  if(strategy.consecutive_losses > 0){
-    html += `<div style="font-size:9px;color:var(--danger);margin-top:2px">⚠️ ${strategy.consecutive_losses} perda(s) consecutiva(s)</div>`;
-  }
-  el.innerHTML = html;
-
-  const tradeLocked = strategy.trade_locked || _tradeSubmitted;
-  const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 2);
-  const blockerMsg = document.getElementById('digitBlockerMsg');
-
-  const btnOdd = document.getElementById('btnOdd');
-  const btnEven = document.getElementById('btnEven');
-  const parityReasonEl = document.getElementById('parityReason');
-  if (strategy.parity_available) {
-    if (strategy.parity_direction === 'odd') {
-      btnOdd.disabled = tradeLocked;
-      btnEven.disabled = true;
-    } else if (strategy.parity_direction === 'even') {
-      btnOdd.disabled = true;
-      btnEven.disabled = tradeLocked;
-    } else {
-      btnOdd.disabled = true;
-      btnEven.disabled = true;
-    }
-    parityReasonEl.textContent = '';
-  } else {
-    btnOdd.disabled = true;
-    btnEven.disabled = true;
-    parityReasonEl.textContent = strategy.parity_reason || '';
-  }
-  // Usar fallback seguro para ticks_left
-  updateSignalTicks('parity', (strategy.parity_ticks_left != null) ? strategy.parity_ticks_left : 0);
-
-  document.getElementById('btnDiffer').disabled = !strategy.differ_available || tradeLocked;
-  updateSignalTicks('differ', (strategy.differ_ticks_left != null) ? strategy.differ_ticks_left : 0);
-
-  document.getElementById('btnMatches').disabled = !strategy.matches_available || tradeLocked;
-  updateSignalTicks('matches', (strategy.matches_ticks_left != null) ? strategy.matches_ticks_left : 0);
-
-  const zContainer = document.getElementById('zscoreContainer');
-  const btnZscore = document.getElementById('btnZscore');
-  if (zContainer && btnZscore) {
-    if (strategy.zscore_available) {
-      zContainer.classList.add('visible');
-      btnZscore.disabled = tradeLocked;
-      if (strategy.zscore_action === 'DIFFER') {
-        btnZscore.textContent = `🎯 Z‑Score DIFFER no dígito ${strategy.zscore_digit}`;
-      } else if (strategy.zscore_action === 'MATCHES') {
-        btnZscore.textContent = `🎯 Z‑Score MATCHES no dígito ${strategy.zscore_digit}`;
-      } else {
-        btnZscore.textContent = '🎯 Z‑SCORE';
-      }
-    } else {
-      zContainer.classList.remove('visible');
-    }
-  }
-  updateSignalTicks('zscore', (strategy.zscore_ticks_left != null) ? strategy.zscore_ticks_left : 0);
-
-  if(blockerMsg){
-    blockerMsg.textContent = ticksBlocked ? `⏳ Aguarde ${ticksRemaining} tick(s)...` : '';
-  }
-
-  const matchesReasonEl = document.getElementById('matchesReason');
-  if (matchesReasonEl) {
-    matchesReasonEl.textContent = strategy.matches_reason || '';
-  }
-
-  const btnDiffer = document.getElementById('btnDiffer');
-  if (btnDiffer) {
-    if (strategy.differ_available && strategy.differ_digit !== undefined) {
-      btnDiffer.textContent = `🎯 DIFFER no dígito ${strategy.differ_digit}`;
-    } else {
-      btnDiffer.textContent = '🎯 DIFFER (dígito menos frequente)';
-    }
-  }
-}
-
-function scheduleHistoryLoad(delay=5000){
-  if(_historyDebounceTimer) clearTimeout(_historyDebounceTimer);
-  _historyDebounceTimer = setTimeout(()=>{ loadHistory(); _historyDebounceTimer=null; }, delay);
-}
-
-async function conectar(){
-  const tok=document.getElementById('tokIn').value.trim();if(!tok){toast('❌ Token obrigatório','loss');return;}
-  try{const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok,account_type:selectedAcct})});const d=await r.json();if(d.error){toast('❌ '+d.error,'loss');return;}toast('✅ Token guardado','win');document.getElementById('conSt').textContent='🔄 A conectar...';setTimeout(()=>{fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{if(d.status==='connecting')toast('🔄 Conectando...','info');});},500);}catch(e){toast('❌ Erro de rede','loss');}
-}
-
-async function connectWithDeriv() {
-    try {
-        const r = await fetch('/api/auth/deriv_oauth_url');
-        const d = await r.json();
-        if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
-        localStorage.removeItem('oauth_result');
-        const popup = window.open(d.url, 'derivOAuth', 'width=800,height=700');
-        const checkResult = setInterval(async () => {
-            const result = localStorage.getItem('oauth_result');
-            const ts = parseInt(localStorage.getItem('oauth_ts') || '0');
-            const fresh = (Date.now() - ts) < 30000;
-            if (result === 'connected' && fresh) {
-                clearInterval(checkResult);
-                clearInterval(checkPopup);
-                localStorage.removeItem('oauth_result');
-                localStorage.removeItem('oauth_ts');
-                toast('✅ Deriv conectada!', 'win', 4000);
-                document.getElementById('conSt').textContent = '🔄 A ligar...';
-                try { await fetch('/api/connect', { method: 'POST' }); } catch(e) {}
-                let attempts = 0;
-                const check = setInterval(() => {
-                    attempts++;
-                    updateAll();
-                    if (isConnected || attempts >= 5) clearInterval(check);
-                }, 2000);
-            } else if (result === 'error' && fresh) {
-                clearInterval(checkResult);
-                clearInterval(checkPopup);
-                localStorage.removeItem('oauth_result');
-                localStorage.removeItem('oauth_ts');
-                toast('❌ OAuth falhou', 'loss');
-            }
-        }, 500);
-        const checkPopup = setInterval(() => {
-            if (!popup || popup.closed) {
-                clearInterval(checkPopup);
-                setTimeout(() => {
-                    if (localStorage.getItem('oauth_result') !== 'connected') {
-                        clearInterval(checkResult);
-                        toast('❌ OAuth cancelado ou falhou', 'loss');
-                    }
-                }, 3000);
-            }
-        }, 500);
-        setTimeout(() => { clearInterval(checkResult); clearInterval(checkPopup); }, 300000);
-    } catch(e) { toast('❌ Erro OAuth', 'loss'); }
-}
-
-async function reconnectManual(){try{const resp=await fetch('/api/connect',{method:'POST'});const data=await resp.json();if(data.status==='connecting'){toast('🔄 A tentar ligar...','info');document.getElementById('conSt').textContent='🔄 A ligar...';setTimeout(updateAll,3000);}else if(data.error)toast('❌ '+data.error,'loss');}catch(e){toast('❌ Erro de rede','loss');}}
-async function disconnectWebSocket(){try{await fetch('/api/disconnect',{method:'POST'});toast('🔌 Desconectado','info');isConnected=false;document.getElementById('sDot').className='dot';document.getElementById('connStatus').textContent='Desconectado';document.getElementById('connectOAuthBtn').disabled=false;document.getElementById('connectTokenBtn').disabled=false;}catch(e){toast('❌ Erro','loss');}}
-async function selAcct(a){selectedAcct=a;document.getElementById('btnDemo').classList.toggle('active',a==='demo');document.getElementById('btnReal').classList.toggle('active',a==='real');try{const r=await fetch('/api/auth/switch-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:a})});const d=await r.json();if(d.error){toast('❌ '+d.error,'loss');return;}toast(`✅ Conta ${a.toUpperCase()} activa`,'win');document.getElementById('conSt').textContent='🔄 A trocar conta...';}catch(e){toast('❌ Erro','loss');}}
-
-function tradeDigit(pred){
-  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
-  const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
-  _tradeSubmitted = true;
-  _tradePending = false;
-  clearTimeout(_tradeSubmittedTimer);
-  _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) {
-      _tradeSubmitted = false;
-      toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
-    }
-  }, 3000);
-  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
-  .then(r=>r.json()).then(d=>{
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ _tradePending = true; toast('⏳ Aposta enviada!','info'); scheduleHistoryLoad(5000); }
-  }).catch(()=>{ _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); toast('❌ Erro de rede','loss'); });
-}
-
-async function tradeDiffer(){
-  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
-  const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
-  _tradeSubmitted = true;
-  _tradePending = false;
-  clearTimeout(_tradeSubmittedTimer);
-  _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) {
-      _tradeSubmitted = false;
-      toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
-    }
-  }, 3000);
-  try{
-    const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
-    const d=await r.json();
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ toast(d.message,'win',4000); playBeep(); _tradePending = true; scheduleHistoryLoad(5000); }
-  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); }
-}
-
-async function tradeMatches(){
-  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
-  const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
-  _tradeSubmitted = true;
-  _tradePending = false;
-  clearTimeout(_tradeSubmittedTimer);
-  _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) {
-      _tradeSubmitted = false;
-      toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
-    }
-  }, 3000);
-  try{
-    const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
-    const d=await r.json();
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ toast(d.message,'win',4000); playBeep(); _tradePending = true; scheduleHistoryLoad(5000); }
-  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); }
-}
-
-async function tradeZscore(){
-  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
-  const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
-  _tradeSubmitted = true;
-  _tradePending = false;
-  clearTimeout(_tradeSubmittedTimer);
-  _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) {
-      _tradeSubmitted = false;
-      toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
-    }
-  }, 3000);
-  try{
-    const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
-    const d=await r.json();
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ toast(d.message,'win',4000); playBeep(); _tradePending = true; scheduleHistoryLoad(5000); }
-  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); }
-}
-
-async function ignoreZscore(){
-    try {
-        const r = await fetch('/api/zscore/ignore', { method: 'POST' });
-        const d = await r.json();
-        if (d.status === 'ok') {
-            toast('🚫 Sinal Z‑Score ignorado', 'info');
-        } else {
-            toast('❌ ' + (d.error || 'Erro ao ignorar'), 'loss');
-        }
-    } catch(e) {
-        toast('❌ Erro de rede', 'loss');
-    }
-}
-
-async function mgtMultiply(fieldId){
-    if(_mgtLocked){ toast('⏳ Aguarde...', 'warning'); return; }
-    _mgtLocked = true;
-    const input=document.getElementById(fieldId);
-    const currentAmount=parseFloat(input.value)||0.35;
-    try{
-        const r=await fetch('/api/martingale/apply',{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({last_amount:currentAmount})
-        });
-        const d=await r.json();
-        if(d.error){
-            toast('❌ '+d.error,'loss');
-        } else {
-            const nextAmount=d.martingale.next_amount;
-            document.getElementById('amtDigit').value=nextAmount.toFixed(2);
-            toast('📈 '+d.martingale.message,'info');
-        }
-    } catch(e) {
-        toast('❌ Erro de rede','loss');
-    }
-    _mgtLocked = false;
-}
-
-async function mgtDivide(fieldId){const input=document.getElementById(fieldId);const currentAmount=parseFloat(input.value)||0.35;const nextAmount=Math.max(0.35,currentAmount/2);input.value=nextAmount.toFixed(2);toast('📉 $'+nextAmount.toFixed(2),'info');}
-async function rstMgt(){await fetch('/api/martingale/reset',{method:'POST'});document.getElementById('amtDigit').value='0.35';toast('🔄 Martingale resetado','info');}
-async function clearHistory(){await fetch('/api/clear_history',{method:'POST'});toast('🗑️ Histórico limpo','info');loadHistory();}
-
-function loadAffiliate(){fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{if(d.link)document.getElementById('refLink').value=d.link;});fetch('/api/affiliate/earnings').then(r=>r.json()).then(d=>{const el=document.getElementById('affiliateEarnings');if(d.error){el.innerHTML='';return;}el.innerHTML=`<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px"><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">GANHOS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">$${d.earnings?.toFixed(2)||'0.00'}</div></div><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">REFERIDOS</div><div style="font-size:16px;font-weight:bold">${d.referred_count||0}</div></div></div>`;});}
-function cpLink(){const el=document.getElementById('refLink');const text=el.value;navigator.clipboard.writeText(text).then(()=>{toast('📋 Copiado!','win');}).catch(()=>{el.select();document.execCommand('copy');toast('📋 Copiado!','win');});}
-
-function loadHistory(){fetch('/api/report').then(r=>r.json()).then(d=>{const sum=document.getElementById('histSummary2'),list=document.getElementById('histList2'),miniList=document.getElementById('histList');if(d.error){if(sum)sum.innerHTML='';if(list)list.innerHTML='';if(miniList)miniList.innerHTML='';return;}const r=d.resumo;if(sum)sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${r.total_trades}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${r.trades_hoje}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WINS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${r.wins}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">LOSSES</div><div style="font-size:16px;font-weight:bold;color:var(--danger)">${r.losses}</div></div>`;const html=d.historico.map(t=>{const win=t.result==='win',lose=t.result==='loss',cor=win?'var(--accent)':lose?'var(--danger)':'#ffaa00',icon=win?'✅':lose?'❌':'⏳';let actionLabel=t.action||'';if(t.is_digit){actionLabel=(t.action==='BUY'||t.action==='CALL')?'ÍMPAR 🎲':'PAR 🎲';}const profitText=t.profit?`<div style="color:${t.profit>0?'var(--accent)':'var(--danger)'}">${t.profit>0?'+':''}$${t.profit.toFixed(2)}</div>`:'';return`<div style="padding:6px;background:#020617;border-radius:6px;margin-bottom:4px;font-size:11px"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">${t.time}</span><span style="font-weight:700;color:${cor}">${icon} ${t.result.toUpperCase()}</span></div><div>${actionLabel} ${t.symbol} $${t.amount.toFixed(2)}</div>${profitText}</div>`;}).join('');if(list)list.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';if(miniList)miniList.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';}).catch(()=>toast('❌ Erro histórico','loss'));}
-
-function loadAdminUsers(){fetch('/api/admin/users').then(r=>r.json()).then(d=>{const el=document.getElementById('adminUserList');if(d.error){el.innerHTML='<p style="color:var(--danger)">'+d.error+'</p>';return;}el.innerHTML=d.users.map(u=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px;background:#020617;border-radius:6px;margin-bottom:4px"><div><div style="font-weight:600;font-size:12px">${u.name||u.email}</div><div style="font-size:10px;color:var(--muted)">${u.email}</div></div><button class="bmr" style="padding:3px 10px;font-size:10px" onclick="toggleUser('${u.email}',${!u.active})">${u.active?'Desativar':'Ativar'}</button></div>`).join('');});}
-function toggleUser(email,enable){fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,enable})}).then(r=>r.json()).then(d=>{toast(d.message,'info');loadAdminUsers();});}
-async function saveMarkup(){const pct=parseFloat(document.getElementById('markupInput').value);const r=await fetch('/api/admin/set-markup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({percentage:pct})});const d=await r.json();document.getElementById('markupMsg').textContent=d.error?d.error:`✅ ${pct}%`;document.getElementById('markupMsg').style.color=d.error?'var(--danger)':'var(--accent)';}
-function showTab(t){document.getElementById('loginForm').style.display=t==='login'?'block':'none';document.getElementById('registerForm').style.display=t==='register'?'block':'none';document.getElementById('forgotForm').style.display=t==='forgot'?'block':'none';document.getElementById('authErr').textContent='';}
-function doLogin(){if(_loggingIn)return;_loggingIn=true;const email=document.getElementById('lEmail').value.trim().toLowerCase(),password=document.getElementById('lPass').value;fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})}).then(r=>r.json()).then(d=>{_loggingIn=false;if(d.error){document.getElementById('authErr').textContent=d.error;return;}document.getElementById('authModal').style.display='none';document.body.classList.remove('modal-open');document.getElementById('mainContent').style.display='block';if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';initSyms();loadAffiliate();loadHistory();initCandleChart();setTimeout(loadCandles,3000);startPolling();if(d.user?.has_deriv_token)setTimeout(autoConnect,1500);}).catch(()=>{_loggingIn=false;document.getElementById('authErr').textContent='Erro de rede';});}
-function doRegister(){if(_registering)return;_registering=true;const name=document.getElementById('rName').value.trim(),email=document.getElementById('rEmail').value.trim().toLowerCase(),password=document.getElementById('rPass').value,ref=document.getElementById('rRef').value.trim();if(!name||!email||password.length<6){_registering=false;document.getElementById('authErr').textContent='Dados inválidos';return;}fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,password,referral_code:ref})}).then(r=>r.json()).then(d=>{_registering=false;if(d.error){document.getElementById('authErr').textContent=d.error;return;}document.getElementById('authModal').style.display='none';document.body.classList.remove('modal-open');document.getElementById('mainContent').style.display='block';initSyms();loadAffiliate();loadHistory();initCandleChart();setTimeout(loadCandles,3000);startPolling();toast('✅ Conta criada!','win',4000);}).catch(()=>{_registering=false;document.getElementById('authErr').textContent='Erro de rede';});}
-function doReset(){const email=document.getElementById('fEmail').value.trim().toLowerCase();fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})}).then(r=>r.json()).then(d=>{document.getElementById('fMsg').textContent=d.error?d.error:'✅ Verifique o email';document.getElementById('fMsg').style.color=d.error?'var(--danger)':'var(--accent)';});}
-function doLogout(){stopPolling();if(resizeObserver)resizeObserver.disconnect();fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload());}
-async function saveTokAcct(acctType){const tok=document.getElementById('tokIn').value.trim();if(!tok){toast('❌ Cole o token','loss');return;}try{const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok,account_type:acctType})});const d=await r.json();if(d.error){toast('❌ '+d.error,'loss');return;}toast(`✅ Token ${acctType.toUpperCase()} guardado`,'win');document.getElementById('tokIn').value='';updateTokenDisplay();}catch(e){toast('❌ Erro','loss');}}
-function updateTokenDisplay(){fetch('/api/auth/status').then(r=>r.json()).then(d=>{if(d.authenticated&&d.user){const display=document.getElementById('tokenDisplay'),dotDemo=document.getElementById('dotDemo'),dotReal=document.getElementById('dotReal'),statusDemo=document.getElementById('statusDemo'),statusReal=document.getElementById('statusReal');display.style.display='block';if(d.user.has_demo_token){dotDemo.className='token-dot ok'+(d.user.active_account==='demo'?' active':'');statusDemo.textContent='Guardado'+(d.user.active_account==='demo'?' (Activo)':'');statusDemo.style.color='var(--accent)';}else{dotDemo.className='token-dot missing';statusDemo.textContent='Não guardado';statusDemo.style.color='var(--muted)';}if(d.user.has_real_token){dotReal.className='token-dot ok'+(d.user.active_account==='real'?' active':'');statusReal.textContent='Guardado'+(d.user.active_account==='real'?' (Activo)':'');statusReal.style.color='var(--accent)';}else{dotReal.className='token-dot missing';statusReal.textContent='Não guardado';statusReal.style.color='var(--muted)';}document.getElementById('activeAccountDisplay').textContent=(d.user.active_account||'demo').toUpperCase();}});}
-function toggleMenu(){document.getElementById('sideMenu').classList.toggle('open');document.getElementById('overlay').classList.toggle('show');}
-function showSec(s){document.querySelectorAll('#dashboard-section,#affiliate-section,#history-section,#payment-section,#settings-section,#admin-section').forEach(el=>el.classList.add('hidden'));document.getElementById(s+'-section').classList.remove('hidden');toggleMenu();if(s==='history')loadHistory();if(s==='affiliate')loadAffiliate();if(s==='admin')loadAdminUsers();if(s==='settings')updateTokenDisplay();}
-
-function updatePingDisplay(){
-    if(!isConnected) return;
-    fetch('/api/debug').then(r=>{
-        if(!r.ok) return null;
-        return r.json();
-    }).then(d=>{
-        if(!d || d.ping_ms === undefined) return;
-        let ping = d.ping_ms;
-        if (ping >= 9999 && _lastValidPing > 0) {
-            ping = _lastValidPing;
-        }
-        const cor = ping < 100 ? 'var(--accent)' : ping < 250 ? 'var(--warning)' : 'var(--danger)';
-        const el = document.getElementById('conSt');
-        if(el && isConnected){
-            el.innerHTML = `✅ Ping: <span style="color:${cor}">${ping}ms</span> | Reconexões: ${d.reconnect_count}`;
-        }
-        const latencyWarning = document.getElementById('latencyWarning');
-        if (latencyWarning) {
-            if (ping > 200 && ping < 9999) {
-                latencyWarning.classList.add('visible');
-                latencyWarning.textContent = `⚠️ Latência alta (${ping}ms)`;
-            } else {
-                latencyWarning.classList.remove('visible');
-            }
-        }
     }).catch(()=>{});
-}
+  }
 
-setInterval(()=>{if(isConnected)loadCandles();},10000);
-setInterval(updateScoreboard,30000);updateScoreboard();
-setInterval(updatePingDisplay, 10000);
+  async function autoConnect(){
+      if(_autoConnectAttempts >= MAX_AUTO_CONNECT_ATTEMPTS){
+          toast('⚠️ Token inválido ou expirado. Renove o token nas Configurações.', 'warning', 6000);
+          const el=$_('conSt'); if(el) el.textContent = '🔒 Token inválido';
+          return;
+      }
+      try{
+          const r=await fetch('/api/auth/auto-connect');
+          const d=await r.json();
+          if(d.status==='already_connected'){
+              const el=$_('conSt'); if(el) el.textContent='✅ Conectado';
+              isConnected=true;
+              _autoConnectAttempts = 0;
+          } else if (d.status === 'connecting') {
+              const el=$_('conSt'); if(el) el.textContent = '🔄 Auto-conectando...';
+              let attempts = 0;
+              const check = setInterval(() => {
+                  attempts++;
+                  updateAll();
+                  if (isConnected){ clearInterval(check); _autoConnectAttempts = 0; }
+                  if (attempts >= 5){
+                      clearInterval(check);
+                      _autoConnectAttempts++;
+                      if(_autoConnectAttempts >= MAX_AUTO_CONNECT_ATTEMPTS){
+                          const ce=$_('conSt'); if(ce) ce.textContent = '🔒 Token inválido';
+                          toast('⚠️ Token inválido ou expirado. Renove o token nas Configurações.', 'warning', 6000);
+                      }
+                  }
+              }, 2000);
+          } else if (d.status === 'no_token'){
+          } else {
+              _autoConnectAttempts++;
+          }
+      }catch(e){ _autoConnectAttempts++; }
+  }
 
-(function(){
+  function initSyms(){
+    const el=$_('symSel'); if(!el) return;
+    let h='';
+    for(const[k,v]of Object.entries(syms)) h+=`<button class="sym-btn ${k===curSym?'active':''}" onclick="chgSym('${k}',this)">${v}</button>`;
+    el.innerHTML=h;
+  }
+  function chgSym(s,el){
+    curSym=s;
+    fetch('/api/symbol/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})});
+    document.querySelectorAll('.sym-btn').forEach(b=>b.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  function initCandleChart(){
+    const container=$_('priceChart');
+    if(!container||candleChart) return;
+    try {
+      candleChart=LightweightCharts.createChart(container,{width:container.clientWidth,height:160,layout:{background:{color:'#020617'},textColor:'#e2e8f0'},grid:{vertLines:{color:'#1e293b'},horzLines:{color:'#1e293b'}},rightPriceScale:{borderColor:'#1e293b'},timeScale:{borderColor:'#1e293b',timeVisible:true}});
+      candleSeries=candleChart.addCandlestickSeries({upColor:'#00f0b5',downColor:'#ff4d4d',borderUpColor:'#00f0b5',borderDownColor:'#ff4d4d',wickUpColor:'#00f0b5',wickDownColor:'#ff4d4d'});
+      if(window.ResizeObserver){ resizeObserver=new ResizeObserver(()=>{if(candleChart&&container) candleChart.applyOptions({width:container.clientWidth});}); resizeObserver.observe(container); }
+    } catch(e) { console.error('Chart init error:', e); }
+  }
+  async function loadCandles(){
+    if(!candleChart) return;
+    try{
+      const r=await fetch(`/api/candles/data?granularity=${currentGranularity}`);
+      const d=await r.json();
+      if(!d.candles||d.candles.length===0) return;
+      const formatted=d.candles.map(c=>({time:c.epoch,open:parseFloat(c.open),high:parseFloat(c.high),low:parseFloat(c.low),close:parseFloat(c.close)})).sort((a,b)=>a.time-b.time);
+      candleSeries.setData(formatted); candleChart.timeScale().fitContent();
+    }catch(e){}
+  }
+
+  document.addEventListener('click',(e)=>{if(e.target.classList.contains('tf-btn')&&!e.target.closest('.guide-nav')){document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));e.target.classList.add('active');currentGranularity=parseInt(e.target.dataset.tf);loadCandles();}});
+
+  function updateSignalTicks(strategy, ticksLeft) {
+      const el = $_(strategy + 'Ticks');
+      if (!el) return;
+      if (ticksLeft > 0) {
+          el.textContent = `Sinal válido por ${ticksLeft} ticks`;
+          el.className = 'signal-ticks';
+      } else {
+          el.textContent = '';
+          el.className = 'signal-ticks';
+      }
+  }
+
+  async function updateAll(){
+    try {
+      const [statusResp, martingaleResp] = await Promise.allSettled([
+        fetch('/api/status').then(r=>r.json()),
+        fetch('/api/martingale/status').then(r=>r.json())
+      ]);
+
+      if(statusResp.status === 'fulfilled'){
+        const data = statusResp.value;
+        if(data.error) return;
+        const bot=data.bot; if(!bot) return;
+        const conn=bot.connected&&bot.authorized; isConnected=conn;
+        const oa=$_('connectOAuthBtn'); if(oa) oa.disabled=conn;
+        const ct=$_('connectTokenBtn'); if(ct) ct.disabled=conn;
+        const rb=$_('reconnectBtn'); if(rb) rb.style.display=conn?'none':'inline-block';
+        const sd=$_('sDot'); if(sd) sd.className='dot'+(conn?' on':'');
+        const cs=$_('connStatus'); if(cs) cs.textContent=conn?'Conectado':'Desconectado';
+        const bl=$_('bal'); if(bl) bl.textContent=(bot.balance||0).toFixed(2);
+        const cu=$_('cur'); if(cu) cu.textContent=bot.currency||'USD';
+        const pe=$_('priceEl'); if(pe) pe.textContent=(bot.price||0).toFixed(4);
+
+        if (bot.has_pending_trade && !_tradePending && !_tradeSubmitted) {
+            _tradePending = true;
+            const bd=$_('bigD'); if(bd){ bd.textContent = '⏳'; bd.className = 'big-d wait'; }
+            const bp=$_('bigP'); if(bp) bp.textContent = 'AGUARDANDO RESULTADO';
+        }
+        if (!bot.has_pending_trade && _tradePending && !bot.last_trade_result) {
+            _tradePending = false;
+        }
+
+        if (bot.last_trade_latency_ms) { _lastTradeLatency = bot.last_trade_latency_ms; }
+        if (bot.last_valid_ping_ms) { _lastValidPing = bot.last_valid_ping_ms; }
+
+        if(data.digits){
+          updateDigits(data.digits);
+          if(data.digits.digit_frequencies) updateFreqGrid(data.digits.digit_frequencies,data.digits.least_frequent_digit,data.digits.most_frequent_digit);
+        }
+        updateHistSummary(bot);
+        if(!candleChart) initCandleChart();
+
+        if(data.strategy){
+          const tr = data.digits?.ticks_remaining;
+          updateStrategyDisplay(data.strategy, tr);
+        }
+
+        if(bot.last_trade_result){
+          const ltr = bot.last_trade_result;
+          if(ltr.contract_id && ltr.contract_id !== _lastProcessedContractId){
+            _lastProcessedContractId = ltr.contract_id;
+            _tradePending = false;
+            clearTimeout(_tradeSubmittedTimer);
+            const bd=$_('bigD'); if(bd){ bd.textContent = ltr.digit !== undefined ? ltr.digit : '?'; bd.className = 'big-d ' + (ltr.is_win ? 'odd' : 'even'); }
+            const bp=$_('bigP'); if(bp) bp.textContent = (ltr.is_win ? 'GANHOU' : 'PERDEU');
+            const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
+            const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
+            toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${latencyInfo}`, ltr.is_win ? 'win' : 'loss', 4000);
+            _showTradeResult = true;
+            setTimeout(() => { _showTradeResult = false; }, 2000);
+          }
+        }
+      }
+
+      if(martingaleResp.status === 'fulfilled'){
+        const m = martingaleResp.value;
+        const act = m.active ? `ATIVO (passo ${m.step})` : 'INATIVO';
+        const nxt = '$' + (m.next_amount || 0.35).toFixed(2);
+        const dAct=$_('mgtActDig'); if(dAct) dAct.textContent = act;
+        const dNxt=$_('mgtNxtDig'); if(dNxt) dNxt.textContent = nxt;
+        const ad=$_('amtDigit'); const indicator=$_('martingaleIndicator');
+        if(m.active){
+          if(ad) { ad.value = (m.next_amount||0.35).toFixed(2); ad.classList.add('martingale-active'); }
+          if(indicator) indicator.textContent = '🔄 Martingale pronto — clique no botão';
+        } else {
+          if(ad) ad.classList.remove('martingale-active');
+          if(indicator) indicator.textContent = '';
+        }
+      }
+    } catch(e) {
+      console.error('updateAll error:', e);
+    }
+  }
+
+  function updateDigits(digits){
+    if(!digits) return;
+    const tpd=digits.ticks_per_digit||10, tr=Math.max(0,Math.round(digits.ticks_remaining||tpd));
+    const tb=$_('tBar'); if(tb) tb.style.width=Math.min(100,(tr/tpd)*100)+'%';
+    const cd=$_('cdown'); if(cd) cd.textContent=`⏱ ${tr} tick${tr!==1?'s':''}`;
+    const recent=digits.recent||[], counter=digits.digit_counter||0;
+
+    if(_tradePending && !_tradeSubmitted){
+      const bd=$_('bigD'); if(bd){ bd.textContent = '⏳'; bd.className = 'big-d wait'; }
+      const bp=$_('bigP'); if(bp) bp.textContent = 'AGUARDANDO RESULTADO';
+      return;
+    }
+
+    if(_showTradeResult){ return; }
+
+    if(recent.length>0 && (recent.length!==lastDigitCount || counter!==lastDigitCounter)){
+      lastDigitCount=recent.length; lastDigitCounter=counter;
+      const newest=recent[recent.length-1], isOdd=newest%2!==0;
+      const bd=$_('bigD'); if(bd){ bd.textContent=newest; bd.className='big-d '+(isOdd?'odd':'even'); }
+      const bp=$_('bigP'); if(bp){ bp.textContent=isOdd?'ÍMPAR':'PAR'; bp.className='big-p '+(isOdd?'odd':'even'); }
+      let html=''; recent.forEach((d)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
+      const hr=$_('histRow'); if(hr) hr.innerHTML=html;
+      const hs=$_('histScroll'); if(hs) hs.scrollLeft=hs.scrollWidth;
+    }
+    const analysis=digits.analysis;
+    if(analysis){
+      const si=$_('seqInfo'); if(si) si.textContent=(analysis.sequences?.descricao)||'';
+      if(analysis.entropy!==undefined){
+        const ei=$_('entropyInfo'); if(ei) ei.textContent=`Entropia: ${analysis.entropy.toFixed(2)} (${analysis.entropy_verdict||'---'})`;
+      } else { const ei=$_('entropyInfo'); if(ei) ei.textContent=''; }
+    }
+  }
+
+  function updateFreqGrid(freqs,leastDigit,mostDigit){
+    const grid=$_('freqGrid'); if(!grid) return;
+    let html='';
+    for(let d=0;d<10;d++){
+      const pct=freqs[d]||0;
+      let cls='';
+      if(d===leastDigit) cls='least';
+      if(d===mostDigit) cls=cls?'least most':'most';
+      html+=`<div class="freq-item${cls?' '+cls:''}"><div class="freq-bar" style="height:${Math.max(pct*2,2)}px;"></div><div>${d}</div><div style="font-size:8px;">${pct}%</div></div>`;
+    }
+    grid.innerHTML=html;
+  }
+
+  function updateHistSummary(bot){
+    const s=bot.stats, d=bot.daily_stats, sum=$_('histSummary');
+    if(!sum||!s) return;
+    const pl=s.profit_loss||0, cor=pl>=0?'var(--accent)':'var(--danger)', sinal=pl>=0?'+':'';
+    sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${s.total||0}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WIN RATE</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${s.win_rate||0}%</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">P/L</div><div style="font-size:16px;font-weight:bold;color:${cor}">${sinal}$${Math.abs(pl).toFixed(2)}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${d?d.trades:0}</div></div>`;
+  }
+
+  function updateStrategyDisplay(strategy, ticksRemaining){
+    if(!strategy) return;
+    const el=$_('strategyStatus'); if(!el) return;
+    let html = '<div class="strategy-indicators">';
+
+    if(strategy.global_stop){
+      html += '<span class="strat-badge blocked">🛑 STOP GLOBAL</span>';
+    } else if(strategy.cooldown){
+      html += '<span class="strat-badge warning">⏳ COOLDOWN</span>';
+    } else if(strategy.trade_locked){
+      html += '<span class="strat-badge warning">🔒 TRADE LOCK</span>';
+    } else {
+      html += '<span class="strat-badge ready">✅ ATIVO</span>';
+    }
+
+    html += '<span class="strat-badge ' + (strategy.differ_available ? 'ready' : 'blocked') + '">DIFFER</span>';
+    html += '<span class="strat-badge ' + (strategy.parity_available ? 'ready' : 'blocked') + '">PAR/ÍMPAR</span>';
+    html += '<span class="strat-badge ' + (strategy.matches_available ? 'ready' : 'blocked') + '">MATCHES</span>';
+    html += '<span class="strat-badge ' + (strategy.zscore_available ? 'ready' : 'blocked') + '">Z‑SCORE</span>';
+    html += '</div>';
+
+    if(strategy.consecutive_losses > 0){
+      html += `<div style="font-size:9px;color:var(--danger);margin-top:2px">⚠️ ${strategy.consecutive_losses} perda(s) consecutiva(s)</div>`;
+    }
+    el.innerHTML = html;
+
+    const tradeLocked = strategy.trade_locked || _tradeSubmitted;
+    const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 2);
+    const blockerMsg=$_('digitBlockerMsg');
+
+    const btnOdd=$_('btnOdd'); const btnEven=$_('btnEven'); const parityReasonEl=$_('parityReason');
+    if (strategy.parity_available) {
+      if (strategy.parity_direction === 'odd') {
+        if(btnOdd) btnOdd.disabled = tradeLocked;
+        if(btnEven) btnEven.disabled = true;
+      } else if (strategy.parity_direction === 'even') {
+        if(btnOdd) btnOdd.disabled = true;
+        if(btnEven) btnEven.disabled = tradeLocked;
+      } else {
+        if(btnOdd) btnOdd.disabled = true;
+        if(btnEven) btnEven.disabled = true;
+      }
+      if(parityReasonEl) parityReasonEl.textContent = '';
+    } else {
+      if(btnOdd) btnOdd.disabled = true;
+      if(btnEven) btnEven.disabled = true;
+      if(parityReasonEl) parityReasonEl.textContent = strategy.parity_reason || '';
+    }
+    updateSignalTicks('parity', (strategy.parity_ticks_left != null) ? strategy.parity_ticks_left : 0);
+
+    const btnDiffer=$_('btnDiffer'); if(btnDiffer) btnDiffer.disabled = !strategy.differ_available || tradeLocked;
+    updateSignalTicks('differ', (strategy.differ_ticks_left != null) ? strategy.differ_ticks_left : 0);
+
+    const btnMatches=$_('btnMatches'); if(btnMatches) btnMatches.disabled = !strategy.matches_available || tradeLocked;
+    updateSignalTicks('matches', (strategy.matches_ticks_left != null) ? strategy.matches_ticks_left : 0);
+
+    const zContainer=$_('zscoreContainer'); const btnZscore=$_('btnZscore');
+    if (zContainer && btnZscore) {
+      if (strategy.zscore_available) {
+        zContainer.classList.add('visible');
+        btnZscore.disabled = tradeLocked;
+        if (strategy.zscore_action === 'DIFFER') {
+          btnZscore.textContent = `🎯 Z‑Score DIFFER no dígito ${strategy.zscore_digit}`;
+        } else if (strategy.zscore_action === 'MATCHES') {
+          btnZscore.textContent = `🎯 Z‑Score MATCHES no dígito ${strategy.zscore_digit}`;
+        } else {
+          btnZscore.textContent = '🎯 Z‑SCORE';
+        }
+      } else {
+        zContainer.classList.remove('visible');
+      }
+    }
+    updateSignalTicks('zscore', (strategy.zscore_ticks_left != null) ? strategy.zscore_ticks_left : 0);
+
+    if(blockerMsg){
+      blockerMsg.textContent = ticksBlocked ? `⏳ Aguarde ${ticksRemaining} tick(s)...` : '';
+    }
+
+    const matchesReasonEl=$_('matchesReason');
+    if (matchesReasonEl) {
+      matchesReasonEl.textContent = strategy.matches_reason || '';
+    }
+
+    if (btnDiffer) {
+      if (strategy.differ_available && strategy.differ_digit !== undefined) {
+        btnDiffer.textContent = `🎯 DIFFER no dígito ${strategy.differ_digit}`;
+      } else {
+        btnDiffer.textContent = '🎯 DIFFER (dígito menos frequente)';
+      }
+    }
+  }
+
+  function scheduleHistoryLoad(delay=5000){
+    if(_historyDebounceTimer) clearTimeout(_historyDebounceTimer);
+    _historyDebounceTimer = setTimeout(()=>{ loadHistory(); _historyDebounceTimer=null; }, delay);
+  }
+
+  async function conectar(){
+    const tok=$_('tokIn'); if(!tok){ toast('❌ Token obrigatório','loss'); return; }
+    const tokenVal = tok.value.trim(); if(!tokenVal){ toast('❌ Token obrigatório','loss'); return; }
+    try{
+      const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tokenVal,account_type:selectedAcct})});
+      const d=await r.json();
+      if(d.error){ toast('❌ '+d.error,'loss'); return; }
+      toast('✅ Token guardado','win');
+      const cs=$_('conSt'); if(cs) cs.textContent='🔄 A conectar...';
+      setTimeout(()=>{ fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.status==='connecting') toast('🔄 Conectando...','info'); }); },500);
+    }catch(e){ toast('❌ Erro de rede','loss'); }
+  }
+
+  async function connectWithDeriv() {
+      try {
+          const r = await fetch('/api/auth/deriv_oauth_url');
+          const d = await r.json();
+          if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
+          localStorage.removeItem('oauth_result');
+          const popup = window.open(d.url, 'derivOAuth', 'width=800,height=700');
+          const checkResult = setInterval(async () => {
+              const result = localStorage.getItem('oauth_result');
+              const ts = parseInt(localStorage.getItem('oauth_ts') || '0');
+              const fresh = (Date.now() - ts) < 30000;
+              if (result === 'connected' && fresh) {
+                  clearInterval(checkResult); clearInterval(checkPopup);
+                  localStorage.removeItem('oauth_result'); localStorage.removeItem('oauth_ts');
+                  toast('✅ Deriv conectada!', 'win', 4000);
+                  const cs=$_('conSt'); if(cs) cs.textContent = '🔄 A ligar...';
+                  try { await fetch('/api/connect', { method: 'POST' }); } catch(e) {}
+                  let attempts = 0;
+                  const check = setInterval(() => { attempts++; updateAll(); if (isConnected || attempts >= 5) clearInterval(check); }, 2000);
+              } else if (result === 'error' && fresh) {
+                  clearInterval(checkResult); clearInterval(checkPopup);
+                  localStorage.removeItem('oauth_result'); localStorage.removeItem('oauth_ts');
+                  toast('❌ OAuth falhou', 'loss');
+              }
+          }, 500);
+          const checkPopup = setInterval(() => {
+              if (!popup || popup.closed) { clearInterval(checkPopup); setTimeout(() => { if (localStorage.getItem('oauth_result') !== 'connected') { clearInterval(checkResult); toast('❌ OAuth cancelado ou falhou', 'loss'); } }, 3000); }
+          }, 500);
+          setTimeout(() => { clearInterval(checkResult); clearInterval(checkPopup); }, 300000);
+      } catch(e) { toast('❌ Erro OAuth', 'loss'); }
+  }
+
+  async function reconnectManual(){
+    try{ const resp=await fetch('/api/connect',{method:'POST'}); const data=await resp.json(); if(data.status==='connecting'){ toast('🔄 A tentar ligar...','info'); const cs=$_('conSt'); if(cs) cs.textContent='🔄 A ligar...'; setTimeout(updateAll,3000); } else if(data.error) toast('❌ '+data.error,'loss'); } catch(e){ toast('❌ Erro de rede','loss'); }
+  }
+  async function disconnectWebSocket(){
+    try{ await fetch('/api/disconnect',{method:'POST'}); toast('🔌 Desconectado','info'); isConnected=false; const sd=$_('sDot'); if(sd) sd.className='dot'; const cs=$_('connStatus'); if(cs) cs.textContent='Desconectado'; const oa=$_('connectOAuthBtn'); if(oa) oa.disabled=false; const ct=$_('connectTokenBtn'); if(ct) ct.disabled=false; } catch(e){ toast('❌ Erro','loss'); }
+  }
+  window.selAcct = async function(a){
+    selectedAcct=a; const bd=$_('btnDemo'); if(bd) bd.classList.toggle('active',a==='demo'); const br=$_('btnReal'); if(br) br.classList.toggle('active',a==='real');
+    try{ const r=await fetch('/api/auth/switch-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:a})}); const d=await r.json(); if(d.error){ toast('❌ '+d.error,'loss'); return; } toast(`✅ Conta ${a.toUpperCase()} activa`,'win'); const cs=$_('conSt'); if(cs) cs.textContent='🔄 A trocar conta...'; } catch(e){ toast('❌ Erro','loss'); }
+  };
+
+  function tradeDigit(pred){
+    if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+    const amt=parseFloat($_('amtDigit')?.value)||0.35;
+    _tradeSubmitted = true; _tradePending = false;
+    clearTimeout(_tradeSubmittedTimer);
+    _tradeSubmittedTimer = setTimeout(() => { if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000); } }, 3000);
+    fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
+    .then(r=>r.json()).then(d=>{
+      _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
+      if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
+      else{ _tradePending = true; toast('⏳ Aposta enviada!','info'); scheduleHistoryLoad(5000); }
+    }).catch(()=>{ _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); toast('❌ Erro de rede','loss'); });
+  }
+
+  async function tradeDiffer(){
+    if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+    const amt=parseFloat($_('amtDigit')?.value)||0.35;
+    _tradeSubmitted = true; _tradePending = false;
+    clearTimeout(_tradeSubmittedTimer);
+    _tradeSubmittedTimer = setTimeout(() => { if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000); } }, 3000);
+    try{
+      const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+      const d=await r.json();
+      _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
+      if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
+      else{ toast(d.message,'win',4000); playBeep(); _tradePending = true; scheduleHistoryLoad(5000); }
+    }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); }
+  }
+
+  async function tradeMatches(){
+    if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+    const amt=parseFloat($_('amtDigit')?.value)||0.35;
+    _tradeSubmitted = true; _tradePending = false;
+    clearTimeout(_tradeSubmittedTimer);
+    _tradeSubmittedTimer = setTimeout(() => { if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000); } }, 3000);
+    try{
+      const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+      const d=await r.json();
+      _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
+      if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
+      else{ toast(d.message,'win',4000); playBeep(); _tradePending = true; scheduleHistoryLoad(5000); }
+    }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); }
+  }
+
+  async function tradeZscore(){
+    if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+    const amt=parseFloat($_('amtDigit')?.value)||0.35;
+    _tradeSubmitted = true; _tradePending = false;
+    clearTimeout(_tradeSubmittedTimer);
+    _tradeSubmittedTimer = setTimeout(() => { if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000); } }, 3000);
+    try{
+      const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+      const d=await r.json();
+      _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
+      if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
+      else{ toast(d.message,'win',4000); playBeep(); _tradePending = true; scheduleHistoryLoad(5000); }
+    }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); }
+  }
+
+  async function ignoreZscore(){
+      try {
+          const r = await fetch('/api/zscore/ignore', { method: 'POST' });
+          const d = await r.json();
+          if (d.status === 'ok') { toast('🚫 Sinal Z‑Score ignorado', 'info'); }
+          else { toast('❌ ' + (d.error || 'Erro ao ignorar'), 'loss'); }
+      } catch(e) { toast('❌ Erro de rede', 'loss'); }
+  }
+
+  async function mgtMultiply(fieldId){
+      if(_mgtLocked){ toast('⏳ Aguarde...', 'warning'); return; }
+      _mgtLocked = true;
+      const input=$_(fieldId); const currentAmount=parseFloat(input?.value)||0.35;
+      try{
+          const r=await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:currentAmount})});
+          const d=await r.json();
+          if(d.error){ toast('❌ '+d.error,'loss'); }
+          else { const nextAmount=d.martingale.next_amount; const ad=$_('amtDigit'); if(ad) ad.value=nextAmount.toFixed(2); toast('📈 '+d.martingale.message,'info'); }
+      } catch(e) { toast('❌ Erro de rede','loss'); }
+      _mgtLocked = false;
+  }
+
+  async function mgtDivide(fieldId){ const input=$_(fieldId); const currentAmount=parseFloat(input?.value)||0.35; const nextAmount=Math.max(0.35,currentAmount/2); if(input) input.value=nextAmount.toFixed(2); toast('📉 $'+nextAmount.toFixed(2),'info'); }
+  async function rstMgt(){ await fetch('/api/martingale/reset',{method:'POST'}); const ad=$_('amtDigit'); if(ad) ad.value='0.35'; toast('🔄 Martingale resetado','info'); }
+  async function clearHistory(){ await fetch('/api/clear_history',{method:'POST'}); toast('🗑️ Histórico limpo','info'); loadHistory(); }
+
+  function loadAffiliate(){
+    fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{ if(d.link){ const el=$_('refLink'); if(el) el.value=d.link; } });
+    fetch('/api/affiliate/earnings').then(r=>r.json()).then(d=>{
+      const el=$_('affiliateEarnings'); if(!el) return; if(d.error){ el.innerHTML=''; return; }
+      el.innerHTML=`<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px"><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">GANHOS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">$${d.earnings?.toFixed(2)||'0.00'}</div></div><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">REFERIDOS</div><div style="font-size:16px;font-weight:bold">${d.referred_count||0}</div></div></div>`;
+    });
+  }
+  function cpLink(){ const el=$_('refLink'); if(!el) return; const text=el.value; navigator.clipboard.writeText(text).then(()=>{ toast('📋 Copiado!','win'); }).catch(()=>{ el.select(); document.execCommand('copy'); toast('📋 Copiado!','win'); }); }
+
+  function loadHistory(){
+    fetch('/api/report').then(r=>r.json()).then(d=>{
+      const sum=$_('histSummary2'), list=$_('histList2'), miniList=$_('histList');
+      if(d.error){ if(sum) sum.innerHTML=''; if(list) list.innerHTML=''; if(miniList) miniList.innerHTML=''; return; }
+      const r=d.resumo;
+      if(sum) sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${r.total_trades}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${r.trades_hoje}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WINS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${r.wins}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">LOSSES</div><div style="font-size:16px;font-weight:bold;color:var(--danger)">${r.losses}</div></div>`;
+      const html=d.historico.map(t=>{
+        const win=t.result==='win', lose=t.result==='loss', cor=win?'var(--accent)':lose?'var(--danger)':'#ffaa00', icon=win?'✅':lose?'❌':'⏳';
+        let actionLabel=t.action||''; if(t.is_digit){ actionLabel=(t.action==='BUY'||t.action==='CALL')?'ÍMPAR 🎲':'PAR 🎲'; }
+        const profitText=t.profit?`<div style="color:${t.profit>0?'var(--accent)':'var(--danger)'}">${t.profit>0?'+':''}$${t.profit.toFixed(2)}</div>`:'';
+        return`<div style="padding:6px;background:#020617;border-radius:6px;margin-bottom:4px;font-size:11px"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">${t.time}</span><span style="font-weight:700;color:${cor}">${icon} ${t.result.toUpperCase()}</span></div><div>${actionLabel} ${t.symbol} $${t.amount.toFixed(2)}</div>${profitText}</div>`;
+      }).join('');
+      if(list) list.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+      if(miniList) miniList.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+    }).catch(()=>toast('❌ Erro histórico','loss'));
+  }
+
+  function loadAdminUsers(){
+    fetch('/api/admin/users').then(r=>r.json()).then(d=>{
+      const el=$_('adminUserList'); if(!el) return;
+      if(d.error){ el.innerHTML='<p style="color:var(--danger)">'+d.error+'</p>'; return; }
+      el.innerHTML=d.users.map(u=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px;background:#020617;border-radius:6px;margin-bottom:4px"><div><div style="font-weight:600;font-size:12px">${u.name||u.email}</div><div style="font-size:10px;color:var(--muted)">${u.email}</div></div><button class="bmr" style="padding:3px 10px;font-size:10px" onclick="toggleUser('${u.email}',${!u.active})">${u.active?'Desativar':'Ativar'}</button></div>`).join('');
+    });
+  }
+  function toggleUser(email,enable){ fetch('/api/admin/toggle-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,enable})}).then(r=>r.json()).then(d=>{ toast(d.message,'info'); loadAdminUsers(); }); }
+  async function saveMarkup(){ const pct=parseFloat($_('markupInput')?.value); const r=await fetch('/api/admin/set-markup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({percentage:pct})}); const d=await r.json(); const el=$_('markupMsg'); if(el){ el.textContent=d.error?d.error:`✅ ${pct}%`; el.style.color=d.error?'var(--danger)':'var(--accent)'; } }
+  function showTab(t){ const lf=$_('loginForm'); if(lf) lf.style.display=t==='login'?'block':'none'; const rf=$_('registerForm'); if(rf) rf.style.display=t==='register'?'block':'none'; const ff=$_('forgotForm'); if(ff) ff.style.display=t==='forgot'?'block':'none'; const ae=$_('authErr'); if(ae) ae.textContent=''; }
+  function doLogin(){
+    if(_loggingIn) return; _loggingIn=true;
+    const email=$_('lEmail')?.value.trim().toLowerCase(), password=$_('lPass')?.value;
+    fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})}).then(r=>r.json()).then(d=>{
+      _loggingIn=false;
+      if(d.error){ const ae=$_('authErr'); if(ae) ae.textContent=d.error; return; }
+      const am=$_('authModal'); if(am){ am.style.display='none'; document.body.classList.remove('modal-open'); }
+      const mc=$_('mainContent'); if(mc) mc.style.display='block';
+      if(d.user?.role==='admin'){ const ad=$_('adminMI'); if(ad) ad.style.display='block'; }
+      initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles,3000); startPolling();
+      if(d.user?.has_deriv_token) setTimeout(autoConnect,1500);
+    }).catch(()=>{ _loggingIn=false; const ae=$_('authErr'); if(ae) ae.textContent='Erro de rede'; });
+  }
+  function doRegister(){
+    if(_registering) return; _registering=true;
+    const name=$_('rName')?.value.trim(), email=$_('rEmail')?.value.trim().toLowerCase(), password=$_('rPass')?.value, ref=$_('rRef')?.value.trim();
+    if(!name||!email||password.length<6){ _registering=false; const ae=$_('authErr'); if(ae) ae.textContent='Dados inválidos'; return; }
+    fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,password,referral_code:ref})}).then(r=>r.json()).then(d=>{
+      _registering=false;
+      if(d.error){ const ae=$_('authErr'); if(ae) ae.textContent=d.error; return; }
+      const am=$_('authModal'); if(am){ am.style.display='none'; document.body.classList.remove('modal-open'); }
+      const mc=$_('mainContent'); if(mc) mc.style.display='block';
+      initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles,3000); startPolling(); toast('✅ Conta criada!','win',4000);
+    }).catch(()=>{ _registering=false; const ae=$_('authErr'); if(ae) ae.textContent='Erro de rede'; });
+  }
+  function doReset(){
+    const email=$_('fEmail')?.value.trim().toLowerCase();
+    fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})}).then(r=>r.json()).then(d=>{
+      const el=$_('fMsg'); if(el){ el.textContent=d.error?d.error:'✅ Verifique o email'; el.style.color=d.error?'var(--danger)':'var(--accent)'; }
+    });
+  }
+  function doLogout(){ stopPolling(); if(resizeObserver) resizeObserver.disconnect(); fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload()); }
+  async function saveTokAcct(acctType){
+    const tok=$_('tokIn'); if(!tok){ toast('❌ Cole o token','loss'); return; } const tokenVal=tok.value.trim(); if(!tokenVal){ toast('❌ Cole o token','loss'); return; }
+    try{ const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tokenVal,account_type:acctType})}); const d=await r.json(); if(d.error){ toast('❌ '+d.error,'loss'); return; } toast(`✅ Token ${acctType.toUpperCase()} guardado`,'win'); if(tok) tok.value=''; updateTokenDisplay(); } catch(e){ toast('❌ Erro','loss'); }
+  }
+  function updateTokenDisplay(){
+    fetch('/api/auth/status').then(r=>r.json()).then(d=>{
+      if(d.authenticated&&d.user){
+        const display=$_('tokenDisplay'); if(display) display.style.display='block';
+        const dotDemo=$_('dotDemo'), dotReal=$_('dotReal'), statusDemo=$_('statusDemo'), statusReal=$_('statusReal');
+        if(d.user.has_demo_token){ if(dotDemo) dotDemo.className='token-dot ok'+(d.user.active_account==='demo'?' active':''); if(statusDemo){ statusDemo.textContent='Guardado'+(d.user.active_account==='demo'?' (Activo)':''); statusDemo.style.color='var(--accent)'; } }
+        else { if(dotDemo) dotDemo.className='token-dot missing'; if(statusDemo){ statusDemo.textContent='Não guardado'; statusDemo.style.color='var(--muted)'; } }
+        if(d.user.has_real_token){ if(dotReal) dotReal.className='token-dot ok'+(d.user.active_account==='real'?' active':''); if(statusReal){ statusReal.textContent='Guardado'+(d.user.active_account==='real'?' (Activo)':''); statusReal.style.color='var(--accent)'; } }
+        else { if(dotReal) dotReal.className='token-dot missing'; if(statusReal){ statusReal.textContent='Não guardado'; statusReal.style.color='var(--muted)'; } }
+        const aad=$_('activeAccountDisplay'); if(aad) aad.textContent=(d.user.active_account||'demo').toUpperCase();
+      }
+    });
+  }
+  function toggleMenu(){ const sm=$_('sideMenu'); if(sm) sm.classList.toggle('open'); const ov=$_('overlay'); if(ov) ov.classList.toggle('show'); }
+  function showSec(s){
+    document.querySelectorAll('#dashboard-section,#affiliate-section,#history-section,#payment-section,#settings-section,#admin-section').forEach(el=>el.classList.add('hidden'));
+    const sec=$_(s+'-section'); if(sec) sec.classList.remove('hidden');
+    toggleMenu();
+    if(s==='history') loadHistory(); if(s==='affiliate') loadAffiliate(); if(s==='admin') loadAdminUsers(); if(s==='settings') updateTokenDisplay();
+  }
+
+  function updatePingDisplay(){
+    if(!isConnected) return;
+    fetch('/api/debug').then(r=>{ if(!r.ok) return null; return r.json(); }).then(d=>{
+      if(!d || d.ping_ms === undefined) return;
+      let ping = d.ping_ms;
+      if (ping >= 9999 && _lastValidPing > 0) { ping = _lastValidPing; }
+      const cor = ping < 100 ? 'var(--accent)' : ping < 250 ? 'var(--warning)' : 'var(--danger)';
+      const el=$_('conSt'); if(el && isConnected){ el.innerHTML = `✅ Ping: <span style="color:${cor}">${ping}ms</span> | Reconexões: ${d.reconnect_count}`; }
+      const lw=$_('latencyWarning');
+      if (lw) {
+        if (ping > 200 && ping < 9999) { lw.classList.add('visible'); lw.textContent = `⚠️ Latência alta (${ping}ms)`; }
+        else { lw.classList.remove('visible'); }
+      }
+    }).catch(()=>{});
+  }
+
+  // Inicialização
+  setInterval(()=>{if(isConnected)loadCandles();},10000);
+  setInterval(updateScoreboard,30000); updateScoreboard();
+  setInterval(updatePingDisplay, 10000);
+
+  (function(){
     const p=new URLSearchParams(location.search);
     const ref=p.get('ref');
-    if(ref){
-        const el=document.getElementById('rRef');
-        if(el)el.value=ref;
-    }
-})();
+    if(ref){ const el=$_('rRef'); if(el) el.value=ref; }
+  })();
 
-fetch('/api/auth/status').then(r=>r.json()).then(d=>{if(d.authenticated){if(d.user?.active_account)selectedAcct=d.user.active_account;document.getElementById('btnDemo').classList.toggle('active',selectedAcct==='demo');document.getElementById('btnReal').classList.toggle('active',selectedAcct==='real');if(d.user?.name)document.getElementById('userNameDisplay').textContent='👤 '+d.user.name;document.getElementById('authModal').style.display='none';document.body.classList.remove('modal-open');document.getElementById('mainContent').style.display='block';if(d.user?.role==='admin')document.getElementById('adminMI').style.display='block';initSyms();loadAffiliate();loadHistory();initCandleChart();setTimeout(loadCandles,3000);startPolling();if(d.user?.has_deriv_token)setTimeout(autoConnect,1500);updateTokenDisplay();}});
+  try {
+    fetch('/api/auth/status').then(r=>r.json()).then(d=>{
+      if(d.authenticated){
+        if(d.user?.active_account) selectedAcct=d.user.active_account;
+        const bd=$_('btnDemo'); if(bd) bd.classList.toggle('active',selectedAcct==='demo');
+        const br=$_('btnReal'); if(br) br.classList.toggle('active',selectedAcct==='real');
+        if(d.user?.name){ const un=$_('userNameDisplay'); if(un) un.textContent='👤 '+d.user.name; }
+        const am=$_('authModal'); if(am){ am.style.display='none'; document.body.classList.remove('modal-open'); }
+        const mc=$_('mainContent'); if(mc) mc.style.display='block';
+        if(d.user?.role==='admin'){ const ad=$_('adminMI'); if(ad) ad.style.display='block'; }
+        initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles,3000); startPolling();
+        if(d.user?.has_deriv_token) setTimeout(autoConnect,1500); updateTokenDisplay();
+      }
+    }).catch(()=>{});
+  } catch(e) {
+    console.error('Init error:', e);
+    toast('Erro de inicialização. Recarregue a página.', 'loss', 5000);
+  }
+
+})();
 </script>
-<div id="debugPoll" style="display:none;"></div>
 </body>
 </html>
