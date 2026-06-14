@@ -1,12 +1,18 @@
 import logging
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
 
 class StrategyManager:
     """
-    Implementa os três módulos da Foloma Visão 360 Smart Flow + Z‑Score.
+    Implementa os módulos da Foloma Visão 360 com:
+    - Snapshots de sinal (ID, dígitos, recomendação, tick de origem).
+    - Expiração por número de ticks (15 ticks).
+    - Bloqueio de reanálise enquanto sinal ativo.
+    - Trade Lock (verificado nas rotas, não em can_trade).
+    - _peek_* apenas lêem; _generate_*_signal fazem a criação.
     """
 
     def __init__(self, client, analyzer):
@@ -36,6 +42,20 @@ class StrategyManager:
         self._matches_signal_at = 0
         self._zscore_signal_at = 0
 
+        # Snapshots dos sinais ativos
+        self._active_signals = {
+            'differ': None,
+            'parity': None,
+            'matches': None,
+            'zscore': None
+        }
+
+        # Expiração por ticks
+        self.SIGNAL_EXPIRY_TICKS = 15
+
+        # Trade Lock (verificado nas rotas, não em can_trade)
+        self._trade_locked = False
+
     @property
     def is_global_stop(self):
         return time.time() < self._global_stop_until
@@ -50,6 +70,7 @@ class StrategyManager:
 
     @property
     def can_trade(self):
+        """Verifica condições básicas de mercado. Não inclui _trade_locked."""
         if self.is_global_stop:
             return False, "STOP GLOBAL ATIVO"
         if self.is_cooldown:
@@ -61,15 +82,13 @@ class StrategyManager:
         if time.time() - getattr(self.client, '_last_reconnect_time', 0) < 10:
             return False, "Reconexão recente"
 
-        # Ping mais tolerante: Pong timeout isolado não bloqueia tudo
         raw_ping = getattr(self.client, '_ping_ms', 0)
         if raw_ping >= 9999:
-            # Se o último tick é recente (<10s), assumimos latência normal
             if self.client.streaming and self.client._last_tick_time:
                 if time.time() - self.client._last_tick_time < 10:
-                    effective_ping = 0  # Confiar no stream
+                    effective_ping = 0
                 else:
-                    effective_ping = 250  # Valor moderado, não bloqueia tudo
+                    effective_ping = 250
             else:
                 effective_ping = 250
         else:
@@ -100,6 +119,14 @@ class StrategyManager:
             if len(self._price_history) > 20:
                 self._price_history.pop(0)
 
+    def lock_trade(self):
+        self._trade_locked = True
+        logger.info("🔒 Trade Lock ATIVO — análise congelada")
+
+    def unlock_trade(self):
+        self._trade_locked = False
+        logger.info("🔓 Trade Lock DESATIVADO")
+
     def _apply_cooldown(self, ticks):
         self._cooldown_until = time.time() + ticks
 
@@ -115,14 +142,44 @@ class StrategyManager:
         self._parity_signal_at = 0
         self._matches_signal_at = 0
         self._zscore_signal_at = 0
+        for key in self._active_signals:
+            self._active_signals[key] = None
+        self._trade_locked = False
 
-    def _is_entry_window_valid(self, signal_at, max_age=15):
-        if signal_at == 0:
-            return True
-        return time.time() - signal_at <= max_age
+    def _create_signal(self, strategy, recommendation, digits, reason=''):
+        current_tick = self.analyzer._tick_count
+        signal = {
+            'id': uuid.uuid4().hex[:8],
+            'strategy': strategy,
+            'digits': digits,
+            'recommendation': recommendation,
+            'reason': reason,
+            'created_at': time.time(),
+            'tick_origin': current_tick,
+            'expires_at_tick': current_tick + self.SIGNAL_EXPIRY_TICKS
+        }
+        self._active_signals[strategy] = signal
+        return signal
+
+    def _is_signal_valid(self, strategy):
+        signal = self._active_signals.get(strategy)
+        if not signal:
+            return False
+        current_tick = self.analyzer._tick_count
+        if current_tick >= signal['expires_at_tick']:
+            self._active_signals[strategy] = None
+            return False
+        return True
+
+    def _ticks_left(self, strategy):
+        signal = self._active_signals.get(strategy)
+        if not signal:
+            return 0
+        return max(0, signal['expires_at_tick'] - self.analyzer._tick_count)
 
     def notify_result(self, action, is_win):
         logger.info(f"📊 notify_result: action='{action}', is_win={is_win}")
+        self.unlock_trade()
         if not is_win:
             self._consecutive_losses += 1
             if self._consecutive_losses >= 2:
@@ -134,10 +191,8 @@ class StrategyManager:
             if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
                 self._apply_cooldown(5)
             elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
-                # Se o martingale está ativo e a perda foi em PAR/ÍMPAR, reiniciar a janela
                 if not self._parity_martingale_used and self._last_parity_streak_type:
                     self._apply_cooldown(1)
-                    # Reiniciar a janela de entrada para permitir o martingale
                     self._parity_signal_at = time.time()
                     logger.info("🔄 Janela de entrada reiniciada para martingale")
                 else:
@@ -154,124 +209,162 @@ class StrategyManager:
                 self._apply_cooldown(2)
 
     # -----------------------------------------------------------------
-    # Métodos de leitura pura para o frontend
+    # Métodos de leitura pura (sem efeitos colaterais)
     # -----------------------------------------------------------------
     def _peek_differ(self):
-        ok, _ = self.can_trade
-        if not ok:
-            return False, None
-        if not self._is_entry_window_valid(self._differ_signal_at):
-            return False, None
+        """Apenas lê o sinal ativo, sem gerar novo."""
+        if self._active_signals['differ']:
+            if self._is_signal_valid('differ'):
+                s = self._active_signals['differ']
+                return True, s['recommendation'], s
+            else:
+                self._active_signals['differ'] = None
+        return False, None, None
+
+    def _peek_parity(self):
+        """Apenas lê o sinal ativo, sem gerar novo."""
+        if self._active_signals['parity']:
+            if self._is_signal_valid('parity'):
+                s = self._active_signals['parity']
+                return True, s['recommendation'], s, s['reason']
+            else:
+                self._active_signals['parity'] = None
+        return False, None, None, ""
+
+    def _peek_matches(self):
+        """Apenas lê o sinal ativo, sem gerar novo."""
+        if self._active_signals['matches']:
+            if self._is_signal_valid('matches'):
+                return True, self._active_signals['matches']
+            else:
+                self._active_signals['matches'] = None
+        return False, None
+
+    def _peek_zscore(self):
+        """Apenas lê o sinal ativo, sem gerar novo."""
+        if self._active_signals['zscore']:
+            if self._is_signal_valid('zscore'):
+                s = self._active_signals['zscore']
+                action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
+                return True, action, s['recommendation'], s
+            else:
+                self._active_signals['zscore'] = None
+        return False, None, None, None
+
+    # -----------------------------------------------------------------
+    # Métodos de geração de sinal (com efeitos colaterais)
+    # -----------------------------------------------------------------
+    def _generate_differ_signal(self):
+        """Gera um novo sinal DIFFER se as condições forem satisfeitas."""
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 2:
-            return False, None
+            return None, "Aguardando dados"
         last_two = recent[-2:]
         if last_two[0] == last_two[1]:
             digit = last_two[0]
             last_ten = recent[-10:] if len(recent) >= 10 else recent
             if last_ten.count(digit) >= 2:
-                available = digit not in self._differ_sequence_used
-                return available, digit if available else None
-        return False, None
+                if digit in self._differ_sequence_used:
+                    return None, f"Dígito {digit} já utilizado nesta sequência"
+                self._differ_sequence_used.add(digit)
+                self._differ_signal_at = time.time()
+                signal = self._create_signal('differ', digit, last_two[-2:],
+                                            f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos")
+                logger.info(f"✅ DIFFER SINAL: {signal['id']} dígito {digit}")
+                return signal, None
+        if len(recent) >= 3 and recent[-3] != recent[-2]:
+            self._differ_sequence_used.clear()
+        return None, "Nenhum padrão DIFFER"
 
-    def _peek_parity(self):
-        ok, reason = self.can_trade
-        if not ok:
-            return False, None, reason
-        if not self._is_entry_window_valid(self._parity_signal_at):
-            return False, None, "Janela de entrada expirada"
+    def _generate_parity_signal(self):
+        """Gera um novo sinal PAR/ÍMPAR se as condições forem satisfeitas."""
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 4:
-            return False, None, "Aguardando dados"
+            return None, "Aguardando dados"
         last_four = [d % 2 != 0 for d in recent[-4:]]
         odd_count = sum(last_four)
         even_count = 4 - odd_count
         if odd_count >= 3:
-            can_enter = not self._parity_odd_used or (
-                self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd'
-            )
-            return can_enter, 'even', f"Tendência ÍMPAR ({odd_count}/4)"
-        if even_count >= 3:
-            can_enter = not self._parity_even_used or (
-                self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even'
-            )
-            return can_enter, 'odd', f"Tendência PAR ({even_count}/4)"
-        return False, None, "Nenhuma tendência clara"
+            rec = 'even'
+            reason = f"Tendência ÍMPAR ({odd_count}/4)"
+        elif even_count >= 3:
+            rec = 'odd'
+            reason = f"Tendência PAR ({even_count}/4)"
+        else:
+            return None, "Nenhuma tendência clara"
 
-    def _peek_matches(self):
-        ok, _ = self.can_trade
-        if not ok:
-            return False
+        if rec == 'even':
+            if self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
+                if not self._can_martingale():
+                    return None, "Martingale bloqueado"
+                self._parity_martingale_used = True
+            else:
+                if self._parity_odd_used:
+                    return None, "Streak ÍMPAR já utilizado"
+                self._parity_odd_used = True
+                self._last_parity_streak_type = 'odd'
+                self._parity_martingale_used = False
+        else:
+            if self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even':
+                if not self._can_martingale():
+                    return None, "Martingale bloqueado"
+                self._parity_martingale_used = True
+            else:
+                if self._parity_even_used:
+                    return None, "Streak PAR já utilizado"
+                self._parity_even_used = True
+                self._last_parity_streak_type = 'even'
+                self._parity_martingale_used = False
+
+        signal = self._create_signal('parity', rec, recent[-4:], reason)
+        self._parity_signal_at = time.time()
+        logger.info(f"✅ PAR/ÍMPAR SINAL: {signal['id']} {reason} → {rec}")
+        return signal, None
+
+    def _generate_matches_signal(self):
+        """Gera um novo sinal MATCHES se as condições forem satisfeitas."""
         if self.is_matches_cooldown:
-            return False
+            return None, "Cooldown MATCHES ativo"
         if self._matches_signal_at > 0 and time.time() - self._matches_signal_at > 300:
-            return False
+            return None, "Sinal expirado"
         absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
         if not absence:
-            return False
+            return None, "Contador de ausência indisponível"
         for digit, count in absence().items():
             if count >= 15 and not self._matches_sequence_used:
-                return True
-        return False
+                self._matches_sequence_used = True
+                self._matches_signal_at = time.time()
+                signal = self._create_signal('matches', digit, [],
+                                            f"Dígito {digit} ausente há {count} ticks")
+                logger.info(f"✅ MATCHES SINAL: {signal['id']} dígito {digit}")
+                return signal, None
+        self._matches_sequence_used = False
+        return None, "Nenhum dígito ausente ≥15 ticks"
 
-    def _peek_zscore(self):
-        ok, _ = self.can_trade
-        if not ok:
-            return False, None, None, "Condições básicas não satisfeitas"
+    def _generate_zscore_signal(self):
+        """Gera um novo sinal Z‑Score se as condições forem satisfeitas."""
         if self._zscore_sequence_used:
-            return False, None, None, "Sinal Z‑Score já utilizado"
+            return None, "Sinal Z‑Score já utilizado"
         if time.time() < self._zscore_cooldown_until:
-            remaining = self._zscore_cooldown_until - time.time()
-            return False, None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
-        if self._zscore_signal_at > 0 and time.time() - self._zscore_signal_at > 300:
-            return False, None, None, "Sinal Z‑Score expirado"
+            return None, f"Cooldown Z‑Score ativo"
         z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
         if z_diff is not None and digit_diff is not None:
-            return True, 'DIFFER', digit_diff, f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"
-        if z_match is not None and digit_match is not None:
-            return True, 'MATCHES', digit_match, f"Z‑Score {z_match:.2f} → MATCHES {digit_match}"
-        return False, None, None, "Nenhum desvio estatístico significativo"
+            action = 'DIFFER'
+            digit = digit_diff
+            reason = f"Z‑Score +{z_diff:.2f} → DIFFER {digit}"
+        elif z_match is not None and digit_match is not None:
+            action = 'MATCHES'
+            digit = digit_match
+            reason = f"Z‑Score {z_match:.2f} → MATCHES {digit}"
+        else:
+            return None, "Nenhum desvio estatístico significativo"
+        signal = self._create_signal('zscore', digit, [], reason)
+        self._zscore_signal_at = time.time()
+        self._last_zscore_digit = digit
+        self._last_zscore_action = 'Z_DIFFER' if action == 'DIFFER' else 'Z_MATCH'
+        logger.info(f"✅ Z‑Score SINAL: {signal['id']} {reason}")
+        return signal, None
 
-    # -----------------------------------------------------------------
-    # Módulo 1: DIFFER
-    # -----------------------------------------------------------------
-    def evaluate_differ(self):
-        ok, reason = self.can_trade
-        if not ok:
-            logger.info(f"⛔ DIFFER bloqueado: {reason}")
-            return None, reason
-
-        if not self._is_entry_window_valid(self._differ_signal_at):
-            logger.info("⛔ DIFFER bloqueado: janela de entrada expirada")
-            return None, "Janela de entrada expirada"
-
-        recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 2:
-            return None, "Aguardando dados"
-
-        last_two = recent[-2:]
-        if last_two[0] == last_two[1]:
-            digit = last_two[0]
-            last_ten = recent[-10:] if len(recent) >= 10 else recent
-            count = last_ten.count(digit)
-            if count >= 2:
-                if digit in self._differ_sequence_used:
-                    logger.info(f"⛔ DIFFER bloqueado: dígito {digit} já utilizado")
-                    return None, f"Dígito {digit} já utilizado nesta sequência"
-                self._differ_sequence_used.add(digit)
-                self._last_differ_digit = digit
-                self._differ_signal_at = time.time()
-                logger.info(f"✅ DIFFER SINAL: dígito {digit} — {last_two[0]}{last_two[1]} consecutivos + {count}/10 dominância")
-                return digit, f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos + dominância {count}/10"
-
-        if len(recent) >= 3 and recent[-3] != recent[-2]:
-            self._differ_sequence_used.clear()
-        logger.debug(f"⛔ DIFFER: nenhum padrão — últimos 2: {last_two}")
-        return None, "Nenhum padrão DIFFER"
-
-    # -----------------------------------------------------------------
-    # Módulo 2: PAR/ÍMPAR com martingale condicional
-    # -----------------------------------------------------------------
     def _can_martingale(self):
         raw = getattr(self.client, '_ping_ms', 0)
         ping = 0 if (raw >= 9999 and self.client.streaming
@@ -289,141 +382,97 @@ class StrategyManager:
             return False
         return True
 
+    # -----------------------------------------------------------------
+    # Métodos de avaliação (para as rotas de trade)
+    # -----------------------------------------------------------------
+    def evaluate_differ(self):
+        ok, reason = self.can_trade
+        if not ok:
+            logger.info(f"⛔ DIFFER bloqueado: {reason}")
+            return None, reason
+        if self._trade_locked:
+            logger.info("⛔ DIFFER bloqueado: trade em curso")
+            return None, "Trade em curso — aguarde"
+        if self._active_signals['differ']:
+            if self._is_signal_valid('differ'):
+                signal = self._active_signals['differ']
+                return signal['recommendation'], signal['reason']
+            else:
+                self._active_signals['differ'] = None
+        signal, err = self._generate_differ_signal()
+        if signal:
+            return signal['recommendation'], signal['reason']
+        return None, err or "Sinal não disponível"
+
     def evaluate_parity(self):
         ok, reason = self.can_trade
         if not ok:
             logger.info(f"⛔ PAR/ÍMPAR bloqueado: {reason}")
             return None, reason
+        if self._trade_locked:
+            logger.info("⛔ PAR/ÍMPAR bloqueado: trade em curso")
+            return None, "Trade em curso — aguarde"
+        if self._active_signals['parity']:
+            if self._is_signal_valid('parity'):
+                signal = self._active_signals['parity']
+                return signal['recommendation'], signal['reason']
+            else:
+                self._active_signals['parity'] = None
+        signal, err = self._generate_parity_signal()
+        if signal:
+            return signal['recommendation'], signal['reason']
+        return None, err or "Sinal não disponível"
 
-        if not self._is_entry_window_valid(self._parity_signal_at):
-            logger.info("⛔ PAR/ÍMPAR bloqueado: janela de entrada expirada")
-            return None, "Janela de entrada expirada"
-
-        recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 4:
-            return None, "Aguardando dados"
-
-        last_four = [d % 2 != 0 for d in recent[-4:]]
-        odd_count = sum(last_four)
-        even_count = 4 - odd_count
-        logger.info(f"🔍 PAR/ÍMPAR: últimos 4={recent[-4:]}, ímpares={odd_count}, pares={even_count}")
-
-        if odd_count >= 3:
-            if not self._parity_odd_used:
-                self._parity_odd_used = True
-                self._last_parity_streak_type = 'odd'
-                self._parity_martingale_used = False
-                self._parity_signal_at = time.time()
-                logger.info(f"✅ PAR/ÍMPAR SINAL: {odd_count}/4 ímpares → ENTRAR PAR")
-                return 'even', f"Tendência ÍMPAR ({odd_count}/4) → apostar PAR"
-            if not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
-                if self._can_martingale():
-                    self._parity_martingale_used = True
-                    self._parity_signal_at = time.time()
-                    logger.info("✅ PAR/ÍMPAR MARTINGALE: autorizado")
-                    return 'even', "Martingale: streak ÍMPAR continua → apostar PAR novamente"
-                else:
-                    return None, "Martingale bloqueado por condições de mercado"
-            return None, "Streak ÍMPAR já utilizado"
-
-        if even_count >= 3:
-            if not self._parity_even_used:
-                self._parity_even_used = True
-                self._last_parity_streak_type = 'even'
-                self._parity_martingale_used = False
-                self._parity_signal_at = time.time()
-                logger.info(f"✅ PAR/ÍMPAR SINAL: {even_count}/4 pares → ENTRAR ÍMPAR")
-                return 'odd', f"Tendência PAR ({even_count}/4) → apostar ÍMPAR"
-            if not self._parity_martingale_used and self._last_parity_streak_type == 'even':
-                if self._can_martingale():
-                    self._parity_martingale_used = True
-                    self._parity_signal_at = time.time()
-                    logger.info("✅ PAR/ÍMPAR MARTINGALE: autorizado")
-                    return 'odd', "Martingale: streak PAR continua → apostar ÍMPAR novamente"
-                else:
-                    return None, "Martingale bloqueado por condições de mercado"
-            return None, "Streak PAR já utilizado"
-
-        self._parity_odd_used = False
-        self._parity_even_used = False
-        self._parity_martingale_used = False
-        self._last_parity_streak_type = None
-        logger.debug("⛔ PAR/ÍMPAR: nenhuma tendência clara")
-        return None, "Nenhuma tendência clara"
-
-    # -----------------------------------------------------------------
-    # Módulo 3: MATCHES
-    # -----------------------------------------------------------------
     def evaluate_matches(self):
         ok, reason = self.can_trade
         if not ok:
             logger.info(f"⛔ MATCHES bloqueado: {reason}")
             return None, reason
+        if self._trade_locked:
+            logger.info("⛔ MATCHES bloqueado: trade em curso")
+            return None, "Trade em curso — aguarde"
+        if self._active_signals['matches']:
+            if self._is_signal_valid('matches'):
+                signal = self._active_signals['matches']
+                return signal['recommendation'], signal['reason']
+            else:
+                self._active_signals['matches'] = None
+        signal, err = self._generate_matches_signal()
+        if signal:
+            return signal['recommendation'], signal['reason']
+        return None, err or "Sinal não disponível"
 
-        if self.is_matches_cooldown:
-            remaining = self._matches_cooldown_until - time.time()
-            logger.info(f"⛔ MATCHES bloqueado: cooldown ativo ({remaining:.0f}s restantes)")
-            return None, f"Cooldown MATCHES ativo ({remaining:.0f}s)"
-
-        absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
-        if not absence:
-            return None, "Contador de ausência indisponível"
-
-        # threshold >= 15 dígitos lentos = 150 ticks reais (~2.5 minutos a 1 tick/s)
-        for digit, count in absence().items():
-            if count >= 15 and not self._matches_sequence_used:
-                self._matches_sequence_used = True
-                self._last_matches_digit = digit
-                self._matches_signal_at = time.time()
-                logger.info(f"✅ MATCHES SINAL: dígito {digit} ausente há {count} ticks")
-                return digit, f"Dígito {digit} ausente há {count} ticks"
-        self._matches_sequence_used = False
-        logger.debug("⛔ MATCHES: nenhum dígito ausente ≥15 ticks")
-        return None, "Nenhum dígito ausente ≥15 ticks"
-
-    # -----------------------------------------------------------------
-    # Módulo 4: Z-Score (alta assertividade)
-    # -----------------------------------------------------------------
     def evaluate_zscore(self):
-        """
-        Avalia Z‑Score. ATENÇÃO: este método NÃO marca o sinal como utilizado.
-        A marcação é feita pela rota /api/trade/zscore APÓS a ordem ser executada.
-        """
         ok, reason = self.can_trade
         if not ok:
             logger.info(f"⛔ Z‑Score bloqueado: {reason}")
             return None, None, reason
-
-        if self._zscore_sequence_used:
-            return None, None, "Sinal Z‑Score já utilizado"
-
-        if time.time() < self._zscore_cooldown_until:
-            remaining = self._zscore_cooldown_until - time.time()
-            return None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
-
-        z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
-        if z_diff is not None and digit_diff is not None:
-            self._last_zscore_digit = digit_diff
-            self._last_zscore_action = 'Z_DIFFER'
-            self._zscore_signal_at = time.time()
-            logger.info(f"✅ Z‑Score SINAL: +{z_diff:.2f} → DIFFER {digit_diff}")
-            return 'DIFFER', digit_diff, f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"
-        if z_match is not None and digit_match is not None:
-            self._last_zscore_digit = digit_match
-            self._last_zscore_action = 'Z_MATCH'
-            self._zscore_signal_at = time.time()
-            logger.info(f"✅ Z‑Score SINAL: {z_match:.2f} → MATCHES {digit_match}")
-            return 'MATCHES', digit_match, f"Z‑Score {z_match:.2f} → MATCHES {digit_match}"
-        return None, None, "Nenhum desvio estatístico significativo"
+        if self._trade_locked:
+            logger.info("⛔ Z‑Score bloqueado: trade em curso")
+            return None, None, "Trade em curso — aguarde"
+        if self._active_signals['zscore']:
+            if self._is_signal_valid('zscore'):
+                signal = self._active_signals['zscore']
+                action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
+                digit = signal['recommendation']
+                return action, digit, signal['reason']
+            else:
+                self._active_signals['zscore'] = None
+        signal, err = self._generate_zscore_signal()
+        if signal:
+            action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
+            digit = signal['recommendation']
+            return action, digit, signal['reason']
+        return None, None, err or "Sinal não disponível"
 
     # -----------------------------------------------------------------
-    # Status para o frontend
+    # Status para o frontend (apenas leitura, sem efeitos colaterais)
     # -----------------------------------------------------------------
     def get_status(self):
-        differ_avail, differ_digit = self._peek_differ()
-        parity_avail, parity_dir, parity_reason = self._peek_parity()
-        matches_avail = self._peek_matches()
-        zscore_avail, zscore_action, zscore_digit, zscore_reason = self._peek_zscore()
+        differ_avail, differ_digit, differ_signal = self._peek_differ()
+        parity_avail, parity_dir, parity_signal, parity_reason = self._peek_parity()
+        matches_avail, matches_signal = self._peek_matches()
+        zscore_avail, zscore_action, zscore_digit, zscore_signal = self._peek_zscore()
 
         if self.is_matches_cooldown:
             matches_reason = f"Cooldown {self._matches_cooldown_until - time.time():.0f}s"
@@ -437,15 +486,23 @@ class StrategyManager:
             'cooldown': self.is_cooldown,
             'matches_cooldown': self.is_matches_cooldown,
             'consecutive_losses': self._consecutive_losses,
+            'trade_locked': self._trade_locked,
             'differ_available': differ_avail,
             'differ_digit': differ_digit,
+            'differ_signal': differ_signal,
+            'differ_ticks_left': self._ticks_left('differ'),
             'parity_available': parity_avail,
             'parity_direction': parity_dir,
             'parity_reason': parity_reason,
+            'parity_signal': parity_signal,
+            'parity_ticks_left': self._ticks_left('parity'),
             'matches_available': matches_avail,
             'matches_reason': matches_reason,
+            'matches_signal': matches_signal,
+            'matches_ticks_left': self._ticks_left('matches'),
             'zscore_available': zscore_avail,
             'zscore_action': zscore_action,
             'zscore_digit': zscore_digit,
-            'zscore_reason': zscore_reason,
+            'zscore_signal': zscore_signal,
+            'zscore_ticks_left': self._ticks_left('zscore'),
         }
