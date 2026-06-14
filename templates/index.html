@@ -86,49 +86,12 @@
     .freq-item.most { border: 2px solid var(--purple); }
     .freq-item.least { border: 2px solid var(--accent); }
 
-    /* Botões de ação */
-    .differ-btn {
-      background: var(--accent); color: #000;
-      width: 100%; margin-top: 6px; margin-bottom: 10px;
-      padding: 12px; font-weight: bold;
-      position: relative; z-index: 1;
-      min-height: 48px;
-      touch-action: manipulation;
-    }
-    .matches-btn {
-      background: var(--purple); color: #fff;
-      width: 100%; margin-top: 15px;
-      padding: 12px; font-weight: bold;
-      position: relative; z-index: 1;
-      min-height: 48px;
-      touch-action: manipulation;
-    }
-    .zscore-container {
-      display: none;
-      margin-top: 15px;
-      gap: 6px;
-    }
-    .zscore-container.visible {
-      display: flex;
-      align-items: stretch;
-    }
-    .zscore-btn {
-      background: var(--warning); color: #000;
-      flex: 1;
-      padding: 12px; font-weight: bold;
-      position: relative; z-index: 1;
-      min-height: 48px;
-      touch-action: manipulation;
-    }
-    .ignore-btn {
-      background: var(--card);
-      color: var(--muted);
-      border: 1px solid var(--border);
-      padding: 8px 12px;
-      font-size: 11px;
-      white-space: nowrap;
-      touch-action: manipulation;
-    }
+    .differ-btn { background: var(--accent); color: #000; width: 100%; margin-top: 6px; margin-bottom: 10px; padding: 12px; font-weight: bold; position: relative; z-index: 1; min-height: 48px; touch-action: manipulation; }
+    .matches-btn { background: var(--purple); color: #fff; width: 100%; margin-top: 15px; padding: 12px; font-weight: bold; position: relative; z-index: 1; min-height: 48px; touch-action: manipulation; }
+    .zscore-container { display: none; margin-top: 15px; gap: 6px; }
+    .zscore-container.visible { display: flex; align-items: stretch; }
+    .zscore-btn { background: var(--warning); color: #000; flex: 1; padding: 12px; font-weight: bold; position: relative; z-index: 1; min-height: 48px; touch-action: manipulation; }
+    .ignore-btn { background: var(--card); color: var(--muted); border: 1px solid var(--border); padding: 8px 12px; font-size: 11px; white-space: nowrap; touch-action: manipulation; }
 
     .trade-row { display: flex; gap: 8px; align-items: center; }
     .trade-row input { flex: 1; }
@@ -157,40 +120,17 @@
     .strat-info { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
     .strat-info .dot { width: 6px; height: 6px; }
 
-    /* Aviso de latência alta */
-    .latency-warning {
-      background: var(--warning);
-      color: #000;
-      font-size: 10px;
-      padding: 3px 8px;
-      border-radius: 6px;
-      font-weight: 700;
-      display: none;
-      text-align: center;
-      margin-top: 4px;
-    }
+    .latency-warning { background: var(--warning); color: #000; font-size: 10px; padding: 3px 8px; border-radius: 6px; font-weight: 700; display: none; text-align: center; margin-top: 4px; }
     .latency-warning.visible { display: block; }
 
-    /* Razão de bloqueio nos botões */
-    .block-reason {
-      font-size: 9px;
-      color: var(--warning);
-      text-align: center;
-      margin-top: 2px;
-      min-height: 14px;
-    }
+    .block-reason { font-size: 9px; color: var(--warning); text-align: center; margin-top: 2px; min-height: 14px; }
+    .martingale-active { border: 2px solid var(--warning) !important; box-shadow: 0 0 8px var(--warning); }
 
-    /* Indicador de martingale ativo */
-    .martingale-active {
-      border: 2px solid var(--warning) !important;
-      box-shadow: 0 0 8px var(--warning);
-    }
+    .signal-ticks { font-size: 10px; color: var(--accent); text-align: center; min-height: 14px; }
+    .signal-ticks.expired { color: var(--danger); }
 
     @media (max-width: 400px) {
-      .differ-btn, .matches-btn, .zscore-btn {
-        padding: 10px 8px;
-        font-size: 12px;
-      }
+      .differ-btn, .matches-btn, .zscore-btn { padding: 10px 8px; font-size: 12px; }
       .matches-btn { margin-top: 12px; }
       .zscore-container { margin-top: 12px; }
     }
@@ -222,7 +162,6 @@
 <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
 <div class="toast" id="toast"></div>
 
-<!-- Modal do Guia de Utilização -->
 <div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
   <div class="guide-modal" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeGuide()">✕</button>
@@ -234,7 +173,6 @@
       <button class="tf-btn" onclick="scrollToSection('g4')">Plano $20→$100</button>
       <button class="tf-btn" onclick="scrollToSection('g5')">Emocional</button>
     </div>
-    <!-- conteúdo do guia omitido por brevidade -->
   </div>
 </div>
 
@@ -301,15 +239,19 @@
         <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')" style="padding:10px 14px">ÍMPAR</button>
         <button class="btn-sell" id="btnEven" onclick="tradeDigit('even')" style="padding:10px 14px">PAR</button>
       </div>
+      <div class="signal-ticks" id="parityTicks"></div>
       <div id="martingaleIndicator" style="font-size:10px;color:var(--warning);text-align:center;min-height:14px;margin-top:2px;"></div>
       <div class="block-reason" id="parityReason"></div>
       <button class="differ-btn" id="btnDiffer" onclick="tradeDiffer()">🎯 DIFFER (dígito menos frequente)</button>
+      <div class="signal-ticks" id="differTicks"></div>
       <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (dígito mais frequente) — payout ~9x</button>
+      <div class="signal-ticks" id="matchesTicks"></div>
       <div id="matchesReason" style="font-size:9px; color: var(--muted); text-align:center; margin-top:2px;"></div>
       <div class="zscore-container" id="zscoreContainer">
         <button class="zscore-btn" id="btnZscore" onclick="tradeZscore()">🎯 Z‑SCORE</button>
         <button class="ignore-btn" id="btnIgnoreZscore" onclick="ignoreZscore()">🚫 Ignorar</button>
       </div>
+      <div class="signal-ticks" id="zscoreTicks"></div>
       <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
       <div class="ms">
         Martingale: <span id="mgtActDig">INATIVO</span> | Próx: <span id="mgtNxtDig">$0.35</span>
@@ -328,51 +270,6 @@
       <div id="histList" style="max-height:250px;overflow-y:auto"></div>
     </div>
   </div>
-
-  <div id="affiliate-section" class="hidden">
-    <div class="card"><div class="card-title">🔗 SEU LINK</div><div class="lc"><input type="text" id="refLink" readonly><button class="bmr" onclick="cpLink()">📋</button></div><div id="affiliateEarnings"></div></div>
-  </div>
-  <div id="history-section" class="hidden">
-    <div class="card"><div class="card-title">📊 RESUMO</div><div id="histSummary2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px"></div><div class="card-title">📋 OPERAÇÕES</div><div id="histList2"></div></div>
-  </div>
-  <div id="payment-section" class="hidden">
-    <div class="card"><div class="card-title">💰 DEPÓSITO</div><a href="/go/airtm" target="_blank" class="btn-buy" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#000">💳 Depositar via AirTM</a></div>
-    <div class="card"><div class="card-title">🏦 SAQUE</div><a href="https://app.deriv.com/cashier/withdrawal" target="_blank" class="btn-sell" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#fff">🏧 Sacar via Deriv</a></div>
-  </div>
-  <div id="settings-section" class="hidden">
-    <div class="card"><div class="card-title">🚀 CRIAR CONTA DERIV</div><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" class="btn-buy" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#000">🚀 Criar Conta</a></div>
-    <div class="card"><div class="card-title">🔐 TOKEN DERIV</div><input type="password" id="tokIn" placeholder="Cole o token"><div style="display:flex;gap:6px;margin-top:6px"><button class="bmr" style="flex:1" onclick="saveTokAcct('demo')">💾 DEMO</button><button class="bmr" style="flex:1" onclick="saveTokAcct('real')">💾 REAL</button></div><div class="token-display" id="tokenDisplay" style="display:none"><div class="token-row"><span><span class="token-dot" id="dotDemo"></span> Demo</span><span id="statusDemo" style="color:var(--muted)">---</span></div><div class="token-row"><span><span class="token-dot" id="dotReal"></span> Real</span><span id="statusReal" style="color:var(--muted)">---</span></div><div class="token-row"><span style="color:var(--accent);font-weight:600">Activa:</span><span id="activeAccountDisplay" style="color:var(--accent);font-weight:700">DEMO</span></div></div></div>
-    <div class="card"><div class="card-title">📖 GUIA</div><button class="btn-buy" style="width:100%" onclick="openGuide()">📖 Ver Guia</button></div>
-  </div>
-  <div id="admin-section" class="hidden">
-    <div class="card"><div class="card-title">👑 ADMIN</div><div id="adminUserList"></div><button class="bmr" style="width:100%;margin-top:8px" onclick="loadAdminUsers()">🔄 Actualizar</button></div>
-    <div class="card"><div class="card-title">💸 COMISSÃO (%)</div><input type="number" id="markupInput" value="0.5" step="0.1" min="0" max="3"><button class="btn-buy" style="width:100%;margin-top:6px" onclick="saveMarkup()">GUARDAR</button><div id="markupMsg" style="text-align:center;margin-top:4px;font-size:11px"></div></div>
-  </div>
-</div>
-
-<div id="authModal" class="modal" onclick="if(event.target===this)closeAuthModal()">
-  <div class="mbox" onclick="event.stopPropagation()">
-    <h2 style="color:var(--accent);text-align:center;margin-bottom:12px">FOLOMA VISÃO 360</h2>
-    <div style="display:flex;gap:6px;margin-bottom:12px">
-      <button class="bmr" style="flex:1" onclick="showTab('login')">ENTRAR</button>
-      <button class="bmr" style="flex:1" onclick="showTab('register')">REGISTAR</button>
-      <button class="bmr" style="flex:1" onclick="showTab('forgot')">RECUPERAR</button>
-    </div>
-    <div id="loginForm">
-      <input type="email" id="lEmail" placeholder="Email"><input type="password" id="lPass" placeholder="Senha" style="margin-top:6px">
-      <button class="btn-buy" onclick="doLogin()" style="margin-top:6px">ENTRAR</button>
-    </div>
-    <div id="registerForm" style="display:none">
-      <input type="text" id="rName" placeholder="Nome"><input type="email" id="rEmail" placeholder="Email" style="margin-top:6px">
-      <input type="password" id="rPass" placeholder="Senha (min 6)" style="margin-top:6px"><input type="text" id="rRef" placeholder="Código de indicação" style="margin-top:6px">
-      <button class="btn-buy" onclick="doRegister()" style="margin-top:6px">CRIAR CONTA</button>
-    </div>
-    <div id="forgotForm" style="display:none">
-      <input type="email" id="fEmail" placeholder="Email"><button class="btn-buy" onclick="doReset()" style="margin-top:6px">ENVIAR LINK</button>
-      <div id="fMsg" style="text-align:center;margin-top:6px;font-size:11px"></div>
-    </div>
-    <div id="authErr" style="text-align:center;margin-top:6px;color:var(--danger);font-size:11px"></div>
-  </div>
 </div>
 
 <script>
@@ -390,23 +287,16 @@ let candleChart = null, candleSeries = null;
 let _pollRunning = false;
 let _historyDebounceTimer = null;
 
-// Estado de trade — separado em submissão e pendente
-let _tradeSubmitted = false;   // proposta enviada, aguarda contrato (bloqueia botão)
-let _tradePending = false;     // contrato ativo, aguarda resultado (bloqueia dígito)
+let _tradeSubmitted = false;
+let _tradePending = false;
 let _tradeSubmittedTimer = null;
 let _lastProcessedContractId = null;
-
-// Bloquear atualização do dígito enquanto o resultado é exibido
 let _showTradeResult = false;
+const TRADE_TIMEOUT_MS = 15000;
 
-// Limite de auto-connect
 let _autoConnectAttempts = 0;
 const MAX_AUTO_CONNECT_ATTEMPTS = 3;
-
-// Debounce martingale
 let _mgtLocked = false;
-
-// Latência do último trade (lida diretamente do /api/status)
 let _lastTradeLatency = 0;
 let _lastValidPing = 0;
 
@@ -490,7 +380,6 @@ async function autoConnect(){
                 }
             }, 2000);
         } else if (d.status === 'no_token'){
-            // não tem token, não conta como tentativa
         } else {
             _autoConnectAttempts++;
         }
@@ -526,6 +415,18 @@ async function loadCandles(){
 
 document.addEventListener('click',(e)=>{if(e.target.classList.contains('tf-btn')&&!e.target.closest('.guide-nav')){document.querySelectorAll('.tf-btn').forEach(b=>b.classList.remove('active'));e.target.classList.add('active');currentGranularity=parseInt(e.target.dataset.tf);loadCandles();}});
 
+function updateSignalTicks(strategy, ticksLeft) {
+    const el = document.getElementById(strategy + 'Ticks');
+    if (!el) return;
+    if (ticksLeft > 0) {
+        el.textContent = `Sinal válido por ${ticksLeft} ticks`;
+        el.className = 'signal-ticks';
+    } else {
+        el.textContent = '';
+        el.className = 'signal-ticks';
+    }
+}
+
 async function updateAll(){
   const [statusResp, martingaleResp] = await Promise.allSettled([
     fetch('/api/status').then(r=>r.json()),
@@ -546,7 +447,6 @@ async function updateAll(){
     document.getElementById('cur').textContent=bot.currency||'USD';
     const priceEl=document.getElementById('priceEl');if(priceEl)priceEl.textContent=(bot.price||0).toFixed(4);
 
-    // Restaurar estado de trade pendente após reload
     if (bot.has_pending_trade && !_tradePending && !_tradeSubmitted) {
         _tradePending = true;
         document.getElementById('bigD').textContent = '⏳';
@@ -557,7 +457,6 @@ async function updateAll(){
         _tradePending = false;
     }
 
-    // Atualizar latência do último trade diretamente do status
     if (bot.last_trade_latency_ms) {
         _lastTradeLatency = bot.last_trade_latency_ms;
     }
@@ -577,7 +476,6 @@ async function updateAll(){
       updateStrategyDisplay(data.strategy, tr);
     }
 
-    // Processar resultado do último trade
     if(bot.last_trade_result){
       const ltr = bot.last_trade_result;
       if(ltr.contract_id && ltr.contract_id !== _lastProcessedContractId){
@@ -626,7 +524,6 @@ function updateDigits(digits){
   document.getElementById('cdown').textContent=`⏱ ${tr} tick${tr!==1?'s':''}`;
   const recent=digits.recent||[],counter=digits.digit_counter||0;
 
-  // Se trade pendente, apenas congela o dígito grande, mantém histórico
   if(_tradePending && !_tradeSubmitted){
     document.getElementById('bigD').textContent = '⏳';
     document.getElementById('bigD').className = 'big-d wait';
@@ -634,7 +531,6 @@ function updateDigits(digits){
     return;
   }
 
-  // Se o resultado está a ser exibido, não atualizar o dígito
   if(_showTradeResult){
     return;
   }
@@ -687,6 +583,8 @@ function updateStrategyDisplay(strategy, ticksRemaining){
     html += '<span class="strat-badge blocked">🛑 STOP GLOBAL</span>';
   } else if(strategy.cooldown){
     html += '<span class="strat-badge warning">⏳ COOLDOWN</span>';
+  } else if(strategy.trade_locked){
+    html += '<span class="strat-badge warning">🔒 TRADE LOCK</span>';
   } else {
     html += '<span class="strat-badge ready">✅ ATIVO</span>';
   }
@@ -702,20 +600,20 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   }
   el.innerHTML = html;
 
+  const tradeLocked = strategy.trade_locked || _tradeSubmitted;
   const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 2);
   const blockerMsg = document.getElementById('digitBlockerMsg');
 
-  // Apenas o botão recomendado fica ativo no PAR/ÍMPAR (e só bloqueia durante submissão)
   const btnOdd = document.getElementById('btnOdd');
   const btnEven = document.getElementById('btnEven');
   const parityReasonEl = document.getElementById('parityReason');
   if (strategy.parity_available) {
     if (strategy.parity_direction === 'odd') {
-      btnOdd.disabled = _tradeSubmitted;
+      btnOdd.disabled = tradeLocked;
       btnEven.disabled = true;
     } else if (strategy.parity_direction === 'even') {
       btnOdd.disabled = true;
-      btnEven.disabled = _tradeSubmitted;
+      btnEven.disabled = tradeLocked;
     } else {
       btnOdd.disabled = true;
       btnEven.disabled = true;
@@ -726,17 +624,20 @@ function updateStrategyDisplay(strategy, ticksRemaining){
     btnEven.disabled = true;
     parityReasonEl.textContent = strategy.parity_reason || '';
   }
+  updateSignalTicks('parity', strategy.parity_ticks_left || 0);
 
-  document.getElementById('btnDiffer').disabled = !strategy.differ_available || _tradeSubmitted;
-  document.getElementById('btnMatches').disabled = !strategy.matches_available || _tradeSubmitted;
+  document.getElementById('btnDiffer').disabled = !strategy.differ_available || tradeLocked;
+  updateSignalTicks('differ', strategy.differ_ticks_left || 0);
 
-  // Z‑Score com container
+  document.getElementById('btnMatches').disabled = !strategy.matches_available || tradeLocked;
+  updateSignalTicks('matches', strategy.matches_ticks_left || 0);
+
   const zContainer = document.getElementById('zscoreContainer');
   const btnZscore = document.getElementById('btnZscore');
   if (zContainer && btnZscore) {
     if (strategy.zscore_available) {
       zContainer.classList.add('visible');
-      btnZscore.disabled = _tradeSubmitted;
+      btnZscore.disabled = tradeLocked;
       if (strategy.zscore_action === 'DIFFER') {
         btnZscore.textContent = `🎯 Z‑Score DIFFER no dígito ${strategy.zscore_digit}`;
       } else if (strategy.zscore_action === 'MATCHES') {
@@ -748,11 +649,10 @@ function updateStrategyDisplay(strategy, ticksRemaining){
       zContainer.classList.remove('visible');
     }
   }
+  updateSignalTicks('zscore', strategy.zscore_ticks_left || 0);
 
   if(blockerMsg){
-    blockerMsg.textContent = ticksBlocked
-      ? `⏳ Aguarde ${ticksRemaining} tick(s)...`
-      : '';
+    blockerMsg.textContent = ticksBlocked ? `⏳ Aguarde ${ticksRemaining} tick(s)...` : '';
   }
 
   const matchesReasonEl = document.getElementById('matchesReason');
@@ -835,10 +735,8 @@ async function selAcct(a){selectedAcct=a;document.getElementById('btnDemo').clas
 function tradeDigit(pred){
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
-  
   _tradeSubmitted = true;
   _tradePending = false;
-  
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) {
@@ -846,34 +744,20 @@ function tradeDigit(pred){
       toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
     }
   }, 3000);
-  
   fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
   .then(r=>r.json()).then(d=>{
     _tradeSubmitted = false;
     clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ 
-      toast('❌ '+d.error,'loss'); 
-      _tradePending = false; 
-    } else { 
-      _tradePending = true;
-      toast('⏳ Aposta enviada!','info'); 
-      scheduleHistoryLoad(5000); 
-    }
-  }).catch(()=>{ 
-    _tradeSubmitted = false; 
-    _tradePending = false; 
-    clearTimeout(_tradeSubmittedTimer);
-    toast('❌ Erro de rede','loss'); 
-  });
+    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
+    else{ _tradePending = true; toast('⏳ Aposta enviada!','info'); scheduleHistoryLoad(5000); }
+  }).catch(()=>{ _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); toast('❌ Erro de rede','loss'); });
 }
 
 async function tradeDiffer(){
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
-  
   _tradeSubmitted = true;
   _tradePending = false;
-  
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) {
@@ -881,7 +765,6 @@ async function tradeDiffer(){
       toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
     }
   }, 3000);
-  
   try{
     const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
@@ -895,10 +778,8 @@ async function tradeDiffer(){
 async function tradeMatches(){
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
-  
   _tradeSubmitted = true;
   _tradePending = false;
-  
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) {
@@ -906,7 +787,6 @@ async function tradeMatches(){
       toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
     }
   }, 3000);
-  
   try{
     const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
@@ -920,10 +800,8 @@ async function tradeMatches(){
 async function tradeZscore(){
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   const amt=parseFloat(document.getElementById('amtDigit').value)||0.35;
-  
   _tradeSubmitted = true;
   _tradePending = false;
-  
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) {
@@ -931,7 +809,6 @@ async function tradeZscore(){
       toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
     }
   }, 3000);
-  
   try{
     const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
@@ -1011,7 +888,6 @@ function updatePingDisplay(){
     }).then(d=>{
         if(!d || d.ping_ms === undefined) return;
         let ping = d.ping_ms;
-        // Se o ping atual é o valor sentinela, usar o último ping válido
         if (ping >= 9999 && _lastValidPing > 0) {
             ping = _lastValidPing;
         }
@@ -1020,7 +896,6 @@ function updatePingDisplay(){
         if(el && isConnected){
             el.innerHTML = `✅ Ping: <span style="color:${cor}">${ping}ms</span> | Reconexões: ${d.reconnect_count}`;
         }
-        // Mostrar/esconder aviso de latência alta
         const latencyWarning = document.getElementById('latencyWarning');
         if (latencyWarning) {
             if (ping > 200 && ping < 9999) {
@@ -1033,7 +908,6 @@ function updatePingDisplay(){
     }).catch(()=>{});
 }
 
-// Inicialização
 setInterval(()=>{if(isConnected)loadCandles();},10000);
 setInterval(updateScoreboard,30000);updateScoreboard();
 setInterval(updatePingDisplay, 10000);
