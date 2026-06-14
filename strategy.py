@@ -10,7 +10,7 @@ class StrategyManager:
     """
     Implementa os módulos da Foloma Visão 360 com:
     - Snapshots de sinal (ID, dígitos, recomendação, tick de origem).
-    - Expiração por número de ticks (15 ticks).
+    - Expiração por número de ticks (30 ticks).
     - Bloqueio de reanálise enquanto sinal ativo.
     - Trade Lock (verificado nas rotas, não em can_trade).
     - _peek_* apenas lêem; _generate_*_signal fazem a criação.
@@ -21,7 +21,7 @@ class StrategyManager:
     def __init__(self, client, analyzer):
         self.client = client
         self.analyzer = analyzer
-        self._lock = threading.RLock()          # Protecção multi-thread
+        self._lock = threading.RLock()
 
         self._last_differ_digit = None
         self._last_parity_action = None
@@ -55,14 +55,17 @@ class StrategyManager:
             'zscore': None
         }
 
-        # Expiração por ticks
-        self.SIGNAL_EXPIRY_TICKS = 15
+        # Expiração por ticks (aumentado para dar mais tempo ao utilizador)
+        self.SIGNAL_EXPIRY_TICKS = 30
 
         # Trade Lock com timeout
         self._trade_locked = False
         self._trade_locked_at = 0
         self.TRADE_LOCK_TIMEOUT = 60   # segundos
 
+    # -----------------------------------------------------------------
+    # Propriedades e verificações básicas
+    # -----------------------------------------------------------------
     @property
     def is_global_stop(self):
         return time.time() < self._global_stop_until
@@ -77,7 +80,6 @@ class StrategyManager:
 
     @property
     def can_trade(self):
-        """Verifica condições básicas de mercado. Não inclui _trade_locked."""
         if self.is_global_stop:
             return False, "STOP GLOBAL ATIVO"
         if self.is_cooldown:
@@ -120,7 +122,7 @@ class StrategyManager:
         return True, "OK"
 
     # -----------------------------------------------------------------
-    # Métodos de atualização automática (chamados a cada tick)
+    # Atualização automática (chamada a cada tick)
     # -----------------------------------------------------------------
     def on_tick(self, tick):
         price = tick.get('price', 0)
@@ -129,36 +131,31 @@ class StrategyManager:
                 self._price_history.append(price)
                 if len(self._price_history) > 20:
                     self._price_history.pop(0)
-        self.refresh_signals()   # <<< GERA SINAIS AUTOMATICAMENTE
+        self.refresh_signals()
 
     def refresh_signals(self):
-        """Atualiza a cache de sinais sem consumir recursos."""
         with self._lock:
-            # Destravar trade lock se tiver expirado
             self._check_trade_lock_timeout()
             if self._trade_locked:
-                return  # não gerar novos sinais enquanto trade em curso
+                return
 
             for strategy in ('differ', 'parity', 'matches', 'zscore'):
-                # Se já existe sinal válido, mantém
                 if self._active_signals.get(strategy) and self._is_signal_valid(strategy):
                     continue
-                # Tenta gerar novo
                 generator = getattr(self, f'_generate_{strategy}_signal', None)
                 if generator:
                     signal, _ = generator()
                     if signal:
                         self._active_signals[strategy] = signal
-                    # se falhar, deixa cache limpo
 
     # -----------------------------------------------------------------
-    # Controle de trade lock
+    # Trade lock
     # -----------------------------------------------------------------
     def lock_trade(self):
         with self._lock:
             self._trade_locked = True
             self._trade_locked_at = time.time()
-            logger.info("🔒 Trade Lock ATIVO — análise congelada")
+            logger.info("🔒 Trade Lock ATIVO")
 
     def unlock_trade(self):
         with self._lock:
@@ -172,7 +169,7 @@ class StrategyManager:
             self.unlock_trade()
 
     # -----------------------------------------------------------------
-    # Gerenciamento de cooldowns e estados
+    # Cooldowns e reset
     # -----------------------------------------------------------------
     def _apply_cooldown(self, ticks):
         self._cooldown_until = time.time() + ticks
@@ -198,7 +195,7 @@ class StrategyManager:
     # Criação e validação de sinais
     # -----------------------------------------------------------------
     def _create_signal(self, strategy, recommendation, digits, reason=''):
-        current_tick = self.analyzer._tick_count   # NOTA: ideal seria ter um método público, mas mantido assim
+        current_tick = self.analyzer._tick_count
         signal = {
             'id': uuid.uuid4().hex[:8],
             'strategy': strategy,
@@ -228,7 +225,7 @@ class StrategyManager:
         return max(0, signal['expires_at_tick'] - self.analyzer._tick_count)
 
     # -----------------------------------------------------------------
-    # Callback de resultado de trade
+    # Resultado de trade
     # -----------------------------------------------------------------
     def notify_result(self, action, is_win):
         with self._lock:
@@ -263,50 +260,46 @@ class StrategyManager:
                     self._apply_cooldown(2)
 
     # -----------------------------------------------------------------
-    # Métodos de leitura pura (sem efeitos colaterais)
+    # Leitura pura (peek)
     # -----------------------------------------------------------------
     def _peek_differ(self):
         with self._lock:
-            if self._active_signals['differ']:
-                if self._is_signal_valid('differ'):
-                    s = self._active_signals['differ']
-                    return True, s['recommendation'], s
-                else:
-                    self._active_signals['differ'] = None
+            if self._active_signals['differ'] and self._is_signal_valid('differ'):
+                s = self._active_signals['differ']
+                return True, s['recommendation'], s
+            else:
+                self._active_signals['differ'] = None
             return False, None, None
 
     def _peek_parity(self):
         with self._lock:
-            if self._active_signals['parity']:
-                if self._is_signal_valid('parity'):
-                    s = self._active_signals['parity']
-                    return True, s['recommendation'], s, s['reason']
-                else:
-                    self._active_signals['parity'] = None
+            if self._active_signals['parity'] and self._is_signal_valid('parity'):
+                s = self._active_signals['parity']
+                return True, s['recommendation'], s, s['reason']
+            else:
+                self._active_signals['parity'] = None
             return False, None, None, ""
 
     def _peek_matches(self):
         with self._lock:
-            if self._active_signals['matches']:
-                if self._is_signal_valid('matches'):
-                    return True, self._active_signals['matches']
-                else:
-                    self._active_signals['matches'] = None
+            if self._active_signals['matches'] and self._is_signal_valid('matches'):
+                return True, self._active_signals['matches']
+            else:
+                self._active_signals['matches'] = None
             return False, None
 
     def _peek_zscore(self):
         with self._lock:
-            if self._active_signals['zscore']:
-                if self._is_signal_valid('zscore'):
-                    s = self._active_signals['zscore']
-                    action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
-                    return True, action, s['recommendation'], s
-                else:
-                    self._active_signals['zscore'] = None
+            if self._active_signals['zscore'] and self._is_signal_valid('zscore'):
+                s = self._active_signals['zscore']
+                action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
+                return True, action, s['recommendation'], s
+            else:
+                self._active_signals['zscore'] = None
             return False, None, None, None
 
     # -----------------------------------------------------------------
-    # Métodos de geração de sinal (com efeitos colaterais)
+    # Geração de sinais (com efeitos colaterais)
     # -----------------------------------------------------------------
     def _generate_differ_signal(self):
         with self._lock:
@@ -437,92 +430,118 @@ class StrategyManager:
         return True
 
     # -----------------------------------------------------------------
-    # Métodos de avaliação (para as rotas de trade)
+    # Métodos de avaliação (chamados pelas rotas)
     # -----------------------------------------------------------------
     def evaluate_differ(self):
         with self._lock:
             self._check_trade_lock_timeout()
             ok, reason = self.can_trade
+            logger.info(f"📈 evaluate_differ: can_trade={ok}, reason={reason}")
             if not ok:
                 return None, reason
             if self._trade_locked:
+                logger.info("📈 evaluate_differ: trade_locked=True")
                 return None, "Trade em curso"
-            # Usar sinal em cache
+
+            # Verificar cache
             if self._active_signals['differ'] and self._is_signal_valid('differ'):
-                signal = self._active_signals['differ']
-                return signal['recommendation'], signal['reason']
+                s = self._active_signals['differ']
+                logger.info(f"📈 evaluate_differ: usando sinal cache {s['id']} -> {s['recommendation']}")
+                return s['recommendation'], s['reason']
             else:
                 self._active_signals['differ'] = None
-            # Se não havia, tenta gerar na hora (fallback)
+
+            # Tentar gerar novo
             signal, err = self._generate_differ_signal()
             if signal:
                 self._active_signals['differ'] = signal
+                logger.info(f"📈 evaluate_differ: novo sinal gerado {signal['id']} -> {signal['recommendation']}")
                 return signal['recommendation'], signal['reason']
+            logger.info(f"📈 evaluate_differ: falhou -> {err}")
             return None, err or "Sinal não disponível"
 
     def evaluate_parity(self):
         with self._lock:
             self._check_trade_lock_timeout()
             ok, reason = self.can_trade
+            logger.info(f"📈 evaluate_parity: can_trade={ok}, reason={reason}")
             if not ok:
                 return None, reason
             if self._trade_locked:
+                logger.info("📈 evaluate_parity: trade_locked=True")
                 return None, "Trade em curso"
+
             if self._active_signals['parity'] and self._is_signal_valid('parity'):
-                signal = self._active_signals['parity']
-                return signal['recommendation'], signal['reason']
+                s = self._active_signals['parity']
+                logger.info(f"📈 evaluate_parity: usando sinal cache {s['id']} -> {s['recommendation']}")
+                return s['recommendation'], s['reason']
             else:
                 self._active_signals['parity'] = None
+
             signal, err = self._generate_parity_signal()
             if signal:
                 self._active_signals['parity'] = signal
+                logger.info(f"📈 evaluate_parity: novo sinal gerado {signal['id']} -> {signal['recommendation']}")
                 return signal['recommendation'], signal['reason']
+            logger.info(f"📈 evaluate_parity: falhou -> {err}")
             return None, err or "Sinal não disponível"
 
     def evaluate_matches(self):
         with self._lock:
             self._check_trade_lock_timeout()
             ok, reason = self.can_trade
+            logger.info(f"📈 evaluate_matches: can_trade={ok}, reason={reason}")
             if not ok:
                 return None, reason
             if self._trade_locked:
+                logger.info("📈 evaluate_matches: trade_locked=True")
                 return None, "Trade em curso"
+
             if self._active_signals['matches'] and self._is_signal_valid('matches'):
-                signal = self._active_signals['matches']
-                return signal['recommendation'], signal['reason']
+                s = self._active_signals['matches']
+                logger.info(f"📈 evaluate_matches: usando sinal cache {s['id']} -> {s['recommendation']}")
+                return s['recommendation'], s['reason']
             else:
                 self._active_signals['matches'] = None
+
             signal, err = self._generate_matches_signal()
             if signal:
                 self._active_signals['matches'] = signal
+                logger.info(f"📈 evaluate_matches: novo sinal gerado {signal['id']} -> {signal['recommendation']}")
                 return signal['recommendation'], signal['reason']
+            logger.info(f"📈 evaluate_matches: falhou -> {err}")
             return None, err or "Sinal não disponível"
 
     def evaluate_zscore(self):
         with self._lock:
             self._check_trade_lock_timeout()
             ok, reason = self.can_trade
+            logger.info(f"📈 evaluate_zscore: can_trade={ok}, reason={reason}")
             if not ok:
                 return None, None, reason
             if self._trade_locked:
+                logger.info("📈 evaluate_zscore: trade_locked=True")
                 return None, None, "Trade em curso"
+
             if self._active_signals['zscore'] and self._is_signal_valid('zscore'):
-                signal = self._active_signals['zscore']
+                s = self._active_signals['zscore']
                 action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
-                digit = signal['recommendation']
-                return action, digit, signal['reason']
+                logger.info(f"📈 evaluate_zscore: usando sinal cache {s['id']} -> {action} {s['recommendation']}")
+                return action, s['recommendation'], s['reason']
             else:
                 self._active_signals['zscore'] = None
+
             signal, err = self._generate_zscore_signal()
             if signal:
                 action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
-                digit = signal['recommendation']
                 self._active_signals['zscore'] = signal
-                return action, digit, signal['reason']
+                logger.info(f"📈 evaluate_zscore: novo sinal gerado {signal['id']} -> {action} {signal['recommendation']}")
+                return action, signal['recommendation'], signal['reason']
+            logger.info(f"📈 evaluate_zscore: falhou -> {err}")
             return None, None, err or "Sinal não disponível"
 
     # -----------------------------------------------------------------
-    # Status para o frontend (apenas leitura, sem efeitos colaterais)
+    # Status para o frontend
     # -----------------------------------------------------------------
     def get_status(self):
         with self._lock:
