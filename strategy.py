@@ -134,8 +134,12 @@ class StrategyManager:
             if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
                 self._apply_cooldown(5)
             elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
+                # Se o martingale está ativo e a perda foi em PAR/ÍMPAR, reiniciar a janela
                 if not self._parity_martingale_used and self._last_parity_streak_type:
                     self._apply_cooldown(1)
+                    # Reiniciar a janela de entrada para permitir o martingale
+                    self._parity_signal_at = time.time()
+                    logger.info("🔄 Janela de entrada reiniciada para martingale")
                 else:
                     self._apply_cooldown(5)
             elif action.startswith('MATCH') or action.startswith('Z_MATCH'):
