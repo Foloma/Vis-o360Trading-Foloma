@@ -1,6 +1,7 @@
 import logging
 import time
 import uuid
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -11,11 +12,14 @@ class StrategyManager:
     - Sinais com ID, timestamp e validade de 15 ticks.
     - Análise congelada enquanto houver sinal ativo.
     - Entrada validada contra o snapshot.
+    - Controle de trade lock (usado pelo app.py).
     """
 
     def __init__(self, client, analyzer):
         self.client = client
         self.analyzer = analyzer
+        self._lock = threading.RLock()
+
         self._last_differ_digit = None
         self._last_parity_action = None
         self._last_matches_digit = None
@@ -35,7 +39,7 @@ class StrategyManager:
         self._zscore_cooldown_until = 0
         self._price_history = []
 
-        # Snapshots dos sinais ativos (apenas leitura até à entrada)
+        # Snapshots dos sinais ativos
         self._active_signals = {
             'differ': None,
             'parity': None,
@@ -43,9 +47,17 @@ class StrategyManager:
             'zscore': None
         }
 
-        # Validade do sinal em ticks (1 tick ≈ 1 segundo em R_100)
+        # Validade do sinal em ticks
         self.SIGNAL_VALIDITY_TICKS = 15
 
+        # Trade Lock (exigido pelo app.py)
+        self._trade_locked = False
+        self._trade_locked_at = 0
+        self.TRADE_LOCK_TIMEOUT = 60   # segundos
+
+    # -----------------------------------------------------------------
+    # Propriedades e verificações básicas
+    # -----------------------------------------------------------------
     @property
     def is_global_stop(self):
         return time.time() < self._global_stop_until
@@ -102,31 +114,29 @@ class StrategyManager:
         return True, "OK"
 
     # -----------------------------------------------------------------
-    # Atualização a cada tick – apenas limpa sinais expirados
+    # Atualização a cada tick
     # -----------------------------------------------------------------
     def on_tick(self, tick):
         price = tick.get('price', 0)
         if price:
-            self._price_history.append(price)
-            if len(self._price_history) > 20:
-                self._price_history.pop(0)
-        self.refresh_signals()   # NUNCA gera sinais novos, só remove expirados
+            with self._lock:
+                self._price_history.append(price)
+                if len(self._price_history) > 20:
+                    self._price_history.pop(0)
+        self.refresh_signals()
 
     def refresh_signals(self):
-        """
-        Remove sinais expirados. NÃO chama geradores.
-        Esta é a correção crítica: antes gerava sinais automaticamente,
-        consumindo estados de sequência antes do clique.
-        """
-        for strategy in ('differ', 'parity', 'matches', 'zscore'):
-            signal = self._active_signals.get(strategy)
-            if signal and not self._is_signal_still_valid(signal):
-                self._active_signals[strategy] = None
-                logger.info(f"⏰ Sinal {strategy} expirado (ID {signal['id']})")
+        """Remove sinais expirados. NÃO gera novos automaticamente."""
+        with self._lock:
+            self._check_trade_lock_timeout()
+            for strategy in ('differ', 'parity', 'matches', 'zscore'):
+                signal = self._active_signals.get(strategy)
+                if signal and not self._is_signal_still_valid(signal):
+                    self._active_signals[strategy] = None
+                    logger.info(f"⏰ Sinal {strategy} expirado (ID {signal['id']})")
 
     def _is_signal_still_valid(self, signal):
-        """Verifica se o sinal ainda está dentro do número de ticks de validade."""
-        current_tick = self.analyzer._tick_count   # ideal: usar método público
+        current_tick = self.analyzer._tick_count
         created_tick = signal.get('tick_origin', 0)
         return (current_tick - created_tick) < self.SIGNAL_VALIDITY_TICKS
 
@@ -139,7 +149,27 @@ class StrategyManager:
         return max(0, self.SIGNAL_VALIDITY_TICKS - elapsed)
 
     # -----------------------------------------------------------------
-    # Criação de snapshot de sinal (chamado apenas pelos evaluate_*)
+    # Trade Lock
+    # -----------------------------------------------------------------
+    def lock_trade(self):
+        with self._lock:
+            self._trade_locked = True
+            self._trade_locked_at = time.time()
+            logger.info("🔒 Trade Lock ATIVO")
+
+    def unlock_trade(self):
+        with self._lock:
+            self._trade_locked = False
+            self._trade_locked_at = 0
+            logger.info("🔓 Trade Lock DESATIVADO")
+
+    def _check_trade_lock_timeout(self):
+        if self._trade_locked and time.time() - self._trade_locked_at > self.TRADE_LOCK_TIMEOUT:
+            logger.warning("⏰ Timeout do trade lock – a destravar forçadamente")
+            self.unlock_trade()
+
+    # -----------------------------------------------------------------
+    # Criação de snapshot de sinal
     # -----------------------------------------------------------------
     def _create_signal(self, strategy, recommendation, digits, reason=''):
         current_tick = self.analyzer._tick_count
@@ -156,18 +186,15 @@ class StrategyManager:
         return signal
 
     # -----------------------------------------------------------------
-    # Métodos de leitura pura para o frontend (_peek_*)
-    # NUNCA alteram estado, apenas reportam disponibilidade
+    # Métodos de leitura pura para o frontend
     # -----------------------------------------------------------------
     def _peek_differ(self):
         ok, _ = self.can_trade
         if not ok:
             return False, None
-        # Se existe sinal ativo válido, mostra-o
         signal = self._active_signals['differ']
         if signal and self._is_signal_still_valid(signal):
             return True, signal['recommendation']
-        # Caso contrário, faz pré-visualização sem modificar nada
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 2:
             return False, None
@@ -236,21 +263,23 @@ class StrategyManager:
         return False, None, None, "Nenhum desvio estatístico significativo"
 
     # -----------------------------------------------------------------
-    # Métodos de entrada (evaluate_*) – consomem o sinal se ainda válido
+    # Métodos de entrada (evaluate_*)
     # -----------------------------------------------------------------
     def evaluate_differ(self):
-        ok, reason = self.can_trade
-        if not ok:
-            return None, reason
-        signal = self._active_signals['differ']
-        if signal and self._is_signal_still_valid(signal):
-            # Consumir o sinal (marcar estado de sequência)
-            self._differ_sequence_used.add(signal['recommendation'])
-            self._last_differ_digit = signal['recommendation']
-            logger.info(f"✅ DIFFER executado: snapshot {signal['id']}")
-            return signal['recommendation'], signal['reason']
-        # Gera novo sinal se não existir
-        return self._generate_differ_signal()
+        with self._lock:
+            self._check_trade_lock_timeout()
+            ok, reason = self.can_trade
+            if not ok:
+                return None, reason
+            if self._trade_locked:
+                return None, "Trade em curso"
+            signal = self._active_signals['differ']
+            if signal and self._is_signal_still_valid(signal):
+                self._differ_sequence_used.add(signal['recommendation'])
+                self._last_differ_digit = signal['recommendation']
+                logger.info(f"✅ DIFFER executado: snapshot {signal['id']}")
+                return signal['recommendation'], signal['reason']
+            return self._generate_differ_signal()
 
     def _generate_differ_signal(self):
         recent = self.analyzer.get_recent_digits(20)
@@ -274,22 +303,26 @@ class StrategyManager:
         return None, "Nenhum padrão DIFFER"
 
     def evaluate_parity(self):
-        ok, reason = self.can_trade
-        if not ok:
-            return None, reason
-        signal = self._active_signals['parity']
-        if signal and self._is_signal_still_valid(signal):
-            rec = signal['recommendation']
-            if rec == 'even':
-                self._parity_odd_used = True
-                self._last_parity_streak_type = 'odd'
-            else:
-                self._parity_even_used = True
-                self._last_parity_streak_type = 'even'
-            self._parity_martingale_used = False
-            logger.info(f"✅ PAR/ÍMPAR executado: snapshot {signal['id']}")
-            return rec, signal['reason']
-        return self._generate_parity_signal()
+        with self._lock:
+            self._check_trade_lock_timeout()
+            ok, reason = self.can_trade
+            if not ok:
+                return None, reason
+            if self._trade_locked:
+                return None, "Trade em curso"
+            signal = self._active_signals['parity']
+            if signal and self._is_signal_still_valid(signal):
+                rec = signal['recommendation']
+                if rec == 'even':
+                    self._parity_odd_used = True
+                    self._last_parity_streak_type = 'odd'
+                else:
+                    self._parity_even_used = True
+                    self._last_parity_streak_type = 'even'
+                self._parity_martingale_used = False
+                logger.info(f"✅ PAR/ÍMPAR executado: snapshot {signal['id']}")
+                return rec, signal['reason']
+            return self._generate_parity_signal()
 
     def _generate_parity_signal(self):
         recent = self.analyzer.get_recent_digits(20)
@@ -339,18 +372,22 @@ class StrategyManager:
         return stable and (time.time() - getattr(self.client, '_last_reconnect_time', 0) >= 10)
 
     def evaluate_matches(self):
-        ok, reason = self.can_trade
-        if not ok:
-            return None, reason
-        if self.is_matches_cooldown:
-            return None, "Cooldown MATCHES ativo"
-        signal = self._active_signals['matches']
-        if signal and self._is_signal_still_valid(signal):
-            self._matches_sequence_used = True
-            self._last_matches_digit = signal['recommendation']
-            logger.info(f"✅ MATCHES executado: snapshot {signal['id']}")
-            return signal['recommendation'], signal['reason']
-        return self._generate_matches_signal()
+        with self._lock:
+            self._check_trade_lock_timeout()
+            ok, reason = self.can_trade
+            if not ok:
+                return None, reason
+            if self._trade_locked:
+                return None, "Trade em curso"
+            if self.is_matches_cooldown:
+                return None, "Cooldown MATCHES ativo"
+            signal = self._active_signals['matches']
+            if signal and self._is_signal_still_valid(signal):
+                self._matches_sequence_used = True
+                self._last_matches_digit = signal['recommendation']
+                logger.info(f"✅ MATCHES executado: snapshot {signal['id']}")
+                return signal['recommendation'], signal['reason']
+            return self._generate_matches_signal()
 
     def _generate_matches_signal(self):
         absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
@@ -368,25 +405,28 @@ class StrategyManager:
         return None, "Nenhum dígito ausente ≥15 ticks"
 
     def evaluate_zscore(self):
-        ok, reason = self.can_trade
-        if not ok:
-            return None, None, reason
-        if self._zscore_sequence_used:
-            return None, None, "Sinal Z‑Score já utilizado"
-        if time.time() < self._zscore_cooldown_until:
-            remaining = self._zscore_cooldown_until - time.time()
-            return None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
-        signal = self._active_signals['zscore']
-        if signal and self._is_signal_still_valid(signal):
-            self._zscore_sequence_used = True
-            self._zscore_cooldown_until = time.time() + 300
-            # Correção: usar _last_zscore_action para retornar a ação correta
-            action = self._last_zscore_action
-            if not action:  # fallback seguro
-                action = 'DIFFER' if signal['reason'].startswith('Z‑Score +') else 'MATCHES'
-            logger.info(f"✅ Z‑Score executado: snapshot {signal['id']}, ação={action}")
-            return action, signal['recommendation'], signal['reason']
-        return self._generate_zscore_signal()
+        with self._lock:
+            self._check_trade_lock_timeout()
+            ok, reason = self.can_trade
+            if not ok:
+                return None, None, reason
+            if self._trade_locked:
+                return None, None, "Trade em curso"
+            if self._zscore_sequence_used:
+                return None, None, "Sinal Z‑Score já utilizado"
+            if time.time() < self._zscore_cooldown_until:
+                remaining = self._zscore_cooldown_until - time.time()
+                return None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
+            signal = self._active_signals['zscore']
+            if signal and self._is_signal_still_valid(signal):
+                self._zscore_sequence_used = True
+                self._zscore_cooldown_until = time.time() + 300
+                action = self._last_zscore_action
+                if not action:
+                    action = 'DIFFER' if signal['reason'].startswith('Z‑Score +') else 'MATCHES'
+                logger.info(f"✅ Z‑Score executado: snapshot {signal['id']}, ação={action}")
+                return action, signal['recommendation'], signal['reason']
+            return self._generate_zscore_signal()
 
     def _generate_zscore_signal(self):
         z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
@@ -410,78 +450,84 @@ class StrategyManager:
         self._cooldown_until = time.time() + ticks
 
     def reset_sequence_state(self):
-        self._differ_sequence_used.clear()
-        self._parity_odd_used = False
-        self._parity_even_used = False
-        self._parity_martingale_used = False
-        self._last_parity_streak_type = None
-        self._matches_sequence_used = False
-        self._zscore_sequence_used = False
-        for key in self._active_signals:
-            self._active_signals[key] = None
+        with self._lock:
+            self._differ_sequence_used.clear()
+            self._parity_odd_used = False
+            self._parity_even_used = False
+            self._parity_martingale_used = False
+            self._last_parity_streak_type = None
+            self._matches_sequence_used = False
+            self._zscore_sequence_used = False
+            for key in self._active_signals:
+                self._active_signals[key] = None
+            self._trade_locked = False
 
     def notify_result(self, action, is_win):
-        logger.info(f"📊 notify_result: action='{action}', is_win={is_win}")
-        if not is_win:
-            self._consecutive_losses += 1
-            if self._consecutive_losses >= 2:
-                self._global_stop_until = time.time() + 180
-                logger.warning("🛑 STOP GLOBAL: 2 perdas consecutivas — pausa 3 min")
+        with self._lock:
+            logger.info(f"📊 notify_result: action='{action}', is_win={is_win}")
+            self.unlock_trade()
+            if not is_win:
+                self._consecutive_losses += 1
+                if self._consecutive_losses >= 2:
+                    self._global_stop_until = time.time() + 180
+                    logger.warning("🛑 STOP GLOBAL: 2 perdas consecutivas — pausa 3 min")
+                    self._consecutive_losses = 0
+                    self.reset_sequence_state()
+                    return
+                if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
+                    self._apply_cooldown(5)
+                elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
+                    if not self._parity_martingale_used and self._last_parity_streak_type:
+                        self._apply_cooldown(1)
+                    else:
+                        self._apply_cooldown(5)
+                elif action.startswith('MATCH') or action.startswith('Z_MATCH'):
+                    self._matches_cooldown_until = time.time() + 150
+                    self._apply_cooldown(10)
+            else:
                 self._consecutive_losses = 0
                 self.reset_sequence_state()
-                return
-            if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
-                self._apply_cooldown(5)
-            elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
-                if not self._parity_martingale_used and self._last_parity_streak_type:
+                if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
                     self._apply_cooldown(1)
-                else:
-                    self._apply_cooldown(5)
-            elif action.startswith('MATCH') or action.startswith('Z_MATCH'):
-                self._matches_cooldown_until = time.time() + 150
-                self._apply_cooldown(10)
-        else:
-            self._consecutive_losses = 0
-            self.reset_sequence_state()
-            if action.startswith('DIFFER') or action.startswith('Z_DIFFER'):
-                self._apply_cooldown(1)
-            elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
-                self._apply_cooldown(2)
+                elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
+                    self._apply_cooldown(2)
 
     # -----------------------------------------------------------------
-    # Status para o frontend (inclui ticks restantes)
+    # Status para o frontend
     # -----------------------------------------------------------------
     def get_status(self):
-        differ_avail, differ_digit = self._peek_differ()
-        parity_avail, parity_dir, parity_reason = self._peek_parity()
-        matches_avail = self._peek_matches()
-        zscore_avail, zscore_action, zscore_digit, zscore_reason = self._peek_zscore()
+        with self._lock:
+            differ_avail, differ_digit = self._peek_differ()
+            parity_avail, parity_dir, parity_reason = self._peek_parity()
+            matches_avail = self._peek_matches()
+            zscore_avail, zscore_action, zscore_digit, zscore_reason = self._peek_zscore()
 
-        if self.is_matches_cooldown:
-            matches_reason = f"Cooldown {self._matches_cooldown_until - time.time():.0f}s"
-        elif not matches_avail:
-            matches_reason = "Nenhum dígito ausente ≥15 ticks"
-        else:
-            matches_reason = "Disponível"
+            if self.is_matches_cooldown:
+                matches_reason = f"Cooldown {self._matches_cooldown_until - time.time():.0f}s"
+            elif not matches_avail:
+                matches_reason = "Nenhum dígito ausente ≥15 ticks"
+            else:
+                matches_reason = "Disponível"
 
-        return {
-            'global_stop': self.is_global_stop,
-            'cooldown': self.is_cooldown,
-            'matches_cooldown': self.is_matches_cooldown,
-            'consecutive_losses': self._consecutive_losses,
-            'differ_available': differ_avail,
-            'differ_digit': differ_digit,
-            'differ_ticks_left': self._ticks_left(self._active_signals.get('differ')),
-            'parity_available': parity_avail,
-            'parity_direction': parity_dir,
-            'parity_reason': parity_reason,
-            'parity_ticks_left': self._ticks_left(self._active_signals.get('parity')),
-            'matches_available': matches_avail,
-            'matches_reason': matches_reason,
-            'matches_ticks_left': self._ticks_left(self._active_signals.get('matches')),
-            'zscore_available': zscore_avail,
-            'zscore_action': zscore_action,
-            'zscore_digit': zscore_digit,
-            'zscore_reason': zscore_reason,
-            'zscore_ticks_left': self._ticks_left(self._active_signals.get('zscore')),
-        }
+            return {
+                'global_stop': self.is_global_stop,
+                'cooldown': self.is_cooldown,
+                'matches_cooldown': self.is_matches_cooldown,
+                'consecutive_losses': self._consecutive_losses,
+                'trade_locked': self._trade_locked,
+                'differ_available': differ_avail,
+                'differ_digit': differ_digit,
+                'differ_ticks_left': self._ticks_left(self._active_signals.get('differ')),
+                'parity_available': parity_avail,
+                'parity_direction': parity_dir,
+                'parity_reason': parity_reason,
+                'parity_ticks_left': self._ticks_left(self._active_signals.get('parity')),
+                'matches_available': matches_avail,
+                'matches_reason': matches_reason,
+                'matches_ticks_left': self._ticks_left(self._active_signals.get('matches')),
+                'zscore_available': zscore_avail,
+                'zscore_action': zscore_action,
+                'zscore_digit': zscore_digit,
+                'zscore_reason': zscore_reason,
+                'zscore_ticks_left': self._ticks_left(self._active_signals.get('zscore')),
+            }
