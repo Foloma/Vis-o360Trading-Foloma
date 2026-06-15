@@ -468,9 +468,10 @@ class StrategyManager:
             self.unlock_trade()
             if not is_win:
                 self._consecutive_losses += 1
-                if self._consecutive_losses >= 2:
+                # Aumentado para 3 perdas consecutivas antes do STOP GLOBAL
+                if self._consecutive_losses >= 3:
                     self._global_stop_until = time.time() + 180
-                    logger.warning("🛑 STOP GLOBAL: 2 perdas consecutivas — pausa 3 min")
+                    logger.warning("🛑 STOP GLOBAL: 3 perdas consecutivas — pausa 3 min")
                     self._consecutive_losses = 0
                     self.reset_sequence_state()
                     return
@@ -479,6 +480,8 @@ class StrategyManager:
                 elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
                     if not self._parity_martingale_used and self._last_parity_streak_type:
                         self._apply_cooldown(1)
+                        self._parity_signal_at = time.time()   # janela reiniciada
+                        logger.info("🔄 Janela de entrada reiniciada para martingale")
                     else:
                         self._apply_cooldown(5)
                 elif action.startswith('MATCH') or action.startswith('Z_MATCH'):
