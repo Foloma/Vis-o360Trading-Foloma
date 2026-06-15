@@ -173,7 +173,6 @@
       <button class="tf-btn" onclick="scrollToSection('g4')">Plano $20→$100</button>
       <button class="tf-btn" onclick="scrollToSection('g5')">Emocional</button>
     </div>
-    <!-- conteúdo do guia omitido por brevidade -->
   </div>
 </div>
 
@@ -336,7 +335,7 @@
   let _pollRunning = false;
   let _historyDebounceTimer = null;
 
-  // Controle de trade local
+  // Controle de trade local (CORRIGIDO)
   let _tradeSubmitted = false;
   let _tradePending = false;
   let _tradeSubmittedTimer = null;
@@ -719,74 +718,15 @@
     _historyDebounceTimer = setTimeout(()=>{ loadHistory(); _historyDebounceTimer=null; }, delay);
   }
 
-  // -----------------------------------------------------------------
-  // Funções de trade (CORRIGIDAS)
-  // -----------------------------------------------------------------
+  // ══════════════ FUNÇÕES DE TRADE CORRIGIDAS ══════════════
   function _resetTradeSubmitted() {
-    _tradeSubmitted = false;
-    if (_tradeSubmittedTimer) {
-      clearTimeout(_tradeSubmittedTimer);
-      _tradeSubmittedTimer = null;
-    }
+      _tradeSubmitted = false;
+      if (_tradeSubmittedTimer) {
+          clearTimeout(_tradeSubmittedTimer);
+          _tradeSubmittedTimer = null;
+      }
   }
 
-  async function conectar(){
-    const tok=$_('tokIn'); if(!tok){ toast('❌ Token obrigatório','loss'); return; }
-    const tokenVal = tok.value.trim(); if(!tokenVal){ toast('❌ Token obrigatório','loss'); return; }
-    try{
-      const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tokenVal,account_type:selectedAcct})});
-      const d=await r.json();
-      if(d.error){ toast('❌ '+d.error,'loss'); return; }
-      toast('✅ Token guardado','win');
-      const cs=$_('conSt'); if(cs) cs.textContent='🔄 A conectar...';
-      setTimeout(()=>{ fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.status==='connecting') toast('🔄 Conectando...','info'); }); },500);
-    }catch(e){ toast('❌ Erro de rede','loss'); }
-  }
-
-  async function connectWithDeriv() {
-      try {
-          const r = await fetch('/api/auth/deriv_oauth_url');
-          const d = await r.json();
-          if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
-          localStorage.removeItem('oauth_result');
-          const popup = window.open(d.url, 'derivOAuth', 'width=800,height=700');
-          const checkResult = setInterval(async () => {
-              const result = localStorage.getItem('oauth_result');
-              const ts = parseInt(localStorage.getItem('oauth_ts') || '0');
-              const fresh = (Date.now() - ts) < 30000;
-              if (result === 'connected' && fresh) {
-                  clearInterval(checkResult); clearInterval(checkPopup);
-                  localStorage.removeItem('oauth_result'); localStorage.removeItem('oauth_ts');
-                  toast('✅ Deriv conectada!', 'win', 4000);
-                  const cs=$_('conSt'); if(cs) cs.textContent = '🔄 A ligar...';
-                  try { await fetch('/api/connect', { method: 'POST' }); } catch(e) {}
-                  let attempts = 0;
-                  const check = setInterval(() => { attempts++; updateAll(); if (isConnected || attempts >= 5) clearInterval(check); }, 2000);
-              } else if (result === 'error' && fresh) {
-                  clearInterval(checkResult); clearInterval(checkPopup);
-                  localStorage.removeItem('oauth_result'); localStorage.removeItem('oauth_ts');
-                  toast('❌ OAuth falhou', 'loss');
-              }
-          }, 500);
-          const checkPopup = setInterval(() => {
-              if (!popup || popup.closed) { clearInterval(checkPopup); setTimeout(() => { if (localStorage.getItem('oauth_result') !== 'connected') { clearInterval(checkResult); toast('❌ OAuth cancelado ou falhou', 'loss'); } }, 3000); }
-          }, 500);
-          setTimeout(() => { clearInterval(checkResult); clearInterval(checkPopup); }, 300000);
-      } catch(e) { toast('❌ Erro OAuth', 'loss'); }
-  }
-
-  async function reconnectManual(){
-    try{ const resp=await fetch('/api/connect',{method:'POST'}); const data=await resp.json(); if(data.status==='connecting'){ toast('🔄 A tentar ligar...','info'); const cs=$_('conSt'); if(cs) cs.textContent='🔄 A ligar...'; setTimeout(updateAll,3000); } else if(data.error) toast('❌ '+data.error,'loss'); } catch(e){ toast('❌ Erro de rede','loss'); }
-  }
-  async function disconnectWebSocket(){
-    try{ await fetch('/api/disconnect',{method:'POST'}); toast('🔌 Desconectado','info'); isConnected=false; const sd=$_('sDot'); if(sd) sd.className='dot'; const cs=$_('connStatus'); if(cs) cs.textContent='Desconectado'; const oa=$_('connectOAuthBtn'); if(oa) oa.disabled=false; const ct=$_('connectTokenBtn'); if(ct) ct.disabled=false; } catch(e){ toast('❌ Erro','loss'); }
-  }
-  window.selAcct = async function(a){
-    selectedAcct=a; const bd=$_('btnDemo'); if(bd) bd.classList.toggle('active',a==='demo'); const br=$_('btnReal'); if(br) br.classList.toggle('active',a==='real');
-    try{ const r=await fetch('/api/auth/switch-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:a})}); const d=await r.json(); if(d.error){ toast('❌ '+d.error,'loss'); return; } toast(`✅ Conta ${a.toUpperCase()} activa`,'win'); const cs=$_('conSt'); if(cs) cs.textContent='🔄 A trocar conta...'; } catch(e){ toast('❌ Erro','loss'); }
-  };
-
-  // Função genérica de trade
   function tradeDigit(pred){
     console.log('🔘 tradeDigit chamado, pred=', pred, '_tradeSubmitted=', _tradeSubmitted);
     if(_tradeSubmitted){
@@ -797,7 +737,7 @@
     const amt = parseFloat(amtInput?.value) || 0.35;
     _tradeSubmitted = true;
     _tradePending = false;
-    _resetTradeSubmitted(); // limpa timer anterior
+    _resetTradeSubmitted();
     _tradeSubmittedTimer = setTimeout(() => {
       if (_tradeSubmitted) {
         console.warn('⚠️ Timeout tradeDigit');
@@ -968,7 +908,63 @@
       } catch(e) { toast('❌ Erro de rede', 'loss'); }
   }
 
-  // funções martingale e resto permanecem iguais
+  // ... resto das funções (conectar, martingale, etc.) permanecem iguais ...
+  async function conectar(){
+    const tok=$_('tokIn'); if(!tok){ toast('❌ Token obrigatório','loss'); return; }
+    const tokenVal = tok.value.trim(); if(!tokenVal){ toast('❌ Token obrigatório','loss'); return; }
+    try{
+      const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tokenVal,account_type:selectedAcct})});
+      const d=await r.json();
+      if(d.error){ toast('❌ '+d.error,'loss'); return; }
+      toast('✅ Token guardado','win');
+      const cs=$_('conSt'); if(cs) cs.textContent='🔄 A conectar...';
+      setTimeout(()=>{ fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.status==='connecting') toast('🔄 Conectando...','info'); }); },500);
+    }catch(e){ toast('❌ Erro de rede','loss'); }
+  }
+
+  async function connectWithDeriv() {
+      try {
+          const r = await fetch('/api/auth/deriv_oauth_url');
+          const d = await r.json();
+          if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
+          localStorage.removeItem('oauth_result');
+          const popup = window.open(d.url, 'derivOAuth', 'width=800,height=700');
+          const checkResult = setInterval(async () => {
+              const result = localStorage.getItem('oauth_result');
+              const ts = parseInt(localStorage.getItem('oauth_ts') || '0');
+              const fresh = (Date.now() - ts) < 30000;
+              if (result === 'connected' && fresh) {
+                  clearInterval(checkResult); clearInterval(checkPopup);
+                  localStorage.removeItem('oauth_result'); localStorage.removeItem('oauth_ts');
+                  toast('✅ Deriv conectada!', 'win', 4000);
+                  const cs=$_('conSt'); if(cs) cs.textContent = '🔄 A ligar...';
+                  try { await fetch('/api/connect', { method: 'POST' }); } catch(e) {}
+                  let attempts = 0;
+                  const check = setInterval(() => { attempts++; updateAll(); if (isConnected || attempts >= 5) clearInterval(check); }, 2000);
+              } else if (result === 'error' && fresh) {
+                  clearInterval(checkResult); clearInterval(checkPopup);
+                  localStorage.removeItem('oauth_result'); localStorage.removeItem('oauth_ts');
+                  toast('❌ OAuth falhou', 'loss');
+              }
+          }, 500);
+          const checkPopup = setInterval(() => {
+              if (!popup || popup.closed) { clearInterval(checkPopup); setTimeout(() => { if (localStorage.getItem('oauth_result') !== 'connected') { clearInterval(checkResult); toast('❌ OAuth cancelado ou falhou', 'loss'); } }, 3000); }
+          }, 500);
+          setTimeout(() => { clearInterval(checkResult); clearInterval(checkPopup); }, 300000);
+      } catch(e) { toast('❌ Erro OAuth', 'loss'); }
+  }
+
+  async function reconnectManual(){
+    try{ const resp=await fetch('/api/connect',{method:'POST'}); const data=await resp.json(); if(data.status==='connecting'){ toast('🔄 A tentar ligar...','info'); const cs=$_('conSt'); if(cs) cs.textContent='🔄 A ligar...'; setTimeout(updateAll,3000); } else if(data.error) toast('❌ '+data.error,'loss'); } catch(e){ toast('❌ Erro de rede','loss'); }
+  }
+  async function disconnectWebSocket(){
+    try{ await fetch('/api/disconnect',{method:'POST'}); toast('🔌 Desconectado','info'); isConnected=false; const sd=$_('sDot'); if(sd) sd.className='dot'; const cs=$_('connStatus'); if(cs) cs.textContent='Desconectado'; const oa=$_('connectOAuthBtn'); if(oa) oa.disabled=false; const ct=$_('connectTokenBtn'); if(ct) ct.disabled=false; } catch(e){ toast('❌ Erro','loss'); }
+  }
+  window.selAcct = async function(a){
+    selectedAcct=a; const bd=$_('btnDemo'); if(bd) bd.classList.toggle('active',a==='demo'); const br=$_('btnReal'); if(br) br.classList.toggle('active',a==='real');
+    try{ const r=await fetch('/api/auth/switch-account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_type:a})}); const d=await r.json(); if(d.error){ toast('❌ '+d.error,'loss'); return; } toast(`✅ Conta ${a.toUpperCase()} activa`,'win'); const cs=$_('conSt'); if(cs) cs.textContent='🔄 A trocar conta...'; } catch(e){ toast('❌ Erro','loss'); }
+  };
+
   async function mgtMultiply(fieldId){
       if(_mgtLocked){ toast('⏳ Aguarde...', 'warning'); return; }
       _mgtLocked = true;
