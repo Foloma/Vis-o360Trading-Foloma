@@ -14,7 +14,7 @@ class StrategyManager:
     - Bloqueio de reanálise enquanto sinal ativo.
     - Trade Lock (verificado nas rotas, não em can_trade).
     - _peek_* apenas lêem; _generate_*_signal fazem a criação.
-    - Geração automática de sinais (refresh_signals) a cada tick.
+    - Geração automática de sinais REMOVIDA; apenas limpeza de expirados.
     - Destravamento automático do trade lock após timeout.
     """
 
@@ -134,19 +134,13 @@ class StrategyManager:
         self.refresh_signals()
 
     def refresh_signals(self):
+        """Apenas remove sinais expirados. NÃO gera novos automaticamente."""
         with self._lock:
             self._check_trade_lock_timeout()
-            if self._trade_locked:
-                return
-
             for strategy in ('differ', 'parity', 'matches', 'zscore'):
-                if self._active_signals.get(strategy) and self._is_signal_valid(strategy):
-                    continue
-                generator = getattr(self, f'_generate_{strategy}_signal', None)
-                if generator:
-                    signal, _ = generator()
-                    if signal:
-                        self._active_signals[strategy] = signal
+                if self._active_signals.get(strategy):
+                    if not self._is_signal_valid(strategy):
+                        self._active_signals[strategy] = None
 
     # -----------------------------------------------------------------
     # Trade lock
