@@ -14,7 +14,7 @@ class StrategyManager:
     - Bloqueio de reanálise enquanto sinal ativo.
     - Trade Lock (verificado nas rotas, não em can_trade).
     - _peek_* apenas lêem; _generate_*_signal fazem a criação.
-    - Geração automática de sinais REMOVIDA; apenas limpeza de expirados.
+    - Geração automática de pré‑visualização (sem consumir estados).
     - Destravamento automático do trade lock após timeout.
     """
 
@@ -134,12 +134,25 @@ class StrategyManager:
         self.refresh_signals()
 
     def refresh_signals(self):
-        """Apenas remove sinais expirados. NÃO gera novos automaticamente."""
+        """
+        Atualiza a cache de sinais com pré‑visualizações (sem consumir estados).
+        """
         with self._lock:
             self._check_trade_lock_timeout()
+            if self._trade_locked:
+                return
+
             for strategy in ('differ', 'parity', 'matches', 'zscore'):
-                if self._active_signals.get(strategy):
-                    if not self._is_signal_valid(strategy):
+                # Se já existe sinal válido, mantém
+                if self._active_signals.get(strategy) and self._is_signal_valid(strategy):
+                    continue
+                # Tenta gerar pré‑visualização sem efeitos colaterais
+                peek_generator = getattr(self, f'_peek_generate_{strategy}_signal', None)
+                if peek_generator:
+                    signal = peek_generator()
+                    if signal:
+                        self._active_signals[strategy] = signal
+                    else:
                         self._active_signals[strategy] = None
 
     # -----------------------------------------------------------------
@@ -293,6 +306,66 @@ class StrategyManager:
             return False, None, None, None
 
     # -----------------------------------------------------------------
+    # Pré‑visualização de sinais (sem efeitos colaterais)
+    # -----------------------------------------------------------------
+    def _peek_generate_differ_signal(self):
+        recent = self.analyzer.get_recent_digits(20)
+        if len(recent) < 2:
+            return None
+        last_two = recent[-2:]
+        if last_two[0] == last_two[1]:
+            digit = last_two[0]
+            last_ten = recent[-10:] if len(recent) >= 10 else recent
+            if last_ten.count(digit) >= 2 and digit not in self._differ_sequence_used:
+                return self._create_signal('differ', digit, last_two[-2:],
+                                           f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos")
+        return None
+
+    def _peek_generate_parity_signal(self):
+        recent = self.analyzer.get_recent_digits(20)
+        if len(recent) < 4:
+            return None
+        last_four = [d % 2 != 0 for d in recent[-4:]]
+        odd_count = sum(last_four)
+        even_count = 4 - odd_count
+        if odd_count >= 3:
+            rec = 'even'
+            reason = f"Tendência ÍMPAR ({odd_count}/4)"
+        elif even_count >= 3:
+            rec = 'odd'
+            reason = f"Tendência PAR ({even_count}/4)"
+        else:
+            return None
+        # Não verifica used/martingale aqui, apenas se a tendência existe
+        return self._create_signal('parity', rec, recent[-4:], reason)
+
+    def _peek_generate_matches_signal(self):
+        if self.is_matches_cooldown:
+            return None
+        absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
+        if not absence:
+            return None
+        for digit, count in absence().items():
+            if count >= 15 and not self._matches_sequence_used:
+                return self._create_signal('matches', digit, [],
+                                           f"Dígito {digit} ausente há {count} ticks")
+        return None
+
+    def _peek_generate_zscore_signal(self):
+        if self._zscore_sequence_used:
+            return None
+        if time.time() < self._zscore_cooldown_until:
+            return None
+        z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
+        if z_diff is not None and digit_diff is not None:
+            reason = f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"
+            return self._create_signal('zscore', digit_diff, [], reason)
+        elif z_match is not None and digit_match is not None:
+            reason = f"Z‑Score {z_match:.2f} → MATCHES {digit_match}"
+            return self._create_signal('zscore', digit_match, [], reason)
+        return None
+
+    # -----------------------------------------------------------------
     # Geração de sinais (com efeitos colaterais)
     # -----------------------------------------------------------------
     def _generate_differ_signal(self):
@@ -437,7 +510,6 @@ class StrategyManager:
                 logger.info("📈 evaluate_differ: trade_locked=True")
                 return None, "Trade em curso"
 
-            # Verificar cache
             if self._active_signals['differ'] and self._is_signal_valid('differ'):
                 s = self._active_signals['differ']
                 logger.info(f"📈 evaluate_differ: usando sinal cache {s['id']} -> {s['recommendation']}")
@@ -445,7 +517,6 @@ class StrategyManager:
             else:
                 self._active_signals['differ'] = None
 
-            # Tentar gerar novo
             signal, err = self._generate_differ_signal()
             if signal:
                 self._active_signals['differ'] = signal
