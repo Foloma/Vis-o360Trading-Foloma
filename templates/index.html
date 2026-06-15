@@ -335,6 +335,7 @@ let _historyDebounceTimer = null;
 let _tradeSubmitted = false;
 let _tradePending = false;
 let _tradeSubmittedTimer = null;
+let _tradePendingTimer = null;
 let _lastProcessedContractId = null;
 let _showTradeResult = false;
 
@@ -532,6 +533,7 @@ async function updateAll(){
         _lastProcessedContractId = ltr.contract_id;
         _tradePending = false;
         clearTimeout(_tradeSubmittedTimer);
+        clearTimeout(_tradePendingTimer);
         const bd=$_('bigD'), bp=$_('bigP');
         bd.textContent = ltr.digit !== undefined ? ltr.digit : '?';
         bd.className = 'big-d ' + (ltr.is_win ? 'odd' : 'even');
@@ -715,8 +717,8 @@ function scheduleHistoryLoad(delay=5000){
   _historyDebounceTimer = setTimeout(()=>{ loadHistory(); _historyDebounceTimer=null; }, delay);
 }
 
+// ══════════ FUNÇÕES DE TRADE (PRONTAS PARA PRODUÇÃO) ══════════
 function tradeDigit(pred){
-  console.log('[tradeDigit] chamado, _tradeSubmitted=', _tradeSubmitted);
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   const amt=parseFloat($_( 'amtDigit').value)||0.35;
   _tradeSubmitted = true;
@@ -724,7 +726,6 @@ function tradeDigit(pred){
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) {
-      console.warn('[tradeDigit] timeout');
       _tradeSubmitted = false;
       toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
     }
@@ -734,67 +735,95 @@ function tradeDigit(pred){
     _tradeSubmitted = false;
     clearTimeout(_tradeSubmittedTimer);
     if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else { _tradePending = true; toast('⏳ Aposta enviada!','info'); scheduleHistoryLoad(5000); }
+    else { 
+      _tradePending = true;
+      clearTimeout(_tradePendingTimer);
+      _tradePendingTimer = setTimeout(() => {
+        if (_tradePending) {
+          _tradePending = false;
+          toast('⚠️ Resultado demorou muito. Verifique o histórico.','warning', 6000);
+        }
+      }, 15000);
+      toast('⏳ Aposta enviada!','info'); 
+      scheduleHistoryLoad(5000); 
+    }
   }).catch(e=>{
-    console.error('[tradeDigit] erro:', e);
     _tradeSubmitted = false; _tradePending = false;
-    clearTimeout(_tradeSubmittedTimer);
+    clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer);
     toast('❌ Erro de rede','loss');
   });
 }
 
 async function tradeDiffer(){
-  console.log('[tradeDiffer] chamado, _tradeSubmitted=', _tradeSubmitted);
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   const amt=parseFloat($_( 'amtDigit').value)||0.35;
   _tradeSubmitted = true; _tradePending = false;
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) { console.warn('[tradeDiffer] timeout'); _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
+    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
   try{
     const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
     _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
     if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ toast(d.message,'win',4000); playBeep(); _tradePending = true; scheduleHistoryLoad(5000); }
-  }catch(e){ console.error('[tradeDiffer] erro:', e); toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); }
+    else{ 
+      _tradePending = true;
+      clearTimeout(_tradePendingTimer);
+      _tradePendingTimer = setTimeout(() => {
+        if (_tradePending) { _tradePending = false; }
+      }, 15000);
+      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
+    }
+  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
 }
 
 async function tradeMatches(){
-  console.log('[tradeMatches] chamado, _tradeSubmitted=', _tradeSubmitted);
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   const amt=parseFloat($_( 'amtDigit').value)||0.35;
   _tradeSubmitted = true; _tradePending = false;
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) { console.warn('[tradeMatches] timeout'); _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
+    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
   try{
     const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
     _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
     if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ toast(d.message,'win',4000); playBeep(); _tradePending = true; scheduleHistoryLoad(5000); }
-  }catch(e){ console.error('[tradeMatches] erro:', e); toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); }
+    else{ 
+      _tradePending = true;
+      clearTimeout(_tradePendingTimer);
+      _tradePendingTimer = setTimeout(() => {
+        if (_tradePending) { _tradePending = false; }
+      }, 15000);
+      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
+    }
+  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
 }
 
 async function tradeZscore(){
-  console.log('[tradeZscore] chamado, _tradeSubmitted=', _tradeSubmitted);
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   const amt=parseFloat($_( 'amtDigit').value)||0.35;
   _tradeSubmitted = true; _tradePending = false;
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) { console.warn('[tradeZscore] timeout'); _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
+    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
   try{
     const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
     _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
     if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ toast(d.message,'win',4000); playBeep(); _tradePending = true; scheduleHistoryLoad(5000); }
-  }catch(e){ console.error('[tradeZscore] erro:', e); toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); }
+    else{ 
+      _tradePending = true;
+      clearTimeout(_tradePendingTimer);
+      _tradePendingTimer = setTimeout(() => {
+        if (_tradePending) { _tradePending = false; }
+      }, 15000);
+      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
+    }
+  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
 }
 
 async function ignoreZscore(){
