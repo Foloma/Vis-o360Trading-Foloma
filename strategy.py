@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class StrategyManager:
     """
     Implementa os módulos da Foloma Visão 360 com sincronização por snapshots.
-    - Sinais com ID, timestamp e validade de 15 ticks.
+    - Sinais com ID, timestamp e validade (agora 10 ticks, alinhado com ciclo real).
     - Análise congelada enquanto houver sinal ativo.
     - Entrada validada contra o snapshot.
     - Controle de trade lock (usado pelo app.py).
@@ -47,8 +47,8 @@ class StrategyManager:
             'zscore': None
         }
 
-        # Validade do sinal em ticks
-        self.SIGNAL_VALIDITY_TICKS = 15
+        # Validade do sinal em ticks (alinhado com ciclo real de dígitos)
+        self.SIGNAL_VALIDITY_TICKS = 10
 
         # Trade Lock (exigido pelo app.py)
         self._trade_locked = False
@@ -186,7 +186,7 @@ class StrategyManager:
         return signal
 
     # -----------------------------------------------------------------
-    # Métodos de leitura pura para o frontend
+    # Métodos de leitura pura para o frontend (sem efeitos colaterais)
     # -----------------------------------------------------------------
     def _peek_differ(self):
         ok, _ = self.can_trade
@@ -243,6 +243,7 @@ class StrategyManager:
         return False
 
     def _peek_zscore(self):
+        """Versão sem efeitos colaterais – apenas lê snapshot existente."""
         ok, _ = self.can_trade
         if not ok:
             return False, None, None, "Condições básicas não satisfeitas"
@@ -250,20 +251,16 @@ class StrategyManager:
         if signal and self._is_signal_still_valid(signal):
             action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
             return True, action, signal['recommendation'], signal['reason']
+        # Se não há snapshot válido, não gera novo – apenas reporta indisponível
         if self._zscore_sequence_used:
             return False, None, None, "Sinal Z‑Score já utilizado"
         if time.time() < self._zscore_cooldown_until:
             remaining = self._zscore_cooldown_until - time.time()
             return False, None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
-        z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
-        if z_diff is not None and digit_diff is not None:
-            return True, 'DIFFER', digit_diff, f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"
-        if z_match is not None and digit_match is not None:
-            return True, 'MATCHES', digit_match, f"Z‑Score {z_match:.2f} → MATCHES {digit_match}"
-        return False, None, None, "Nenhum desvio estatístico significativo"
+        return False, None, None, "Nenhum sinal Z‑Score disponível"
 
     # -----------------------------------------------------------------
-    # Métodos de entrada (evaluate_*)
+    # Métodos de entrada (evaluate_*) – com efeitos colaterais
     # -----------------------------------------------------------------
     def evaluate_differ(self):
         with self._lock:
@@ -319,7 +316,7 @@ class StrategyManager:
                 else:
                     self._parity_even_used = True
                     self._last_parity_streak_type = 'even'
-                self._parity_martingale_used = False
+                # Corrigido: NÃO resetar _parity_martingale_used aqui
                 logger.info(f"✅ PAR/ÍMPAR executado: snapshot {signal['id']}")
                 return rec, signal['reason']
             return self._generate_parity_signal()
@@ -468,7 +465,6 @@ class StrategyManager:
             self.unlock_trade()
             if not is_win:
                 self._consecutive_losses += 1
-                # Aumentado para 3 perdas consecutivas antes do STOP GLOBAL
                 if self._consecutive_losses >= 3:
                     self._global_stop_until = time.time() + 180
                     logger.warning("🛑 STOP GLOBAL: 3 perdas consecutivas — pausa 3 min")
