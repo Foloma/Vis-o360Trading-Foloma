@@ -368,7 +368,6 @@ class TradingBot:
                     else:
                         won_digit = '?'
 
-                # ---- NOVOS CAMPOS DE AUDITORIA ----
                 self.last_trade_result = {
                     'contract_id': contract_id,
                     'action': action,
@@ -380,7 +379,6 @@ class TradingBot:
                     'entry_tick_count': self.digit_analyzer._tick_count if self.digit_analyzer else 0,
                     'latency_ms': self.client.last_trade_latency_ms if self.client else 0
                 }
-                # ---- FIM NOVOS CAMPOS ----
 
             self.update_stats()
             if self.client:
