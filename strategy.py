@@ -48,7 +48,7 @@ class StrategyManager:
         }
 
         # Validade do sinal em ticks (alinhado com ciclo real de dígitos)
-        self.SIGNAL_VALIDITY_TICKS = 10
+        self.SIGNAL_VALIDITY_TICKS = 12
 
         # Trade Lock (exigido pelo app.py)
         self._trade_locked = False
