@@ -66,7 +66,7 @@ class DerivWebSocketClient:
 
         self._last_reconnect_time = 0
         self._ping_ms = 0
-        self._last_valid_ping_ms = 0   # último ping bem‑sucedido
+        self._last_valid_ping_ms = 0
         self._reconnect_count = 0
         self._ping_sent_at = 0
         self._ping_pending = False
@@ -78,7 +78,6 @@ class DerivWebSocketClient:
         self._cooldown_until = 0
         self._token_permanently_invalid = False
 
-        # Latência do último trade para o frontend
         self.last_trade_latency_ms = 0
 
     def set_digit_analyzer(self, a): 
@@ -178,12 +177,9 @@ class DerivWebSocketClient:
             if self._stop_event.wait(timeout=total_wait):
                 break
 
-    # -----------------------------------------------------------------
-    # Polling ativo para contratos pendentes (com evento dedicado)
-    # -----------------------------------------------------------------
     def _start_poller(self):
-        self._stop_poller()                # garante que thread anterior morreu
-        self._poller_stop.clear()          # limpa o evento para o novo loop
+        self._stop_poller()
+        self._poller_stop.clear()
         self._poller_thread = threading.Thread(target=self._poller_loop, daemon=True)
         self._poller_thread.start()
         logger.info("🔄 Poller de contratos iniciado")
@@ -193,7 +189,6 @@ class DerivWebSocketClient:
         if self._poller_thread and self._poller_thread.is_alive():
             self._poller_thread.join(timeout=2)
         self._poller_thread = None
-        # NÃO limpar o evento aqui; será limpo em _start_poller
 
     def _poller_loop(self):
         while not self._poller_stop.wait(timeout=8):
@@ -215,7 +210,6 @@ class DerivWebSocketClient:
                     except Exception as e:
                         logger.error(f"Erro no poller para {cid}: {e}")
 
-    # -----------------------------------------------------------------
     def _reset_state(self):
         self.subscribed_symbols.clear()
         with self._pending_lock:
@@ -379,7 +373,7 @@ class DerivWebSocketClient:
         if self._ping_sent_at and self._ping_pending:
             self._ping_ms = round((time.time() - self._ping_sent_at) * 1000)
             self._ping_pending = False
-            self._last_valid_ping_ms = self._ping_ms   # guardar último valor válido
+            self._last_valid_ping_ms = self._ping_ms
             logger.debug(f"🏓 Ping: {self._ping_ms}ms")
 
     def _start_watchdog(self):
@@ -477,11 +471,7 @@ class DerivWebSocketClient:
             self._req_counter += 1
             return self._req_counter
 
-    # -----------------------------------------------------------------
-    # Validação centralizada pré-trade
-    # -----------------------------------------------------------------
     def _pre_trade_check(self):
-        """Retorna (True, None) se OK, (False, 'motivo') se bloqueado."""
         if time.time() - self._last_reconnect_time < 10:
             return False, "Reconexão recente"
         if not self.streaming:
@@ -502,9 +492,6 @@ class DerivWebSocketClient:
                     return False, "Trade pendente"
         return True, None
 
-    # -----------------------------------------------------------------
-    # Métodos de trade
-    # -----------------------------------------------------------------
     def place_trade(self, contract_type, amount, is_digit=False):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
@@ -685,7 +672,6 @@ class DerivWebSocketClient:
                 if latency_ms > 300:
                     logger.warning(f"⚠️ Latência alta ({latency_ms}ms)")
 
-                # Guardar latência para o frontend
                 self.last_trade_latency_ms = latency_ms
 
                 if self.trading_bot:
@@ -767,6 +753,21 @@ class DerivWebSocketClient:
         profit = sp - bp
         is_win = profit > 0
         logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}")
+
+        # ---- INÍCIO AUDITORIA POC ----
+        if self._digit_analyzer:
+            current_tick = self._digit_analyzer.get_current_digit()
+            current_tick_count = self._digit_analyzer._tick_count
+        else:
+            current_tick = 'N/A'
+            current_tick_count = 'N/A'
+        logger.info(
+            f"🔍 AUDITORIA POC | contract_id={cid} "
+            f"| tick_no_resultado={current_tick} "
+            f"| tick_count_resultado={current_tick_count} "
+            f"| profit={profit:.4f} | is_win={is_win}"
+        )
+        # ---- FIM AUDITORIA POC ----
 
         trade_info = self.active_trades.get(cid, {})
         if not trade_info:
