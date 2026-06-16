@@ -9,9 +9,9 @@ logger = logging.getLogger(__name__)
 class StrategyManager:
     """
     Implementa os módulos da Foloma Visão 360 com sincronização por snapshots.
-    - Pré‑visualização de sinais SEM consumir estados.
-    - Sinais com ID, timestamp e validade (12 ticks).
-    - Entrada validada contra o snapshot.
+    - Sinais gerados apenas no clique (evaluate_*).
+    - Cache de sinais expira após 10 ticks.
+    - Frontend lê apenas a cache (_peek_*).
     - Controle de trade lock e martingale.
     """
 
@@ -39,6 +39,7 @@ class StrategyManager:
         self._zscore_cooldown_until = 0
         self._price_history = []
 
+        # Snapshots dos sinais ativos (cache)
         self._active_signals = {
             'differ': None,
             'parity': None,
@@ -46,12 +47,13 @@ class StrategyManager:
             'zscore': None
         }
 
-        # 12 ticks dá cerca de 12 segundos de janela
-        self.SIGNAL_VALIDITY_TICKS = 12
+        # Validade do sinal em ticks (10 ticks = ~10 segundos)
+        self.SIGNAL_VALIDITY_TICKS = 10
 
+        # Trade Lock (usado pelo app.py)
         self._trade_locked = False
         self._trade_locked_at = 0
-        self.TRADE_LOCK_TIMEOUT = 60
+        self.TRADE_LOCK_TIMEOUT = 60   # segundos
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -112,7 +114,7 @@ class StrategyManager:
         return True, "OK"
 
     # -----------------------------------------------------------------
-    # Atualização a cada tick
+    # Atualização a cada tick – apenas remove sinais expirados
     # -----------------------------------------------------------------
     def on_tick(self, tick):
         price = tick.get('price', 0)
@@ -124,27 +126,14 @@ class StrategyManager:
         self.refresh_signals()
 
     def refresh_signals(self):
-        """
-        Remove sinais expirados e gera pré‑visualizações SEM consumir
-        estados de sequência (usa os _peek_generate_*).
-        """
+        """Remove sinais expirados. NUNCA gera novos automaticamente."""
         with self._lock:
             self._check_trade_lock_timeout()
-            if self._trade_locked:
-                return
-
             for strategy in ('differ', 'parity', 'matches', 'zscore'):
-                # Se existe sinal válido, mantém
-                if self._active_signals.get(strategy) and self._is_signal_still_valid(self._active_signals[strategy]):
-                    continue
-                # Gera pré‑visualização sem efeitos colaterais
-                peek_gen = getattr(self, f'_peek_generate_{strategy}_signal', None)
-                if peek_gen:
-                    signal = peek_gen()
-                    if signal:
-                        self._active_signals[strategy] = signal
-                    else:
-                        self._active_signals[strategy] = None
+                signal = self._active_signals.get(strategy)
+                if signal and not self._is_signal_still_valid(signal):
+                    self._active_signals[strategy] = None
+                    logger.info(f"⏰ Sinal {strategy} expirado (ID {signal['id']})")
 
     def _is_signal_still_valid(self, signal):
         if not signal:
@@ -182,7 +171,7 @@ class StrategyManager:
             self.unlock_trade()
 
     # -----------------------------------------------------------------
-    # Criação de snapshot de sinal
+    # Criação de snapshot de sinal (chamado apenas nos evaluate_*)
     # -----------------------------------------------------------------
     def _create_signal(self, strategy, recommendation, digits, reason=''):
         current_tick = self.analyzer._tick_count
@@ -199,69 +188,7 @@ class StrategyManager:
         return signal
 
     # -----------------------------------------------------------------
-    # Pré‑visualização sem efeitos colaterais (_peek_generate_*)
-    # -----------------------------------------------------------------
-    def _peek_generate_differ_signal(self):
-        recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 2:
-            return None
-        last_two = recent[-2:]
-        if last_two[0] == last_two[1]:
-            digit = last_two[0]
-            last_ten = recent[-10:] if len(recent) >= 10 else recent
-            if last_ten.count(digit) >= 2 and digit not in self._differ_sequence_used:
-                return self._create_signal('differ', digit, last_two[-2:],
-                                           f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos")
-        return None
-
-    def _peek_generate_parity_signal(self):
-        recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 4:
-            return None
-        last_four = [d % 2 != 0 for d in recent[-4:]]
-        odd_count = sum(last_four)
-        even_count = 4 - odd_count
-        if odd_count >= 3 and not self._parity_odd_used:
-            return self._create_signal('parity', 'even', recent[-4:],
-                                       f"Tendência ÍMPAR ({odd_count}/4) → PAR")
-        if even_count >= 3 and not self._parity_even_used:
-            return self._create_signal('parity', 'odd', recent[-4:],
-                                       f"Tendência PAR ({even_count}/4) → ÍMPAR")
-        # Martingale disponível?
-        if odd_count >= 3 and self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
-            return self._create_signal('parity', 'even', recent[-4:],
-                                       "Martingale disponível (Tendência ÍMPAR)")
-        if even_count >= 3 and self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even':
-            return self._create_signal('parity', 'odd', recent[-4:],
-                                       "Martingale disponível (Tendência PAR)")
-        return None
-
-    def _peek_generate_matches_signal(self):
-        if self.is_matches_cooldown:
-            return None
-        absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
-        if not absence:
-            return None
-        for digit, count in absence().items():
-            if count >= 15 and not self._matches_sequence_used:
-                return self._create_signal('matches', digit, [],
-                                           f"Dígito {digit} ausente há {count} ticks")
-        return None
-
-    def _peek_generate_zscore_signal(self):
-        if self._zscore_sequence_used or time.time() < self._zscore_cooldown_until:
-            return None
-        z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
-        if z_diff is not None and digit_diff is not None:
-            return self._create_signal('zscore', digit_diff, [],
-                                       f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}")
-        if z_match is not None and digit_match is not None:
-            return self._create_signal('zscore', digit_match, [],
-                                       f"Z‑Score {z_match:.2f} → MATCHES {digit_match}")
-        return None
-
-    # -----------------------------------------------------------------
-    # Métodos de leitura pura para o frontend (usados em get_status)
+    # Métodos de leitura pura para o frontend (_peek_*)
     # -----------------------------------------------------------------
     def _peek_differ(self):
         signal = self._active_signals['differ']
