@@ -1227,14 +1227,27 @@ def trade_digit():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        contract = 'CALL' if action == 'odd' else 'PUT'
-        logger.info(f"🎲 TRADE PAR/ÍMPAR: ação recomendada={action}, contrato={contract}, valor=${amt:.2f}, ticks_restantes={tr}")
+        # ---- INÍCIO AUDITORIA ----
+        audit_tick = analyzer.get_current_digit()
+        audit_tick_count = analyzer._tick_count
+        audit_click_time = time.time()
+        logger.info(
+            f"🔍 AUDITORIA | tick_no_clique={audit_tick} "
+            f"| tick_count={audit_tick_count} "
+            f"| hora_clique={audit_click_time:.3f}"
+        )
+        # ---- FIM AUDITORIA ----
 
+        contract = 'CALL' if action == 'odd' else 'PUT'
         ok = sess['client'].place_trade(contract, amt, True)
         if ok:
             strategy.lock_trade()
             credit_affiliate_commission(session['user_email'], amt)
             label = 'ÍMPAR' if action == 'odd' else 'PAR'
+            # Adiciona latência (opcional, para já)
+            logger.info(
+                f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
+            )
             return jsonify({
                 'status': 'ok',
                 'message': f'✅ {label} por ${amt:.2f}',
@@ -1245,7 +1258,6 @@ def trade_digit():
     except Exception:
         logger.exception("Erro trade dígito")
         return jsonify({'error': 'Erro interno'}), 500
-
 @app.route('/api/trade/differ', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
