@@ -9,10 +9,10 @@ logger = logging.getLogger(__name__)
 class StrategyManager:
     """
     Implementa os módulos da Foloma Visão 360 com sincronização por snapshots.
-    - Sinais com ID, timestamp e validade (agora 10 ticks, alinhado com ciclo real).
+    - Sinais com ID, timestamp e validade (10 ticks).
     - Análise congelada enquanto houver sinal ativo.
     - Entrada validada contra o snapshot.
-    - Controle de trade lock (usado pelo app.py).
+    - Controle de trade lock e martingale.
     """
 
     def __init__(self, client, analyzer):
@@ -219,10 +219,21 @@ class StrategyManager:
         last_four = [d % 2 != 0 for d in recent[-4:]]
         odd_count = sum(last_four)
         even_count = 4 - odd_count
-        if odd_count >= 3 and not self._parity_odd_used:
-            return True, 'even', f"Tendência ÍMPAR ({odd_count}/4)"
-        if even_count >= 3 and not self._parity_even_used:
-            return True, 'odd', f"Tendência PAR ({even_count}/4)"
+        # Verificar disponibilidade com suporte a martingale
+        if odd_count >= 3:
+            # Entrada inicial
+            if not self._parity_odd_used:
+                return True, 'even', f"Tendência ÍMPAR ({odd_count}/4)"
+            # Martingale disponível
+            if (self._parity_odd_used and not self._parity_martingale_used
+                    and self._last_parity_streak_type == 'odd'):
+                return True, 'even', "Martingale disponível (Tendência ÍMPAR)"
+        if even_count >= 3:
+            if not self._parity_even_used:
+                return True, 'odd', f"Tendência PAR ({even_count}/4)"
+            if (self._parity_even_used and not self._parity_martingale_used
+                    and self._last_parity_streak_type == 'even'):
+                return True, 'odd', "Martingale disponível (Tendência PAR)"
         return False, None, "Nenhuma tendência clara"
 
     def _peek_matches(self):
@@ -251,7 +262,6 @@ class StrategyManager:
         if signal and self._is_signal_still_valid(signal):
             action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
             return True, action, signal['recommendation'], signal['reason']
-        # Se não há snapshot válido, não gera novo – apenas reporta indisponível
         if self._zscore_sequence_used:
             return False, None, None, "Sinal Z‑Score já utilizado"
         if time.time() < self._zscore_cooldown_until:
@@ -316,7 +326,7 @@ class StrategyManager:
                 else:
                     self._parity_even_used = True
                     self._last_parity_streak_type = 'even'
-                # Corrigido: NÃO resetar _parity_martingale_used aqui
+                # NÃO resetar _parity_martingale_used aqui (corrigido)
                 logger.info(f"✅ PAR/ÍMPAR executado: snapshot {signal['id']}")
                 return rec, signal['reason']
             return self._generate_parity_signal()
@@ -476,7 +486,6 @@ class StrategyManager:
                 elif action in ('CALL', 'PUT', 'BUY', 'SELL', 'DIGITODD', 'DIGITEVEN'):
                     if not self._parity_martingale_used and self._last_parity_streak_type:
                         self._apply_cooldown(1)
-                        self._parity_signal_at = time.time()   # janela reiniciada
                         logger.info("🔄 Janela de entrada reiniciada para martingale")
                     else:
                         self._apply_cooldown(5)
