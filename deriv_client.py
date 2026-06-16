@@ -672,6 +672,20 @@ class DerivWebSocketClient:
                 if latency_ms > 300:
                     logger.warning(f"⚠️ Latência alta ({latency_ms}ms)")
 
+                # ---- INÍCIO AUDITORIA ENTRADA ----
+                if self._digit_analyzer:
+                    entry_tick = self._digit_analyzer.get_current_digit()
+                    entry_tick_count = self._digit_analyzer._tick_count
+                else:
+                    entry_tick = 'N/A'
+                    entry_tick_count = 'N/A'
+                logger.info(
+                    f"🔍 AUDITORIA ENTRADA | contract_id={cid} "
+                    f"| tick_entrada={entry_tick} "
+                    f"| tick_count_entrada={entry_tick_count}"
+                )
+                # ---- FIM AUDITORIA ENTRADA ----
+
                 self.last_trade_latency_ms = latency_ms
 
                 if self.trading_bot:
