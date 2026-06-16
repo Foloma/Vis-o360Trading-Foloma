@@ -13,6 +13,7 @@ class StrategyManager:
     - Preview sem efeitos colaterais.
     - Cache de sinais expira após 10 ticks.
     - Entrada apenas no clique (evaluate_*), que consome o estado.
+    - Trade Lock com timeout de 15 segundos.
     """
 
     def __init__(self, client, analyzer):
@@ -50,7 +51,7 @@ class StrategyManager:
 
         self._trade_locked = False
         self._trade_locked_at = 0
-        self.TRADE_LOCK_TIMEOUT = 60
+        self.TRADE_LOCK_TIMEOUT = 15   # ← reduzido para 15 segundos
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -146,7 +147,6 @@ class StrategyManager:
             tr = self.analyzer.get_ticks_remaining()
             inicio_ciclo = tr >= tpd - 1
 
-            # Estratégias de ciclo (só no início)
             if inicio_ciclo:
                 for strategy in ('differ', 'parity'):
                     if self._active_signals.get(strategy) and self._is_signal_still_valid(self._active_signals[strategy]):
@@ -158,7 +158,6 @@ class StrategyManager:
                             self._create_signal(strategy, preview['recommendation'],
                                                 preview.get('digits', []), preview['reason'])
 
-            # Estratégias contínuas (sempre)
             for strategy in ('matches', 'zscore'):
                 if self._active_signals.get(strategy) and self._is_signal_still_valid(self._active_signals[strategy]):
                     continue
@@ -583,12 +582,19 @@ class StrategyManager:
             else:
                 matches_reason = "Disponível"
 
+            # Tempo restante do trade lock
+            if self._trade_locked:
+                trade_lock_remaining = max(0, round(self.TRADE_LOCK_TIMEOUT - (time.time() - self._trade_locked_at)))
+            else:
+                trade_lock_remaining = 0
+
             return {
                 'global_stop': self.is_global_stop,
                 'cooldown': self.is_cooldown,
                 'matches_cooldown': self.is_matches_cooldown,
                 'consecutive_losses': self._consecutive_losses,
                 'trade_locked': self._trade_locked,
+                'trade_lock_seconds_remaining': trade_lock_remaining,   # ← NOVO CAMPO
                 'differ_available': differ_avail,
                 'differ_digit': differ_digit,
                 'differ_ticks_left': self._ticks_left(self._active_signals.get('differ')),
