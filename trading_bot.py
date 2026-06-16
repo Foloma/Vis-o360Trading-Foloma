@@ -56,7 +56,6 @@ class TradingBot:
         self.on_signal_result_callback = None
         self._last_signal_id = None
 
-        # Resultado do último trade para o frontend
         self.last_trade_result = None
 
     def start(self, client):
@@ -74,7 +73,6 @@ class TradingBot:
         logger.info("▶️ Resumido")
 
     def on_disconnect(self):
-        """Chamado quando a sessão WebSocket é destruída."""
         self._client_connected = False
         self._client_authorized = False
         self.client = None
@@ -320,9 +318,7 @@ class TradingBot:
                         logger.warning(f"⚠️ Nenhum trade pendente para contract_id {contract_id}. Ignorando.")
                         return
 
-            # Bloco único com lock
             with self._state_lock:
-                # Reverter expiração se necessário
                 if target_trade.get('result') == 'expired':
                     logger.info(f"🔄 Trade {contract_id} foi expirado mas o POC chegou — a aplicar resultado real")
                     self.daily_stats['losses'] -= 1
@@ -330,12 +326,10 @@ class TradingBot:
                     self.stats['expired_trades'] -= 1
                     self.daily_stats['expired_trades'] -= 1
 
-                # Verificar se já não foi processado
                 if target_trade.get('result') not in ('pending', 'expired'):
                     logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
                     return
 
-                # Aplicar resultado real
                 if is_win:
                     target_trade['result'] = 'win'
                     target_trade['profit'] = profit
@@ -357,7 +351,6 @@ class TradingBot:
 
                 self._daily_stats_dirty = True
 
-                # Guardar resultado do último trade para o frontend
                 barrier = target_trade.get('digit_barrier', None)
                 action = target_trade.get('action', '')
                 if barrier is not None:
@@ -368,21 +361,26 @@ class TradingBot:
                     else:
                         won_digit = '?'
                 else:
-                    # Para PAR/ÍMPAR (DIGITODD/DIGITEVEN) inferir paridade
                     if 'DIGITODD' in action or action == 'CALL':
                         won_digit = 'Ímpar' if is_win else 'Par'
                     elif 'DIGITEVEN' in action or action == 'PUT':
                         won_digit = 'Par' if is_win else 'Ímpar'
                     else:
                         won_digit = '?'
+
+                # ---- NOVOS CAMPOS DE AUDITORIA ----
                 self.last_trade_result = {
                     'contract_id': contract_id,
                     'action': action,
                     'barrier': barrier,
                     'is_win': is_win,
                     'profit': profit,
-                    'digit': won_digit
+                    'digit': won_digit,
+                    'entry_tick': self.digit_analyzer.get_current_digit() if self.digit_analyzer else '?',
+                    'entry_tick_count': self.digit_analyzer._tick_count if self.digit_analyzer else 0,
+                    'latency_ms': self.client.last_trade_latency_ms if self.client else 0
                 }
+                # ---- FIM NOVOS CAMPOS ----
 
             self.update_stats()
             if self.client:
