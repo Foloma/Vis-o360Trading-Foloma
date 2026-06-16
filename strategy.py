@@ -9,10 +9,10 @@ logger = logging.getLogger(__name__)
 class StrategyManager:
     """
     Implementa os módulos da Foloma Visão 360 com sincronização por snapshots.
-    - Pré‑visualização de oportunidades sem consumir estados de sequência.
-    - Sinais gerados apenas no clique (evaluate_*).
+    - Sinais gerados automaticamente (differ/parity no início do ciclo; matches/zscore sempre).
+    - Preview sem efeitos colaterais.
     - Cache de sinais expira após 10 ticks.
-    - Frontend vê disponibilidade através de _peek_* que chamam _peek_generate_*.
+    - Entrada apenas no clique (evaluate_*), que consome o estado.
     """
 
     def __init__(self, client, analyzer):
@@ -39,7 +39,6 @@ class StrategyManager:
         self._zscore_cooldown_until = 0
         self._price_history = []
 
-        # Cache de sinais gerados (apenas no clique)
         self._active_signals = {
             'differ': None,
             'parity': None,
@@ -47,7 +46,6 @@ class StrategyManager:
             'zscore': None
         }
 
-        # Validade do sinal após geração (10 ticks)
         self.SIGNAL_VALIDITY_TICKS = 10
 
         self._trade_locked = False
@@ -123,9 +121,10 @@ class StrategyManager:
                 if len(self._price_history) > 20:
                     self._price_history.pop(0)
         self.refresh_signals()
+        self._maybe_generate_signals()
 
     def refresh_signals(self):
-        """Apenas remove sinais expirados da cache."""
+        """Remove sinais expirados. NUNCA gera novos."""
         with self._lock:
             self._check_trade_lock_timeout()
             for strategy in ('differ', 'parity', 'matches', 'zscore'):
@@ -133,6 +132,42 @@ class StrategyManager:
                 if signal and not self._is_signal_still_valid(signal):
                     self._active_signals[strategy] = None
                     logger.info(f"⏰ Sinal {strategy} expirado (ID {signal['id']})")
+
+    def _maybe_generate_signals(self):
+        """
+        Gera sinais automaticamente:
+        - differ/parity apenas no início do ciclo (ticks_remaining >= 9)
+        - matches/zscore a qualquer momento
+        """
+        with self._lock:
+            if self._trade_locked:
+                return
+            tpd = self.analyzer.TICKS_PER_DIGIT if hasattr(self.analyzer, 'TICKS_PER_DIGIT') else 10
+            tr = self.analyzer.get_ticks_remaining()
+            inicio_ciclo = tr >= tpd - 1
+
+            # Estratégias de ciclo (só no início)
+            if inicio_ciclo:
+                for strategy in ('differ', 'parity'):
+                    if self._active_signals.get(strategy) and self._is_signal_still_valid(self._active_signals[strategy]):
+                        continue
+                    preview_func = getattr(self, f'_preview_{strategy}_signal', None)
+                    if preview_func:
+                        preview = preview_func()
+                        if preview:
+                            self._create_signal(strategy, preview['recommendation'],
+                                                preview.get('digits', []), preview['reason'])
+
+            # Estratégias contínuas (sempre)
+            for strategy in ('matches', 'zscore'):
+                if self._active_signals.get(strategy) and self._is_signal_still_valid(self._active_signals[strategy]):
+                    continue
+                preview_func = getattr(self, f'_preview_{strategy}_signal', None)
+                if preview_func:
+                    preview = preview_func()
+                    if preview:
+                        self._create_signal(strategy, preview['recommendation'],
+                                            preview.get('digits', []), preview['reason'])
 
     def _is_signal_still_valid(self, signal):
         if not signal:
@@ -170,7 +205,7 @@ class StrategyManager:
             self.unlock_trade()
 
     # -----------------------------------------------------------------
-    # Criação de snapshot de sinal (apenas no evaluate_*)
+    # Criação de snapshot de sinal
     # -----------------------------------------------------------------
     def _create_signal(self, strategy, recommendation, digits, reason=''):
         current_tick = self.analyzer._tick_count
@@ -187,10 +222,9 @@ class StrategyManager:
         return signal
 
     # -----------------------------------------------------------------
-    # Pré‑visualização sem efeitos colaterais (_peek_generate_*)
-    # Devolvem um dicionário de sinal ou None, SEM alterar estado.
+    # Métodos de preview SEM efeitos colaterais
     # -----------------------------------------------------------------
-    def _peek_generate_differ_signal(self):
+    def _preview_differ_signal(self):
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 2:
             return None
@@ -199,15 +233,12 @@ class StrategyManager:
             digit = last_two[0]
             last_ten = recent[-10:] if len(recent) >= 10 else recent
             if last_ten.count(digit) >= 2 and digit not in self._differ_sequence_used:
-                return {
-                    'strategy': 'differ',
-                    'recommendation': digit,
-                    'digits': last_two[-2:],
-                    'reason': f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos"
-                }
+                return {'recommendation': digit,
+                        'digits': last_two[-2:],
+                        'reason': f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos"}
         return None
 
-    def _peek_generate_parity_signal(self):
+    def _preview_parity_signal(self):
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 4:
             return None
@@ -216,21 +247,25 @@ class StrategyManager:
         even_count = 4 - odd_count
         if odd_count >= 3:
             if not self._parity_odd_used:
-                return {'strategy': 'parity', 'recommendation': 'even',
-                        'digits': recent[-4:], 'reason': f"Tendência ÍMPAR ({odd_count}/4) → PAR"}
+                return {'recommendation': 'even',
+                        'digits': recent[-4:],
+                        'reason': f"Tendência ÍMPAR ({odd_count}/4) → PAR"}
             if self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
-                return {'strategy': 'parity', 'recommendation': 'even',
-                        'digits': recent[-4:], 'reason': "Martingale disponível (Tendência ÍMPAR)"}
+                return {'recommendation': 'even',
+                        'digits': recent[-4:],
+                        'reason': "Martingale disponível (Tendência ÍMPAR)"}
         if even_count >= 3:
             if not self._parity_even_used:
-                return {'strategy': 'parity', 'recommendation': 'odd',
-                        'digits': recent[-4:], 'reason': f"Tendência PAR ({even_count}/4) → ÍMPAR"}
+                return {'recommendation': 'odd',
+                        'digits': recent[-4:],
+                        'reason': f"Tendência PAR ({even_count}/4) → ÍMPAR"}
             if self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even':
-                return {'strategy': 'parity', 'recommendation': 'odd',
-                        'digits': recent[-4:], 'reason': "Martingale disponível (Tendência PAR)"}
+                return {'recommendation': 'odd',
+                        'digits': recent[-4:],
+                        'reason': "Martingale disponível (Tendência PAR)"}
         return None
 
-    def _peek_generate_matches_signal(self):
+    def _preview_matches_signal(self):
         if self.is_matches_cooldown:
             return None
         absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
@@ -238,30 +273,35 @@ class StrategyManager:
             return None
         for digit, count in absence().items():
             if count >= 15 and not self._matches_sequence_used:
-                return {'strategy': 'matches', 'recommendation': digit,
-                        'digits': [], 'reason': f"Dígito {digit} ausente há {count} ticks"}
+                return {'recommendation': digit,
+                        'digits': [],
+                        'reason': f"Dígito {digit} ausente há {count} ticks"}
         return None
 
-    def _peek_generate_zscore_signal(self):
+    def _preview_zscore_signal(self):
         if self._zscore_sequence_used or time.time() < self._zscore_cooldown_until:
             return None
         z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
         if z_diff is not None and digit_diff is not None:
-            return {'strategy': 'zscore', 'recommendation': digit_diff,
-                    'digits': [], 'reason': f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"}
+            return {'recommendation': digit_diff,
+                    'action': 'DIFFER',
+                    'digits': [],
+                    'reason': f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}"}
         if z_match is not None and digit_match is not None:
-            return {'strategy': 'zscore', 'recommendation': digit_match,
-                    'digits': [], 'reason': f"Z‑Score {z_match:.2f} → MATCHES {digit_match}"}
+            return {'recommendation': digit_match,
+                    'action': 'MATCHES',
+                    'digits': [],
+                    'reason': f"Z‑Score {z_match:.2f} → MATCHES {digit_match}"}
         return None
 
     # -----------------------------------------------------------------
-    # Métodos de leitura para get_status (usam cache ou _peek_generate_*)
+    # Métodos de leitura para get_status (cache + preview)
     # -----------------------------------------------------------------
     def _peek_differ(self):
         signal = self._active_signals['differ']
         if signal and self._is_signal_still_valid(signal):
             return True, signal['recommendation']
-        preview = self._peek_generate_differ_signal()
+        preview = self._preview_differ_signal()
         if preview:
             return True, preview['recommendation']
         return False, None
@@ -270,7 +310,7 @@ class StrategyManager:
         signal = self._active_signals['parity']
         if signal and self._is_signal_still_valid(signal):
             return True, signal['recommendation'], signal['reason']
-        preview = self._peek_generate_parity_signal()
+        preview = self._preview_parity_signal()
         if preview:
             return True, preview['recommendation'], preview['reason']
         return False, None, "Nenhuma tendência clara"
@@ -281,7 +321,7 @@ class StrategyManager:
         signal = self._active_signals['matches']
         if signal and self._is_signal_still_valid(signal):
             return True
-        preview = self._peek_generate_matches_signal()
+        preview = self._preview_matches_signal()
         if preview:
             return True
         return False
@@ -291,10 +331,9 @@ class StrategyManager:
         if signal and self._is_signal_still_valid(signal):
             action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
             return True, action, signal['recommendation'], signal['reason']
-        preview = self._peek_generate_zscore_signal()
+        preview = self._preview_zscore_signal()
         if preview:
-            action = 'DIFFER' if 'DIFFER' in preview['reason'] else 'MATCHES'
-            return True, action, preview['recommendation'], preview['reason']
+            return True, preview['action'], preview['recommendation'], preview['reason']
         return False, None, None, "Nenhum sinal Z‑Score disponível"
 
     # -----------------------------------------------------------------
