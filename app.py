@@ -1,8 +1,9 @@
-import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid, urllib.parse, urllib.request
+import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid
 from datetime import datetime, date
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, abort, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
+import urllib.parse
 
 # ==================== CONFIGURAÇÃO ====================
 SECRET_KEY = os.environ.get('SECRET_KEY')
@@ -156,15 +157,10 @@ def init_db():
         user_id TEXT NOT NULL,
         account_type TEXT DEFAULT 'demo',
         created_at REAL NOT NULL,
-        used INTEGER DEFAULT 0,
-        code_verifier TEXT
+        used INTEGER DEFAULT 0
     )''')
     try:
         c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE oauth_states ADD COLUMN code_verifier TEXT")
     except sqlite3.OperationalError:
         pass
     c.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
@@ -1038,115 +1034,64 @@ def debug():
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
 
-# ==================== OAUTH (PKCE) ====================
-@app.route('/api/auth/deriv_oauth_url')
-@require_auth
-def deriv_oauth_url():
-    app_id = config.DERIV_APP_ID
-    if not app_id:
-        return jsonify({'error': 'Configuração OAuth em falta'}), 500
-
-    base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
-    redirect_uri = base_url + '/oauth/callback'
-
-    # PKCE: gerar code_verifier e code_challenge
-    code_verifier = secrets.token_urlsafe(64)[:128]
-    code_challenge = base64.urlsafe_b64encode(
-        hashlib.sha256(code_verifier.encode('ascii')).digest()
-    ).rstrip(b'=').decode('ascii')
-
-    state_id = uuid.uuid4().hex
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        conn.execute(
-            "INSERT INTO oauth_states (state_id, user_id, account_type, created_at, code_verifier) VALUES (?, ?, ?, ?, ?)",
-            (state_id, session['user_id'], request.args.get('account_type', 'demo'), time.time(), code_verifier)
-        )
-        conn.commit()
-    except Exception as e:
-        logger.error(f"Erro ao criar state OAuth: {e}")
-        return jsonify({'error': 'Erro interno ao iniciar OAuth'}), 500
-    finally:
-        conn.close()
-
-    auth_url = (
-        "https://auth.deriv.com/oauth2/auth"
-        f"?response_type=code"
-        f"&client_id={app_id}"
-        f"&redirect_uri={urllib.parse.quote(redirect_uri, safe='')}"
-        f"&scope=trade"
-        f"&state={state_id}"
-        f"&code_challenge={code_challenge}"
-        f"&code_challenge_method=S256"
-    )
-    logger.info(f"URL OAuth (PKCE): {auth_url}")
-    return jsonify({'url': auth_url})
-
+# ==================== OAUTH (IMPLICIT FLOW ORIGINAL) ====================
 @app.route('/oauth/callback')
 def oauth_callback():
     state_id = request.args.get('state')
-    code = request.args.get('code')
-    error = request.args.get('error')
-    if error:
-        logger.error(f"OAuth error: {error}")
-        return redirect('/?error=oauth_denied')
-    if not state_id or not code:
-        return redirect('/?error=invalid_params')
+    if not state_id:
+        return redirect('/?error=invalid_state')
 
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        row = conn.execute(
-            "SELECT user_id, account_type, code_verifier FROM oauth_states WHERE state_id = ? AND used = 0 AND created_at > ?",
-            (state_id, time.time() - OAUTH_STATE_TTL)
-        ).fetchone()
-        if not row:
-            return redirect('/?error=state_expired')
-        user_id, account_type, code_verifier = row
-
-        # Trocar code por token (usando urllib em vez de requests)
-        token_url = "https://auth.deriv.com/oauth2/token"
-        data = {
-            'grant_type': 'authorization_code',
-            'client_id': config.DERIV_APP_ID,
-            'code': code,
-            'code_verifier': code_verifier,
-            'redirect_uri': f"{os.environ.get('BASE_URL', request.host_url.rstrip('/'))}/oauth/callback"
-        }
-        post_data = urllib.parse.urlencode(data).encode('ascii')
-        req = urllib.request.Request(token_url, data=post_data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
-        with urllib.request.urlopen(req) as resp:
-            token_resp = json.loads(resp.read().decode('utf-8'))
-        if 'error' in token_resp:
-            logger.error(f"Token exchange error: {token_resp}")
-            return redirect('/?error=token_exchange_failed')
-
-        access_token = token_resp.get('access_token')
-        if not access_token:
-            return redirect('/?error=no_access_token')
-
-        conn.execute("UPDATE oauth_states SET used = 1 WHERE state_id = ?", (state_id,))
-        conn.commit()
-    finally:
-        conn.close()
-
-    email_row = sqlite3.connect(DATABASE_PATH, timeout=10).execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not email_row:
-        return redirect('/?error=user_not_found')
-    email = email_row[0]
-
-    UserStore.add_token(email, account_type, access_token)
-    UserStore.set_active_account(email, account_type)
-
-    user = UserStore.get(email)
-    session['user_id'] = user_id
-    session['user_email'] = email
-    session['user_name'] = user['name']
-    session['user_role'] = user.get('role', 'user')
-    session.permanent = True
-
-    create_session(user_id, user, force=True)
-    logger.info(f"✅ OAuth PKCE concluído para {email}")
-    return redirect('/?oauth=success')
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>OAuth Callback</title></head>
+<body>
+    <p>A processar autenticação...</p>
+    <script>
+        (function() {{
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            const accessToken = params.get('access_token');
+            if (!accessToken) {{
+                window.location.href = '/?error=no_token';
+                return;
+            }}
+            const tokens = [];
+            for (let i = 1; params.get('token' + i); i++) {{
+                tokens.push({{ token: params.get('token' + i), acct: params.get('acct' + i) || '' }});
+            }}
+            if (tokens.length === 0 && accessToken) {{
+                tokens.push({{ token: accessToken, acct: '' }});
+            }}
+            fetch('/api/auth/process-oauth', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ state: '{state_id}', tokens: tokens }})
+            }})
+            .then(response => response.json())
+            .then(data => {{
+                if (data.status === 'ok') {{
+                    localStorage.setItem('oauth_result', 'connected');
+                    localStorage.setItem('oauth_ts', Date.now().toString());
+                    window.close();
+                    setTimeout(function() {{ window.location.href = '/'; }}, 500);
+                }} else {{
+                    localStorage.setItem('oauth_result', 'error');
+                    localStorage.setItem('oauth_ts', Date.now().toString());
+                    window.close();
+                    setTimeout(function() {{ window.location.href = '/?error=' + (data.error || 'oauth_failed'); }}, 500);
+                }}
+            }})
+            .catch(function() {{
+                localStorage.setItem('oauth_result', 'error');
+                localStorage.setItem('oauth_ts', Date.now().toString());
+                window.close();
+                setTimeout(function() {{ window.location.href = '/?error=request_failed'; }}, 500);
+            }});
+        }})();
+    </script>
+</body>
+</html>"""
+    return make_response(html)
 
 @app.route('/api/auth/process-oauth', methods=['POST'])
 def process_oauth():
@@ -1199,6 +1144,40 @@ def process_oauth():
     create_session(user_id, user, force=True)
     logger.info(f"✅ OAuth concluído para {email}")
     return jsonify({'status': 'ok'})
+
+@app.route('/api/auth/deriv_oauth_url')
+@require_auth
+def deriv_oauth_url():
+    app_id = config.DERIV_APP_ID
+    if not app_id:
+        return jsonify({'error': 'Configuração OAuth em falta'}), 500
+    base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
+    redirect_uri = base_url + '/oauth/callback'
+    encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
+    state_id = uuid.uuid4().hex
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        conn.execute(
+            "INSERT INTO oauth_states (state_id, user_id, account_type, created_at) VALUES (?, ?, ?, ?)",
+            (state_id, session['user_id'], request.args.get('account_type', 'demo'), time.time())
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Erro ao criar state OAuth: {e}")
+        return jsonify({'error': 'Erro interno ao iniciar OAuth'}), 500
+    finally:
+        conn.close()
+
+    url = (
+        f"https://oauth.deriv.com/oauth2/authorize"
+        f"?app_id={app_id}"
+        f"&redirect_uri={encoded_redirect}"
+        f"&response_type=token"
+        f"&state={state_id}"
+        f"&l=PT"
+    )
+    logger.info(f"URL OAuth gerado: {url}")
+    return jsonify({'url': url})
 
 # ==================== TRADING ====================
 
