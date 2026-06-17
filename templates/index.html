@@ -857,7 +857,7 @@ async function conectar(){
   try{ const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok,account_type:selectedAcct})}); const d=await r.json(); if(d.error){ toast('❌ '+d.error,'loss'); return; } toast('✅ Token guardado','win'); $_( 'conSt').textContent='🔄 A conectar...'; setTimeout(()=>{ fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.status==='connecting') toast('🔄 Conectando...','info'); }); },500); } catch(e){ toast('❌ Erro de rede','loss'); }
 }
 
-// ══════════ CONEXÃO OAUTH (FLUXO IMPLÍCITO RESTAURADO) ══════════
+// ══════════ CONEXÃO OAUTH (localStorage) ══════════
 async function connectWithDeriv() {
     try {
         const r = await fetch('/api/auth/deriv_oauth_url');
