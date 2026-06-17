@@ -80,8 +80,11 @@ class DerivWebSocketClient:
 
         self.last_trade_latency_ms = 0
 
-        # URL personalizado do WebSocket (ex.: OTP) – se None, usa config.WS_URL
+        # URL personalizado (ex.: OTP)
         self._ws_url = None
+
+        # Callback para renovar OTP antes de reconexões
+        self._otp_refresh_callback = None
 
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
@@ -100,12 +103,10 @@ class DerivWebSocketClient:
         logger.info(f"🔑 Token configurado: {t[:8]}...")
 
     def set_ws_url(self, url):
-        """Define um URL de WebSocket personalizado (ex.: OTP)."""
         self._ws_url = url
         logger.info(f"🔗 WebSocket URL personalizado: {url}")
 
     def _get_ws_url(self):
-        """Retorna o URL a utilizar na conexão (personalizado ou padrão)."""
         return self._ws_url or self.config.WS_URL
 
     def connect(self):
@@ -134,6 +135,16 @@ class DerivWebSocketClient:
                 if self._stop_event.wait(timeout=60):
                     break
                 continue
+
+            # Antes de reconectar, tentar renovar OTP se disponível
+            if self._otp_refresh_callback and self._reconnect_count > 0:
+                try:
+                    new_url = self._otp_refresh_callback()
+                    if new_url:
+                        self._ws_url = new_url
+                        logger.info(f"🔄 OTP renovado: {new_url[:60]}...")
+                except Exception as e:
+                    logger.error(f"Erro ao renovar OTP: {e}")
 
             self._reset_state()
             try:
@@ -238,6 +249,13 @@ class DerivWebSocketClient:
         self.auth_error = None
 
     def _authorize_and_wait(self, timeout=10):
+        # Se o URL contém OTP, já está autenticado – pular authorize
+        if self._ws_url and 'otp=' in self._ws_url:
+            self.authorized = True
+            self.loginid = 'OTP_AUTH'
+            logger.info("✅ Autenticado via OTP URL (sem authorize)")
+            return True
+
         if not self.user_token:
             logger.error("🚫 Tentativa de autorizar sem token!")
             return False
