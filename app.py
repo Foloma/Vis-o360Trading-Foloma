@@ -1,4 +1,4 @@
-import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid
+import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid, requests
 from datetime import datetime, date
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, abort, make_response
@@ -157,10 +157,15 @@ def init_db():
         user_id TEXT NOT NULL,
         account_type TEXT DEFAULT 'demo',
         created_at REAL NOT NULL,
-        used INTEGER DEFAULT 0
+        used INTEGER DEFAULT 0,
+        code_verifier TEXT
     )''')
     try:
         c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE oauth_states ADD COLUMN code_verifier TEXT")
     except sqlite3.OperationalError:
         pass
     c.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
@@ -170,7 +175,6 @@ def init_db():
 init_db()
 
 OAUTH_STATE_TTL = 900
-OAUTH_STATE_REUSE_WINDOW = 30
 
 def _cleanup_loop():
     while True:
@@ -389,7 +393,6 @@ def reset_bot_state(bot):
 
 def validate_account_type(loginid, expected):
     is_demo = loginid.startswith('VR')
-    logger.info(f"🔍 Validando conta: loginid={loginid}, esperado={expected}, is_demo={is_demo}")
     return is_demo if expected == 'demo' else not is_demo
 
 def persist_trade(user_id, trade_data):
@@ -1012,7 +1015,6 @@ def debug():
         return jsonify({'error': 'Sessão não encontrada'}), 500
     c = sess['client']
     
-    # Calcular ping efetivo (ignorar sentinela se stream estiver saudável)
     raw_ping = getattr(c, '_ping_ms', 0)
     if raw_ping >= 9999 and c.streaming and c._last_tick_time:
         if time.time() - c._last_tick_time < 10:
@@ -1037,73 +1039,118 @@ def debug():
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
 
-# ==================== OAUTH (PERSISTIDO NA BD) ====================
+# ==================== OAUTH (PKCE) ====================
+@app.route('/api/auth/deriv_oauth_url')
+@require_auth
+def deriv_oauth_url():
+    app_id = config.DERIV_APP_ID
+    if not app_id:
+        return jsonify({'error': 'Configuração OAuth em falta'}), 500
+
+    base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
+    redirect_uri = base_url + '/oauth/callback'
+
+    # PKCE: gerar code_verifier e code_challenge
+    code_verifier = secrets.token_urlsafe(64)[:128]
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode('ascii')).digest()
+    ).rstrip(b'=').decode('ascii')
+
+    state_id = uuid.uuid4().hex
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        conn.execute(
+            "INSERT INTO oauth_states (state_id, user_id, account_type, created_at, code_verifier) VALUES (?, ?, ?, ?, ?)",
+            (state_id, session['user_id'], request.args.get('account_type', 'demo'), time.time(), code_verifier)
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Erro ao criar state OAuth: {e}")
+        return jsonify({'error': 'Erro interno ao iniciar OAuth'}), 500
+    finally:
+        conn.close()
+
+    auth_url = (
+        "https://auth.deriv.com/oauth2/auth"
+        f"?response_type=code"
+        f"&client_id={app_id}"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri, safe='')}"
+        f"&scope=trade"
+        f"&state={state_id}"
+        f"&code_challenge={code_challenge}"
+        f"&code_challenge_method=S256"
+    )
+    logger.info(f"URL OAuth (PKCE): {auth_url}")
+    return jsonify({'url': auth_url})
+
 @app.route('/oauth/callback')
 def oauth_callback():
     state_id = request.args.get('state')
-    logger.info(f"📥 OAuth Callback recebido. State: {state_id}, Session: {dict(session)}, Args: {request.args.to_dict()}")
-    if not state_id:
-        logger.error("🚫 Callback sem state!")
-        return redirect('/?error=invalid_state')
+    code = request.args.get('code')
+    error = request.args.get('error')
+    if error:
+        logger.error(f"OAuth error: {error}")
+        return redirect('/?error=oauth_denied')
+    if not state_id or not code:
+        return redirect('/?error=invalid_params')
 
-    html = f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>OAuth Callback</title></head>
-<body>
-    <p>A processar autenticação...</p>
-    <script>
-        (function() {{
-            const hash = window.location.hash.substring(1);
-            const params = new URLSearchParams(hash);
-            const accessToken = params.get('access_token');
-            if (!accessToken) {{
-                window.location.href = '/?error=no_token';
-                return;
-            }}
-            const tokens = [];
-            for (let i = 1; params.get('token' + i); i++) {{
-                tokens.push({{ token: params.get('token' + i), acct: params.get('acct' + i) || '' }});
-            }}
-            if (tokens.length === 0 && accessToken) {{
-                tokens.push({{ token: accessToken, acct: '' }});
-            }}
-            fetch('/api/auth/process-oauth', {{
-                method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }},
-                body: JSON.stringify({{ state: '{state_id}', tokens: tokens }})
-            }})
-            .then(response => response.json())
-            .then(data => {{
-                if (data.status === 'ok') {{
-                    localStorage.setItem('oauth_result', 'connected');
-                    localStorage.setItem('oauth_ts', Date.now().toString());
-                    window.close();
-                    setTimeout(function() {{ window.location.href = '/'; }}, 500);
-                }} else {{
-                    localStorage.setItem('oauth_result', 'error');
-                    localStorage.setItem('oauth_ts', Date.now().toString());
-                    window.close();
-                    setTimeout(function() {{ window.location.href = '/?error=' + (data.error || 'oauth_failed'); }}, 500);
-                }}
-            }})
-            .catch(function() {{
-                localStorage.setItem('oauth_result', 'error');
-                localStorage.setItem('oauth_ts', Date.now().toString());
-                window.close();
-                setTimeout(function() {{ window.location.href = '/?error=request_failed'; }}, 500);
-            }});
-        }})();
-    </script>
-</body>
-</html>"""
-    return make_response(html)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        row = conn.execute(
+            "SELECT user_id, account_type, code_verifier FROM oauth_states WHERE state_id = ? AND used = 0 AND created_at > ?",
+            (state_id, time.time() - OAUTH_STATE_TTL)
+        ).fetchone()
+        if not row:
+            return redirect('/?error=state_expired')
+        user_id, account_type, code_verifier = row
+
+        # Trocar code por token
+        token_url = "https://auth.deriv.com/oauth2/token"
+        data = {
+            'grant_type': 'authorization_code',
+            'client_id': config.DERIV_APP_ID,
+            'code': code,
+            'code_verifier': code_verifier,
+            'redirect_uri': f"{os.environ.get('BASE_URL', request.host_url.rstrip('/'))}/oauth/callback"
+        }
+        token_resp = requests.post(token_url, data=data).json()
+        if 'error' in token_resp:
+            logger.error(f"Token exchange error: {token_resp}")
+            return redirect('/?error=token_exchange_failed')
+
+        access_token = token_resp.get('access_token')
+        if not access_token:
+            return redirect('/?error=no_access_token')
+
+        conn.execute("UPDATE oauth_states SET used = 1 WHERE state_id = ?", (state_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    email_row = sqlite3.connect(DATABASE_PATH, timeout=10).execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not email_row:
+        return redirect('/?error=user_not_found')
+    email = email_row[0]
+
+    UserStore.add_token(email, account_type, access_token)
+    UserStore.set_active_account(email, account_type)
+
+    user = UserStore.get(email)
+    session['user_id'] = user_id
+    session['user_email'] = email
+    session['user_name'] = user['name']
+    session['user_role'] = user.get('role', 'user')
+    session.permanent = True
+
+    create_session(user_id, user, force=True)
+    logger.info(f"✅ OAuth PKCE concluído para {email}")
+    return redirect('/?oauth=success')
 
 @app.route('/api/auth/process-oauth', methods=['POST'])
 def process_oauth():
     data = request.json
     state_id = data.get('state')
     tokens = data.get('tokens', [])
-    logger.info(f"📥 Process OAuth. State: {state_id}, Session: {dict(session)}, Tokens recebidos: {tokens}")
     if not state_id or not tokens:
         return jsonify({'error': 'Dados incompletos'}), 400
 
@@ -1114,25 +1161,18 @@ def process_oauth():
             (state_id, time.time() - OAUTH_STATE_TTL)
         ).fetchone()
         if not row:
-            logger.error(f"🚫 State '{state_id}' não encontrado ou já usado/expirado.")
             return jsonify({'error': 'OAuth expirado. Por favor, inicie novamente.'}), 401
 
-        user_id = row[0]
-        account_type_request = row[1]
-
+        user_id, account_type_request = row
         conn.execute("UPDATE oauth_states SET used = 1 WHERE state_id = ?", (state_id,))
         conn.commit()
     finally:
         conn.close()
 
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        row = conn.execute('SELECT email FROM users WHERE id = ?', (user_id,)).fetchone()
-        if not row:
-            return jsonify({'error': 'Utilizador não encontrado'}), 404
-        email = row[0]
-    finally:
-        conn.close()
+    email_row = sqlite3.connect(DATABASE_PATH, timeout=10).execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not email_row:
+        return jsonify({'error': 'Utilizador não encontrado'}), 404
+    email = email_row[0]
 
     for acc in tokens:
         tok = acc.get('token')
@@ -1157,41 +1197,6 @@ def process_oauth():
     create_session(user_id, user, force=True)
     logger.info(f"✅ OAuth concluído para {email}")
     return jsonify({'status': 'ok'})
-
-@app.route('/api/auth/deriv_oauth_url')
-@require_auth
-def deriv_oauth_url():
-    app_id = config.DERIV_APP_ID
-    if not app_id:
-        logger.error("DERIV_APP_ID não definido")
-        return jsonify({'error': 'Configuração OAuth em falta'}), 500
-    base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
-    redirect_uri = base_url + '/oauth/callback'
-    encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
-    state_id = uuid.uuid4().hex
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        conn.execute(
-            "INSERT INTO oauth_states (state_id, user_id, account_type, created_at) VALUES (?, ?, ?, ?)",
-            (state_id, session['user_id'], request.args.get('account_type', 'demo'), time.time())
-        )
-        conn.commit()
-    except Exception as e:
-        logger.error(f"Erro ao criar state OAuth: {e}")
-        return jsonify({'error': 'Erro interno ao iniciar OAuth'}), 500
-    finally:
-        conn.close()
-
-    url = (
-        f"https://oauth.deriv.com/oauth2/authorize"
-        f"?app_id={app_id}"
-        f"&redirect_uri={encoded_redirect}"
-        f"&response_type=token"
-        f"&state={state_id}"
-        f"&l=PT"
-    )
-    logger.info(f"URL OAuth gerado: {url}")
-    return jsonify({'url': url})
 
 # ==================== TRADING ====================
 
@@ -1243,11 +1248,10 @@ def trade_digit():
         if ok:
             strategy.lock_trade()
             credit_affiliate_commission(session['user_email'], amt)
-            label = 'ÍMPAR' if action == 'odd' else 'PAR'
-            # Adiciona latência (opcional, para já)
             logger.info(
                 f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
             )
+            label = 'ÍMPAR' if action == 'odd' else 'PAR'
             return jsonify({
                 'status': 'ok',
                 'message': f'✅ {label} por ${amt:.2f}',
@@ -1258,6 +1262,7 @@ def trade_digit():
     except Exception:
         logger.exception("Erro trade dígito")
         return jsonify({'error': 'Erro interno'}), 500
+
 @app.route('/api/trade/differ', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1290,10 +1295,24 @@ def trade_differ():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
+        # ---- INÍCIO AUDITORIA ----
+        audit_tick = analyzer.get_current_digit()
+        audit_tick_count = analyzer._tick_count
+        audit_click_time = time.time()
+        logger.info(
+            f"🔍 AUDITORIA | tick_no_clique={audit_tick} "
+            f"| tick_count={audit_tick_count} "
+            f"| hora_clique={audit_click_time:.3f}"
+        )
+        # ---- FIM AUDITORIA ----
+
         ok = sess['client'].place_differ_trade(digit, amt)
         if ok:
             strategy.lock_trade()
             credit_affiliate_commission(session['user_email'], amt)
+            logger.info(
+                f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
+            )
             return jsonify({
                 'status': 'ok',
                 'message': f'🎯 DIFFER no dígito {digit} por ${amt:.2f}',
@@ -1336,10 +1355,24 @@ def trade_matches():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
+        # ---- INÍCIO AUDITORIA ----
+        audit_tick = analyzer.get_current_digit()
+        audit_tick_count = analyzer._tick_count
+        audit_click_time = time.time()
+        logger.info(
+            f"🔍 AUDITORIA | tick_no_clique={audit_tick} "
+            f"| tick_count={audit_tick_count} "
+            f"| hora_clique={audit_click_time:.3f}"
+        )
+        # ---- FIM AUDITORIA ----
+
         ok = sess['client'].place_matches_trade(digit, amt)
         if ok:
             strategy.lock_trade()
             credit_affiliate_commission(session['user_email'], amt)
+            logger.info(
+                f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
+            )
             return jsonify({
                 'status': 'ok',
                 'message': f'🎯 MATCHES no dígito {digit} por ${amt:.2f}',
@@ -1382,28 +1415,36 @@ def trade_zscore():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
+        # ---- INÍCIO AUDITORIA ----
+        audit_tick = analyzer.get_current_digit()
+        audit_tick_count = analyzer._tick_count
+        audit_click_time = time.time()
+        logger.info(
+            f"🔍 AUDITORIA | tick_no_clique={audit_tick} "
+            f"| tick_count={audit_tick_count} "
+            f"| hora_clique={audit_click_time:.3f}"
+        )
+        # ---- FIM AUDITORIA ----
+
         if action == 'DIFFER':
             ok = sess['client'].place_differ_trade(digit, amt)
-            if ok:
-                strategy._zscore_sequence_used = True
-                strategy.lock_trade()
-                credit_affiliate_commission(session['user_email'], amt)
-                return jsonify({
-                    'status': 'ok',
-                    'message': f'🎯 Z‑Score DIFFER no dígito {digit} por ${amt:.2f}',
-                    'digit': digit
-                })
         elif action == 'MATCHES':
             ok = sess['client'].place_matches_trade(digit, amt)
-            if ok:
-                strategy._zscore_sequence_used = True
-                strategy.lock_trade()
-                credit_affiliate_commission(session['user_email'], amt)
-                return jsonify({
-                    'status': 'ok',
-                    'message': f'🎯 Z‑Score MATCHES no dígito {digit} por ${amt:.2f}',
-                    'digit': digit
-                })
+        else:
+            return jsonify({'error': 'Ação Z‑Score inválida'}), 400
+
+        if ok:
+            strategy._zscore_sequence_used = True
+            strategy.lock_trade()
+            credit_affiliate_commission(session['user_email'], amt)
+            logger.info(
+                f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
+            )
+            return jsonify({
+                'status': 'ok',
+                'message': f'🎯 Z‑Score {action} no dígito {digit} por ${amt:.2f}',
+                'digit': digit
+            })
         return jsonify({'error': 'Falha no trade Z‑Score'}), 500
     except Exception:
         logger.exception("Erro trade zscore")
@@ -1412,7 +1453,6 @@ def trade_zscore():
 @app.route('/api/zscore/ignore', methods=['POST'])
 @require_auth
 def ignore_zscore():
-    """Marca o sinal Z‑Score atual como ignorado, libertando o ecrã."""
     sess = get_session(session['user_id'])
     if not sess:
         return jsonify({'error': 'Sem sessão'}), 400
@@ -1520,7 +1560,6 @@ def candles_data():
     sess['client'].request_candles(symbol, granularity=granularity, count=50)
     return jsonify({'candles': sess.get('candles', [])})
 
-# ==================== PLACAR DE SINAIS (AGORA USA TRADES REAIS) ====================
 @app.route('/api/signals/scoreboard')
 @require_auth
 def signals_scoreboard():
@@ -1551,7 +1590,6 @@ def signals_scoreboard():
         'win_rate': round(win_rate, 1)
     })
 
-# ==================== AFILIADOS / PAGAMENTOS ====================
 def credit_affiliate_commission(user_email, amount):
     user = UserStore.get(user_email)
     if not user or not user.get('referral_code'):
@@ -1693,7 +1731,6 @@ def withdraw():
         logger.exception("Erro levantamento")
         return jsonify({'error': 'Erro interno'}), 500
 
-# ==================== ADMIN ====================
 @app.route('/api/admin/users')
 @require_admin
 def admin_users():
