@@ -456,6 +456,51 @@ def _save_martingale_state(user_id, bot):
     except Exception as e:
         logger.error(f"Erro ao guardar martingale: {e}")
 
+def make_otp_refresher(email, account_type):
+    """Cria um callback que obtém um novo wss:// via OTP."""
+    def refresh_otp():
+        user = UserStore.get(email)
+        if not user:
+            return None
+        access_token = user.get('tokens', {}).get(account_type)
+        if not access_token:
+            logger.error("OTP refresher: sem access_token")
+            return None
+        from config import config
+        headers = {
+            'Deriv-App-ID': config.DERIV_APP_ID,
+            'Authorization': f'Bearer {access_token}'
+        }
+        # Obter account_id
+        req = urllib.request.Request(
+            f"{config.DERIV_REST_URL}/trading/v1/options/accounts",
+            headers=headers
+        )
+        with urllib.request.urlopen(req) as resp:
+            accounts = json.loads(resp.read())
+        account_id = None
+        for acc in accounts.get('data', []):
+            if acc.get('account_type') == 'deriv' and not acc.get('is_disabled'):
+                account_id = acc.get('account_id')
+                break
+        if not account_id:
+            logger.error("OTP refresher: account_id não encontrado")
+            return None
+        # Pedir OTP
+        req = urllib.request.Request(
+            f"{config.DERIV_REST_URL}/trading/v1/options/accounts/{account_id}/otp",
+            data=json.dumps({}).encode('utf-8'),
+            headers={**headers, 'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req) as resp:
+            otp_resp = json.loads(resp.read())
+        ws_url = otp_resp.get('data', {}).get('url')
+        if ws_url:
+            logger.info(f"OTP refresher: novo WS URL obtido")
+        return ws_url
+    return refresh_otp
+
 def create_session(user_id, user, force=False, ws_url_override=None):
     with sessions_lock:
         if user_id in sessions:
@@ -493,6 +538,12 @@ def create_session(user_id, user, force=False, ws_url_override=None):
     if ws_url_override:
         client.set_ws_url(ws_url_override)
         logger.info(f"🔗 URL WebSocket personalizado: {ws_url_override}")
+
+    # Configurar o callback de renovação de OTP para reconexões automáticas
+    client._otp_refresh_callback = make_otp_refresher(
+        user.get('email', ''),
+        user.get('active_account', 'demo')
+    )
 
     strategy = StrategyManager(client, analyzer)
     bot.strategy = strategy
