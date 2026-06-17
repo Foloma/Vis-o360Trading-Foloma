@@ -515,6 +515,11 @@ async function updateAll(){
     if (bot.last_trade_latency_ms) { _lastTradeLatency = bot.last_trade_latency_ms; }
     if (bot.last_valid_ping_ms) {
         _lastValidPing = bot.last_valid_ping_ms;
+        const pingEl = $_( 'conSt');
+        if (pingEl && isConnected) {
+            const cor = _lastValidPing < 100 ? 'var(--accent)' : _lastValidPing < 250 ? 'var(--warning)' : 'var(--danger)';
+            pingEl.innerHTML = `✅ Ping: <span style="color:${cor}">${_lastValidPing}ms</span> | Reconexões: ...`;
+        }
     }
 
     if(data.digits){
@@ -852,35 +857,24 @@ async function conectar(){
   try{ const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok,account_type:selectedAcct})}); const d=await r.json(); if(d.error){ toast('❌ '+d.error,'loss'); return; } toast('✅ Token guardado','win'); $_( 'conSt').textContent='🔄 A conectar...'; setTimeout(()=>{ fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.status==='connecting') toast('🔄 Conectando...','info'); }); },500); } catch(e){ toast('❌ Erro de rede','loss'); }
 }
 
+// NOVA FUNÇÃO OAuth PKCE (substitui a anterior)
 async function connectWithDeriv() {
     try {
         const r = await fetch('/api/auth/deriv_oauth_url');
         const d = await r.json();
         if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
-        localStorage.removeItem('oauth_result');
         const popup = window.open(d.url, 'derivOAuth', 'width=800,height=700');
-        const checkResult = setInterval(async () => {
-            const result = localStorage.getItem('oauth_result');
-            const ts = parseInt(localStorage.getItem('oauth_ts') || '0');
-            const fresh = (Date.now() - ts) < 30000;
-            if (result === 'connected' && fresh) {
-                clearInterval(checkResult); clearInterval(checkPopup);
-                localStorage.removeItem('oauth_result'); localStorage.removeItem('oauth_ts');
-                toast('✅ Deriv conectada!', 'win', 4000);
-                $_( 'conSt').textContent = '🔄 A ligar...';
-                try { await fetch('/api/connect', { method: 'POST' }); } catch(e) {}
-                let attempts = 0;
-                const check = setInterval(() => { attempts++; updateAll(); if (isConnected || attempts >= 5) clearInterval(check); }, 2000);
-            } else if (result === 'error' && fresh) {
-                clearInterval(checkResult); clearInterval(checkPopup);
-                localStorage.removeItem('oauth_result'); localStorage.removeItem('oauth_ts');
-                toast('❌ OAuth falhou', 'loss');
+        const checkPopup = setInterval(() => {
+            if (!popup || popup.closed) {
+                clearInterval(checkPopup);
+                // Após fechar, verifica se a ligação foi bem sucedida
+                toast('🔄 A verificar conexão...', 'info');
+                setTimeout(async () => {
+                    await fetch('/api/connect', { method: 'POST' });
+                    updateAll();
+                }, 2000);
             }
         }, 500);
-        const checkPopup = setInterval(() => {
-            if (!popup || popup.closed) { clearInterval(checkPopup); setTimeout(() => { if (localStorage.getItem('oauth_result') !== 'connected') { clearInterval(checkResult); toast('❌ OAuth cancelado ou falhou', 'loss'); } }, 3000); }
-        }, 500);
-        setTimeout(() => { clearInterval(checkResult); clearInterval(checkPopup); }, 300000);
     } catch(e) { toast('❌ Erro OAuth', 'loss'); }
 }
 
@@ -1015,7 +1009,7 @@ function updatePingDisplay(){
 
 setInterval(()=>{if(isConnected)loadCandles();},10000);
 setInterval(updateScoreboard,30000); updateScoreboard();
-setInterval(updatePingDisplay, 10000);   // ← restaurado
+setInterval(updatePingDisplay, 10000);
 
 (function(){
   const p=new URLSearchParams(location.search);
