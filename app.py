@@ -1,9 +1,8 @@
-import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid
+import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid, urllib.parse, urllib.request
 from datetime import datetime, date
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, abort, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
-import urllib.parse
 
 # ==================== CONFIGURAÇÃO ====================
 SECRET_KEY = os.environ.get('SECRET_KEY')
@@ -157,10 +156,15 @@ def init_db():
         user_id TEXT NOT NULL,
         account_type TEXT DEFAULT 'demo',
         created_at REAL NOT NULL,
-        used INTEGER DEFAULT 0
+        used INTEGER DEFAULT 0,
+        code_verifier TEXT
     )''')
     try:
         c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE oauth_states ADD COLUMN code_verifier TEXT")
     except sqlite3.OperationalError:
         pass
     c.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
@@ -452,7 +456,11 @@ def _save_martingale_state(user_id, bot):
     except Exception as e:
         logger.error(f"Erro ao guardar martingale: {e}")
 
-def create_session(user_id, user, force=False):
+def create_session(user_id, user, force=False, ws_url_override=None):
+    """
+    Cria ou reutiliza uma sessão WebSocket.
+    Se ws_url_override for fornecido (ex: OTP), o cliente usará esse URL.
+    """
     with sessions_lock:
         if user_id in sessions:
             existing = sessions[user_id]
@@ -485,6 +493,11 @@ def create_session(user_id, user, force=False):
     client.set_digit_analyzer(analyzer)
     bot.client = client
     bot.digit_analyzer = analyzer
+
+    # Se foi fornecido um URL de WebSocket (via OTP), configura-o
+    if ws_url_override:
+        client._ws_url = ws_url_override
+        logger.info(f"🔗 URL WebSocket personalizado: {ws_url_override}")
 
     strategy = StrategyManager(client, analyzer)
     bot.strategy = strategy
@@ -1034,132 +1047,29 @@ def debug():
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
 
-# ==================== OAUTH (IMPLICIT FLOW ORIGINAL) ====================
-@app.route('/oauth/callback')
-def oauth_callback():
-    state_id = request.args.get('state')
-    if not state_id:
-        return redirect('/?error=invalid_state')
-
-    html = f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>OAuth Callback</title></head>
-<body>
-    <p>A processar autenticação...</p>
-    <script>
-        (function() {{
-            const hash = window.location.hash.substring(1);
-            const params = new URLSearchParams(hash);
-            const accessToken = params.get('access_token');
-            if (!accessToken) {{
-                window.location.href = '/?error=no_token';
-                return;
-            }}
-            const tokens = [];
-            for (let i = 1; params.get('token' + i); i++) {{
-                tokens.push({{ token: params.get('token' + i), acct: params.get('acct' + i) || '' }});
-            }}
-            if (tokens.length === 0 && accessToken) {{
-                tokens.push({{ token: accessToken, acct: '' }});
-            }}
-            fetch('/api/auth/process-oauth', {{
-                method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }},
-                body: JSON.stringify({{ state: '{state_id}', tokens: tokens }})
-            }})
-            .then(response => response.json())
-            .then(data => {{
-                if (data.status === 'ok') {{
-                    localStorage.setItem('oauth_result', 'connected');
-                    localStorage.setItem('oauth_ts', Date.now().toString());
-                    window.close();
-                    setTimeout(function() {{ window.location.href = '/'; }}, 500);
-                }} else {{
-                    localStorage.setItem('oauth_result', 'error');
-                    localStorage.setItem('oauth_ts', Date.now().toString());
-                    window.close();
-                    setTimeout(function() {{ window.location.href = '/?error=' + (data.error || 'oauth_failed'); }}, 500);
-                }}
-            }})
-            .catch(function() {{
-                localStorage.setItem('oauth_result', 'error');
-                localStorage.setItem('oauth_ts', Date.now().toString());
-                window.close();
-                setTimeout(function() {{ window.location.href = '/?error=request_failed'; }}, 500);
-            }});
-        }})();
-    </script>
-</body>
-</html>"""
-    return make_response(html)
-
-@app.route('/api/auth/process-oauth', methods=['POST'])
-def process_oauth():
-    data = request.json
-    state_id = data.get('state')
-    tokens = data.get('tokens', [])
-    if not state_id or not tokens:
-        return jsonify({'error': 'Dados incompletos'}), 400
-
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        row = conn.execute(
-            "SELECT user_id, account_type FROM oauth_states WHERE state_id = ? AND used = 0 AND created_at > ?",
-            (state_id, time.time() - OAUTH_STATE_TTL)
-        ).fetchone()
-        if not row:
-            return jsonify({'error': 'OAuth expirado. Por favor, inicie novamente.'}), 401
-
-        user_id, account_type_request = row
-        conn.execute("UPDATE oauth_states SET used = 1 WHERE state_id = ?", (state_id,))
-        conn.commit()
-    finally:
-        conn.close()
-
-    email_row = sqlite3.connect(DATABASE_PATH, timeout=10).execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not email_row:
-        return jsonify({'error': 'Utilizador não encontrado'}), 404
-    email = email_row[0]
-
-    for acc in tokens:
-        tok = acc.get('token')
-        acct = acc.get('acct', '')
-        if not tok:
-            continue
-        if acct.startswith('VR'):
-            UserStore.add_token(email, 'demo', tok)
-        else:
-            UserStore.add_token(email, 'real', tok)
-        if (account_type_request == 'demo' and acct.startswith('VR')) or \
-           (account_type_request == 'real' and not acct.startswith('VR')):
-            UserStore.set_active_account(email, account_type_request)
-
-    user = UserStore.get(email)
-    session['user_id'] = user_id
-    session['user_email'] = email
-    session['user_name'] = user['name']
-    session['user_role'] = user.get('role', 'user')
-    session.permanent = True
-
-    create_session(user_id, user, force=True)
-    logger.info(f"✅ OAuth concluído para {email}")
-    return jsonify({'status': 'ok'})
-
+# ==================== OAUTH PKCE + OTP ====================
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
 def deriv_oauth_url():
     app_id = config.DERIV_APP_ID
     if not app_id:
         return jsonify({'error': 'Configuração OAuth em falta'}), 500
+
     base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
     redirect_uri = base_url + '/oauth/callback'
-    encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
+
+    # PKCE: code_verifier e code_challenge
+    code_verifier = secrets.token_urlsafe(64)[:128]
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode('ascii')).digest()
+    ).rstrip(b'=').decode('ascii')
+
     state_id = uuid.uuid4().hex
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         conn.execute(
-            "INSERT INTO oauth_states (state_id, user_id, account_type, created_at) VALUES (?, ?, ?, ?)",
-            (state_id, session['user_id'], request.args.get('account_type', 'demo'), time.time())
+            "INSERT INTO oauth_states (state_id, user_id, account_type, created_at, code_verifier) VALUES (?, ?, ?, ?, ?)",
+            (state_id, session['user_id'], request.args.get('account_type', 'demo'), time.time(), code_verifier)
         )
         conn.commit()
     except Exception as e:
@@ -1168,16 +1078,119 @@ def deriv_oauth_url():
     finally:
         conn.close()
 
-    url = (
-        f"https://oauth.deriv.com/oauth2/authorize"
-        f"?app_id={app_id}"
-        f"&redirect_uri={encoded_redirect}"
-        f"&response_type=token"
+    auth_url = (
+        "https://auth.deriv.com/oauth2/auth"
+        f"?response_type=code"
+        f"&client_id={app_id}"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri, safe='')}"
+        f"&scope=trade"
         f"&state={state_id}"
-        f"&l=PT"
+        f"&code_challenge={code_challenge}"
+        f"&code_challenge_method=S256"
     )
-    logger.info(f"URL OAuth gerado: {url}")
-    return jsonify({'url': url})
+    logger.info(f"URL OAuth (PKCE): {auth_url}")
+    return jsonify({'url': auth_url})
+
+@app.route('/oauth/callback')
+def oauth_callback():
+    state_id = request.args.get('state')
+    code = request.args.get('code')
+    error = request.args.get('error')
+    if error:
+        logger.error(f"OAuth error: {error}")
+        return redirect('/?error=oauth_denied')
+    if not state_id or not code:
+        return redirect('/?error=invalid_params')
+
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        row = conn.execute(
+            "SELECT user_id, account_type, code_verifier FROM oauth_states WHERE state_id = ? AND used = 0 AND created_at > ?",
+            (state_id, time.time() - OAUTH_STATE_TTL)
+        ).fetchone()
+        if not row:
+            return redirect('/?error=state_expired')
+        user_id, account_type, code_verifier = row
+
+        # Trocar code por token
+        token_url = "https://auth.deriv.com/oauth2/token"
+        data = {
+            'grant_type': 'authorization_code',
+            'client_id': config.DERIV_APP_ID,
+            'code': code,
+            'code_verifier': code_verifier,
+            'redirect_uri': f"{os.environ.get('BASE_URL', request.host_url.rstrip('/'))}/oauth/callback"
+        }
+        post_data = urllib.parse.urlencode(data).encode('ascii')
+        req = urllib.request.Request(token_url, data=post_data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        with urllib.request.urlopen(req) as resp:
+            token_resp = json.loads(resp.read().decode('utf-8'))
+        if 'error' in token_resp:
+            logger.error(f"Token exchange error: {token_resp}")
+            return redirect('/?error=token_exchange_failed')
+
+        access_token = token_resp.get('access_token')
+        if not access_token:
+            return redirect('/?error=no_access_token')
+
+        # Obter OTP (REST)
+        rest_headers = {
+            'Deriv-App-ID': config.DERIV_APP_ID,
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        # 1. Listar contas
+        req = urllib.request.Request(f"{config.DERIV_REST_URL}/trading/v1/options/accounts", headers=rest_headers)
+        with urllib.request.urlopen(req) as resp:
+            accounts_resp = json.loads(resp.read().decode('utf-8'))
+        account_id = None
+        for acc in accounts_resp.get('data', []):
+            if acc.get('account_type') == 'deriv' and acc.get('is_disabled') == 0:
+                account_id = acc.get('account_id')
+                break
+        if not account_id:
+            return redirect('/?error=no_options_account')
+
+        # 2. Pedir OTP
+        req = urllib.request.Request(
+            f"{config.DERIV_REST_URL}/trading/v1/options/accounts/{account_id}/otp",
+            data=json.dumps({}).encode('utf-8'),
+            headers=rest_headers,
+            method='POST'
+        )
+        with urllib.request.urlopen(req) as resp:
+            otp_resp = json.loads(resp.read().decode('utf-8'))
+        ws_url = otp_resp.get('data', {}).get('url')
+        if not ws_url:
+            return redirect('/?error=otp_failed')
+
+        conn.execute("UPDATE oauth_states SET used = 1 WHERE state_id = ?", (state_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    email_row = sqlite3.connect(DATABASE_PATH, timeout=10).execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not email_row:
+        return redirect('/?error=user_not_found')
+    email = email_row[0]
+
+    # Guardar o token e o ws_url na sessão (ou na BD)
+    UserStore.add_token(email, account_type, access_token)
+    UserStore.set_active_account(email, account_type)
+
+    user = UserStore.get(email)
+    session['user_id'] = user_id
+    session['user_email'] = email
+    session['user_name'] = user['name']
+    session['user_role'] = user.get('role', 'user')
+    session.permanent = True
+
+    # Criar sessão WebSocket com o URL do OTP
+    create_session(user_id, user, force=True, ws_url_override=ws_url)
+    logger.info(f"✅ OAuth PKCE + OTP concluído para {email} | WS URL: {ws_url}")
+    return redirect('/?oauth=success')
+
+# (A rota /api/auth/process-oauth antiga foi removida por não ser mais necessária)
 
 # ==================== TRADING ====================
 
@@ -1213,7 +1226,6 @@ def trade_digit():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        # ---- INÍCIO AUDITORIA ----
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
         audit_click_time = time.time()
@@ -1222,7 +1234,6 @@ def trade_digit():
             f"| tick_count={audit_tick_count} "
             f"| hora_clique={audit_click_time:.3f}"
         )
-        # ---- FIM AUDITORIA ----
 
         contract = 'CALL' if action == 'odd' else 'PUT'
         ok = sess['client'].place_trade(contract, amt, True)
@@ -1276,7 +1287,6 @@ def trade_differ():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        # ---- INÍCIO AUDITORIA ----
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
         audit_click_time = time.time()
@@ -1285,7 +1295,6 @@ def trade_differ():
             f"| tick_count={audit_tick_count} "
             f"| hora_clique={audit_click_time:.3f}"
         )
-        # ---- FIM AUDITORIA ----
 
         ok = sess['client'].place_differ_trade(digit, amt)
         if ok:
@@ -1336,7 +1345,6 @@ def trade_matches():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        # ---- INÍCIO AUDITORIA ----
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
         audit_click_time = time.time()
@@ -1345,7 +1353,6 @@ def trade_matches():
             f"| tick_count={audit_tick_count} "
             f"| hora_clique={audit_click_time:.3f}"
         )
-        # ---- FIM AUDITORIA ----
 
         ok = sess['client'].place_matches_trade(digit, amt)
         if ok:
@@ -1396,7 +1403,6 @@ def trade_zscore():
         if tr < 2:
             return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
 
-        # ---- INÍCIO AUDITORIA ----
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
         audit_click_time = time.time()
@@ -1405,7 +1411,6 @@ def trade_zscore():
             f"| tick_count={audit_tick_count} "
             f"| hora_clique={audit_click_time:.3f}"
         )
-        # ---- FIM AUDITORIA ----
 
         if action == 'DIFFER':
             ok = sess['client'].place_differ_trade(digit, amt)
