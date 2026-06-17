@@ -8,7 +8,8 @@ load_dotenv()
 class Config:
     DERIV_APP_ID = os.getenv('DERIV_APP_ID', '133674')
 
-    WS_URL = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
+    # WebSocket URL sem app_id (autenticação via token na mensagem authorize)
+    WS_URL = "wss://ws.derivws.com/websockets/v3"
 
     AVAILABLE_SYMBOLS = {
         'R_100': 'Volatility 100',
@@ -20,11 +21,9 @@ class Config:
     MIN_STAKE = 0.35
     MAX_STAKE = 100
 
-    # Contratos normais (CALL/PUT) – 10 ticks (aumentado para diagnóstico)
     CONTRACT_DURATION = 10
     CONTRACT_DURATION_UNIT = 't'
 
-    # Contratos de DÍGITO – 10 ticks
     DIGIT_CONTRACT_DURATION = 10
     DIGIT_CONTRACT_DURATION_UNIT = 't'
 
@@ -57,9 +56,8 @@ class Config:
 
     CANDLE_CACHE_TTL = 10
 
-    # 🔬 FLAGS DE DIAGNÓSTICO
-    INVERT_SIGNAL = False   # Se True, troca BUY↔SELL antes de enviar
-    DIAGNOSTIC_MODE = True  # Se True, regista preços de entrada/saída no log
+    INVERT_SIGNAL = False
+    DIAGNOSTIC_MODE = True
 
 
 config = Config()
