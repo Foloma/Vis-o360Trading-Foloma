@@ -80,6 +80,9 @@ class DerivWebSocketClient:
 
         self.last_trade_latency_ms = 0
 
+        # URL personalizado do WebSocket (ex.: OTP) – se None, usa config.WS_URL
+        self._ws_url = None
+
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
 
@@ -95,6 +98,15 @@ class DerivWebSocketClient:
         self.user_token = t
         self._token_permanently_invalid = False
         logger.info(f"🔑 Token configurado: {t[:8]}...")
+
+    def set_ws_url(self, url):
+        """Define um URL de WebSocket personalizado (ex.: OTP)."""
+        self._ws_url = url
+        logger.info(f"🔗 WebSocket URL personalizado: {url}")
+
+    def _get_ws_url(self):
+        """Retorna o URL a utilizar na conexão (personalizado ou padrão)."""
+        return self._ws_url or self.config.WS_URL
 
     def connect(self):
         self._stop_event.set()
@@ -125,8 +137,9 @@ class DerivWebSocketClient:
 
             self._reset_state()
             try:
-                logger.info("🔌 A ligar à Deriv...")
-                self.ws = websocket.create_connection(self.config.WS_URL, timeout=5)
+                ws_url = self._get_ws_url()
+                logger.info(f"🔌 A ligar à Deriv em {ws_url}...")
+                self.ws = websocket.create_connection(ws_url, timeout=5)
                 self.ws.settimeout(1.0)
                 self.connected = True
                 if not self._authorize_and_wait():
