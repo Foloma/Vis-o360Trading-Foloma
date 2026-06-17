@@ -456,50 +456,55 @@ def _save_martingale_state(user_id, bot):
     except Exception as e:
         logger.error(f"Erro ao guardar martingale: {e}")
 
-def make_otp_refresher(email, account_type):
-    """Cria um callback que obtém um novo wss:// via OTP."""
-    def refresh_otp():
+# --- NOVA FUNÇÃO: obter OTP para WebSocket ---
+def get_otp_ws_url(email, account_type):
+    """Obtém novo URL WebSocket autenticado via OTP."""
+    try:
         user = UserStore.get(email)
         if not user:
             return None
         access_token = user.get('tokens', {}).get(account_type)
         if not access_token:
-            logger.error("OTP refresher: sem access_token")
+            logger.error("OTP: sem access_token")
             return None
-        from config import config
         headers = {
             'Deriv-App-ID': config.DERIV_APP_ID,
             'Authorization': f'Bearer {access_token}'
         }
-        # Obter account_id
+        # GET contas
         req = urllib.request.Request(
             f"{config.DERIV_REST_URL}/trading/v1/options/accounts",
             headers=headers
         )
         with urllib.request.urlopen(req) as resp:
             accounts = json.loads(resp.read())
-        account_id = None
-        for acc in accounts.get('data', []):
-            if acc.get('account_type') == 'deriv' and not acc.get('is_disabled'):
-                account_id = acc.get('account_id')
-                break
+        account_id = next(
+            (a['account_id'] for a in accounts.get('data', [])
+             if a.get('account_type') == 'deriv' and not a.get('is_disabled')),
+            None
+        )
         if not account_id:
-            logger.error("OTP refresher: account_id não encontrado")
+            logger.error("OTP: nenhuma conta encontrada")
             return None
-        # Pedir OTP
+        # POST OTP
         req = urllib.request.Request(
             f"{config.DERIV_REST_URL}/trading/v1/options/accounts/{account_id}/otp",
-            data=json.dumps({}).encode('utf-8'),
+            data=b'{}',
             headers={**headers, 'Content-Type': 'application/json'},
             method='POST'
         )
         with urllib.request.urlopen(req) as resp:
             otp_resp = json.loads(resp.read())
         ws_url = otp_resp.get('data', {}).get('url')
-        if ws_url:
-            logger.info(f"OTP refresher: novo WS URL obtido")
+        logger.info(f"🔑 OTP obtido: {ws_url[:60] if ws_url else 'None'}")
         return ws_url
-    return refresh_otp
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8')
+        logger.error(f"OTP HTTP {e.code}: {body}")
+        return None
+    except Exception as e:
+        logger.error(f"Erro OTP: {e}")
+        return None
 
 def create_session(user_id, user, force=False, ws_url_override=None):
     with sessions_lock:
@@ -539,11 +544,10 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         client.set_ws_url(ws_url_override)
         logger.info(f"🔗 URL WebSocket personalizado: {ws_url_override}")
 
-    # Configurar o callback de renovação de OTP para reconexões automáticas
-    client._otp_refresh_callback = make_otp_refresher(
-        user.get('email', ''),
-        user.get('active_account', 'demo')
-    )
+    # Injectar callback de renovação OTP
+    user_email = user.get('email', '')
+    user_acct = user.get('active_account', 'demo')
+    client._otp_refresh_callback = lambda: get_otp_ws_url(user_email, user_acct)
 
     strategy = StrategyManager(client, analyzer)
     bot.strategy = strategy
@@ -659,13 +663,15 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 with client._connect_lock:
                     client._connecting = False
             if client.authorized:
-                if not validate_account_type(client.loginid, user.get('active_account', 'demo')):
-                    logger.warning(f"Token inválido para {user['email']} – a remover sessão.")
-                    bot.on_disconnect()
-                    client._stop_event.set()
-                    with sessions_lock:
-                        sessions.pop(user_id, None)
-                    return
+                # Se for autenticado via OTP, não validar account type
+                if client.loginid != 'OTP_AUTH':
+                    if not validate_account_type(client.loginid, user.get('active_account', 'demo')):
+                        logger.warning(f"Token inválido para {user['email']} – a remover sessão.")
+                        bot.on_disconnect()
+                        client._stop_event.set()
+                        with sessions_lock:
+                            sessions.pop(user_id, None)
+                        return
                 bot.start(client)
                 bot.daily_stats['start_balance'] = bot.balance
             else:
@@ -934,7 +940,9 @@ def api_connect():
         token = UserStore.get_active_token(user)
         if not token:
             return jsonify({'error': 'Token não configurado'}), 400
-        create_session(user_id, user)
+        # Obter OTP para o WebSocket
+        ws_url = get_otp_ws_url(email, user.get('active_account', 'demo'))
+        create_session(user_id, user, ws_url_override=ws_url)
         return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
     finally:
         with connecting_lock:
@@ -957,7 +965,9 @@ def auto_connect():
             'account_type': user.get('active_account', 'demo'),
             'balance': sess['client'].balance
         })
-    create_session(session['user_id'], user)
+    # Obter OTP para o WebSocket
+    ws_url = get_otp_ws_url(email, user.get('active_account', 'demo'))
+    create_session(session['user_id'], user, ws_url_override=ws_url)
     return jsonify({'status': 'connecting', 'account_type': user.get('active_account', 'demo')})
 
 @app.route('/api/auth/switch-account', methods=['POST'])
@@ -983,7 +993,9 @@ def switch_account():
             if old_client._ws_thread and old_client._ws_thread.is_alive():
                 old_client._ws_thread.join(timeout=5)
             del sessions[user_id]
-    sess = create_session(user_id, user, force=True)
+    # Obter OTP para a nova conta
+    ws_url = get_otp_ws_url(email, acc_type)
+    sess = create_session(user_id, user, force=True, ws_url_override=ws_url)
     reset_bot_state(sess['trading_bot'])
     return jsonify({
         'status': 'connecting',
