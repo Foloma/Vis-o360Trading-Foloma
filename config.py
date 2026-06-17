@@ -6,9 +6,14 @@ load_dotenv()
 
 
 class Config:
+    # ID da aplicação OAuth (usado apenas no fluxo PKCE e REST)
     DERIV_APP_ID = os.getenv('DERIV_APP_ID', '133674')
 
-    # WebSocket URL sem app_id (autenticação via token na mensagem authorize)
+    # URL base da API REST da Deriv (para pedidos OTP, etc.)
+    DERIV_REST_URL = "https://api.derivws.com"
+
+    # WebSocket URL **genérico** – será substituído pelo URL retornado pelo OTP
+    # (o cliente WebSocket usará o URL personalizado quando disponível)
     WS_URL = "wss://ws.derivws.com/websockets/v3"
 
     AVAILABLE_SYMBOLS = {
