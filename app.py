@@ -1,9 +1,8 @@
-import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid, requests
+import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid, urllib.parse, urllib.request
 from datetime import datetime, date
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, abort, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
-import urllib.parse
 
 # ==================== CONFIGURAÇÃO ====================
 SECRET_KEY = os.environ.get('SECRET_KEY')
@@ -1104,7 +1103,7 @@ def oauth_callback():
             return redirect('/?error=state_expired')
         user_id, account_type, code_verifier = row
 
-        # Trocar code por token
+        # Trocar code por token (usando urllib em vez de requests)
         token_url = "https://auth.deriv.com/oauth2/token"
         data = {
             'grant_type': 'authorization_code',
@@ -1113,7 +1112,10 @@ def oauth_callback():
             'code_verifier': code_verifier,
             'redirect_uri': f"{os.environ.get('BASE_URL', request.host_url.rstrip('/'))}/oauth/callback"
         }
-        token_resp = requests.post(token_url, data=data).json()
+        post_data = urllib.parse.urlencode(data).encode('ascii')
+        req = urllib.request.Request(token_url, data=post_data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        with urllib.request.urlopen(req) as resp:
+            token_resp = json.loads(resp.read().decode('utf-8'))
         if 'error' in token_resp:
             logger.error(f"Token exchange error: {token_resp}")
             return redirect('/?error=token_exchange_failed')
