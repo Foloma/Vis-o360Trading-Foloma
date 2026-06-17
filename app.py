@@ -457,10 +457,6 @@ def _save_martingale_state(user_id, bot):
         logger.error(f"Erro ao guardar martingale: {e}")
 
 def create_session(user_id, user, force=False, ws_url_override=None):
-    """
-    Cria ou reutiliza uma sessão WebSocket.
-    Se ws_url_override for fornecido (ex: OTP), o cliente usará esse URL.
-    """
     with sessions_lock:
         if user_id in sessions:
             existing = sessions[user_id]
@@ -494,9 +490,8 @@ def create_session(user_id, user, force=False, ws_url_override=None):
     bot.client = client
     bot.digit_analyzer = analyzer
 
-    # Se foi fornecido um URL de WebSocket (via OTP), configura-o
     if ws_url_override:
-        client._ws_url = ws_url_override
+        client.set_ws_url(ws_url_override)
         logger.info(f"🔗 URL WebSocket personalizado: {ws_url_override}")
 
     strategy = StrategyManager(client, analyzer)
@@ -1174,7 +1169,6 @@ def oauth_callback():
         return redirect('/?error=user_not_found')
     email = email_row[0]
 
-    # Guardar o token e o ws_url na sessão (ou na BD)
     UserStore.add_token(email, account_type, access_token)
     UserStore.set_active_account(email, account_type)
 
@@ -1185,12 +1179,22 @@ def oauth_callback():
     session['user_role'] = user.get('role', 'user')
     session.permanent = True
 
-    # Criar sessão WebSocket com o URL do OTP
     create_session(user_id, user, force=True, ws_url_override=ws_url)
     logger.info(f"✅ OAuth PKCE + OTP concluído para {email} | WS URL: {ws_url}")
-    return redirect('/?oauth=success')
 
-# (A rota /api/auth/process-oauth antiga foi removida por não ser mais necessária)
+    # Retornar página que fecha a janela e notifica a principal
+    html = """<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>OAuth</title></head>
+<body>
+<script>
+    localStorage.setItem('oauth_result', 'connected');
+    localStorage.setItem('oauth_ts', Date.now().toString());
+    window.close();
+</script>
+</body>
+</html>"""
+    return make_response(html)
 
 # ==================== TRADING ====================
 
