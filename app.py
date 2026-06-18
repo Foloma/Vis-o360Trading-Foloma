@@ -550,7 +550,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         client.set_ws_url(ws_url_override)
         logger.info(f"🔗 URL WebSocket personalizado: {ws_url_override}")
 
-    # Injectar callback de renovação OTP (apenas o URL)
+    # Injectar callback de renovação OTP
     user_email = user.get('email', '')
     user_acct = user.get('active_account', 'demo')
     client._otp_refresh_callback = lambda: get_otp_ws_url(user_email, user_acct)[0]
@@ -1016,12 +1016,12 @@ def switch_account():
             del sessions[user_id]
     ws_url, balance, currency = get_otp_ws_url(email, acc_type)
     sess = create_session(user_id, user, force=True, ws_url_override=ws_url)
+    reset_bot_state(sess['trading_bot'])
     if sess and balance > 0:
         sess['client'].balance = balance
         sess['client'].currency = currency
         sess['trading_bot'].balance = balance
         sess['trading_bot'].currency = currency
-    reset_bot_state(sess['trading_bot'])
     return jsonify({
         'status': 'connecting',
         'message': f'Conta {acc_type} ativada. A aguardar conexão...',
@@ -1141,7 +1141,6 @@ def deriv_oauth_url():
     base_url = os.environ.get('BASE_URL', request.host_url.rstrip('/'))
     redirect_uri = base_url + '/oauth/callback'
 
-    # PKCE: code_verifier e code_challenge
     code_verifier = secrets.token_urlsafe(64)[:128]
     code_challenge = base64.urlsafe_b64encode(
         hashlib.sha256(code_verifier.encode('ascii')).digest()
@@ -1195,7 +1194,6 @@ def oauth_callback():
             return redirect('/?error=state_expired')
         user_id, account_type, code_verifier = row
 
-        # Trocar code por token
         token_url = "https://auth.deriv.com/oauth2/token"
         data = {
             'grant_type': 'authorization_code',
@@ -1232,30 +1230,24 @@ def oauth_callback():
         if not access_token:
             return redirect('/?error=no_access_token')
 
-        # Obter OTP e saldo via REST
-        ws_url, balance, currency = get_otp_ws_url(None, None)  # precisa de email e account_type? Vamos usar direto
-        # Na verdade, precisamos do email e account_type para o get_otp_ws_url
-        # Vamos obter o email e account_type a partir do user_id
-        conn2 = sqlite3.connect(DATABASE_PATH, timeout=10)
-        email_row = conn2.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
-        conn2.close()
-        if not email_row:
-            return redirect('/?error=user_not_found')
-        email = email_row[0]
-
-        ws_url, balance, currency = get_otp_ws_url(email, account_type)
-
-        if not ws_url:
-            return redirect('/?error=otp_failed')
-
         conn.execute("UPDATE oauth_states SET used = 1 WHERE state_id = ?", (state_id,))
         conn.commit()
     finally:
         conn.close()
 
-    # Guardar token e configurar sessão
+    email_row = sqlite3.connect(DATABASE_PATH, timeout=10).execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not email_row:
+        return redirect('/?error=user_not_found')
+    email = email_row[0]
+
+    # 1. Guardar token PRIMEIRO
     UserStore.add_token(email, account_type, access_token)
     UserStore.set_active_account(email, account_type)
+
+    # 2. Depois obter OTP e saldo (já usa o token novo)
+    ws_url, balance, currency = get_otp_ws_url(email, account_type)
+    if not ws_url:
+        return redirect('/?error=otp_failed')
 
     user = UserStore.get(email)
     session['user_id'] = user_id
@@ -1264,7 +1256,6 @@ def oauth_callback():
     session['user_role'] = user.get('role', 'user')
     session.permanent = True
 
-    # Criar sessão e injectar saldo
     sess = create_session(user_id, user, force=True, ws_url_override=ws_url)
     if sess and balance > 0:
         sess['client'].balance = balance
@@ -1274,7 +1265,6 @@ def oauth_callback():
 
     logger.info(f"✅ OAuth PKCE + OTP concluído para {email} | WS URL: {ws_url} | Saldo: {balance} {currency}")
 
-    # Retornar página que fecha a janela e notifica a principal
     html = """<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>OAuth</title></head>
