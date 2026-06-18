@@ -162,7 +162,10 @@ class DerivWebSocketClient:
                 self._last_reconnect_time = time.time()
                 self._reconnect_count += 1
 
-                self._subscribe_balance()
+                # Só subscrever saldo se NÃO for OTP (saldo já injectado via REST)
+                if not (self._ws_url and 'otp=' in self._ws_url):
+                    self._subscribe_balance()
+
                 if self.current_symbol:
                     self._subscribe_ticks(self.current_symbol)
                     self.request_candles(self.current_symbol)
