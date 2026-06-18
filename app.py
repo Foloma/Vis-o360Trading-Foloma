@@ -1180,9 +1180,18 @@ def oauth_callback():
             'redirect_uri': f"{os.environ.get('BASE_URL', request.host_url.rstrip('/'))}/oauth/callback"
         }
         post_data = urllib.parse.urlencode(data).encode('ascii')
-        req = urllib.request.Request(token_url, data=post_data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
-        with urllib.request.urlopen(req) as resp:
-            token_resp = json.loads(resp.read().decode('utf-8'))
+        req = urllib.request.Request(
+            token_url, data=post_data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                token_resp = json.loads(resp.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode('utf-8')
+            logger.error(f"❌ Token exchange {e.code}: {body}")
+            return redirect('/?error=token_exchange_failed')
+
         if 'error' in token_resp:
             logger.error(f"Token exchange error: {token_resp}")
             return redirect('/?error=token_exchange_failed')
