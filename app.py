@@ -481,9 +481,11 @@ def get_otp_ws_url(email, account_type):
         )
         with urllib.request.urlopen(req) as resp:
             accounts = json.loads(resp.read())
+        logger.info(f"Contas disponíveis: {accounts.get('data', [])}")
+        # Aceitar qualquer conta ativa (não apenas "deriv")
         account_id = next(
             (a['account_id'] for a in accounts.get('data', [])
-             if a.get('account_type') == 'deriv' and not a.get('is_disabled')),
+             if not a.get('is_disabled')),
             None
         )
         if not account_id:
@@ -943,8 +945,9 @@ def api_connect():
         token = UserStore.get_active_token(user)
         if not token:
             return jsonify({'error': 'Token não configurado'}), 400
-        # Obter OTP para o WebSocket
         ws_url = get_otp_ws_url(email, user.get('active_account', 'demo'))
+        if not ws_url:
+            return jsonify({'error': 'Token inválido. Reconecte via OAuth.'}), 400
         create_session(user_id, user, ws_url_override=ws_url)
         return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
     finally:
@@ -968,8 +971,13 @@ def auto_connect():
             'account_type': user.get('active_account', 'demo'),
             'balance': sess['client'].balance
         })
-    # Obter OTP para o WebSocket
     ws_url = get_otp_ws_url(email, user.get('active_account', 'demo'))
+    if not ws_url:
+        return jsonify({
+            'status': 'no_token',
+            'message': 'Token expirado. Reconecte via botão Deriv.',
+            'account_type': user.get('active_account', 'demo')
+        })
     create_session(session['user_id'], user, ws_url_override=ws_url)
     return jsonify({'status': 'connecting', 'account_type': user.get('active_account', 'demo')})
 
@@ -996,7 +1004,6 @@ def switch_account():
             if old_client._ws_thread and old_client._ws_thread.is_alive():
                 old_client._ws_thread.join(timeout=5)
             del sessions[user_id]
-    # Obter OTP para a nova conta
     ws_url = get_otp_ws_url(email, acc_type)
     sess = create_session(user_id, user, force=True, ws_url_override=ws_url)
     reset_bot_state(sess['trading_bot'])
@@ -1223,9 +1230,10 @@ def oauth_callback():
         req = urllib.request.Request(f"{config.DERIV_REST_URL}/trading/v1/options/accounts", headers=rest_headers)
         with urllib.request.urlopen(req) as resp:
             accounts_resp = json.loads(resp.read().decode('utf-8'))
+        logger.info(f"Contas disponíveis: {accounts_resp.get('data', [])}")
         account_id = None
         for acc in accounts_resp.get('data', []):
-            if acc.get('account_type') == 'deriv' and acc.get('is_disabled') == 0:
+            if not acc.get('is_disabled'):
                 account_id = acc.get('account_id')
                 break
         if not account_id:
