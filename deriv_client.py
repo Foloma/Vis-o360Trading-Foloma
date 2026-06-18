@@ -80,10 +80,7 @@ class DerivWebSocketClient:
 
         self.last_trade_latency_ms = 0
 
-        # URL personalizado (ex.: OTP)
         self._ws_url = None
-
-        # Callback para renovar OTP antes de reconexões
         self._otp_refresh_callback = None
 
     def set_digit_analyzer(self, a): 
@@ -108,6 +105,9 @@ class DerivWebSocketClient:
 
     def _get_ws_url(self):
         return self._ws_url or self.config.WS_URL
+
+    def _is_otp_ws(self):
+        return self._ws_url and 'otp=' in self._ws_url
 
     def connect(self):
         self._stop_event.set()
@@ -136,7 +136,6 @@ class DerivWebSocketClient:
                     break
                 continue
 
-            # Antes de reconectar, tentar renovar OTP se disponível
             if self._otp_refresh_callback and self._reconnect_count > 0:
                 try:
                     new_url = self._otp_refresh_callback()
@@ -162,8 +161,7 @@ class DerivWebSocketClient:
                 self._last_reconnect_time = time.time()
                 self._reconnect_count += 1
 
-                # Só subscrever saldo se NÃO for OTP (saldo já injectado via REST)
-                if not (self._ws_url and 'otp=' in self._ws_url):
+                if not self._is_otp_ws():
                     self._subscribe_balance()
 
                 if self.current_symbol:
@@ -252,8 +250,7 @@ class DerivWebSocketClient:
         self.auth_error = None
 
     def _authorize_and_wait(self, timeout=10):
-        # Se o URL contém OTP, já está autenticado – pular authorize
-        if self._ws_url and 'otp=' in self._ws_url:
+        if self._is_otp_ws():
             self.authorized = True
             self.loginid = 'OTP_AUTH'
             logger.info("✅ Autenticado via OTP URL (sem authorize)")
@@ -562,12 +559,14 @@ class DerivWebSocketClient:
 
             logger.info(f"📤 Enviando proposta: {contract_type_full}, amount={amount}, symbol={self.current_symbol}")
             try:
-                self.ws.send(json.dumps({
+                payload = {
                     "proposal": 1, "amount": amount, "basis": "stake",
                     "contract_type": contract_type_full, "currency": self.currency,
                     "duration": duration, "duration_unit": duration_unit,
-                    "symbol": self.current_symbol, "req_id": req_id
-                }))
+                }
+                if not self._is_otp_ws():
+                    payload["symbol"] = self.current_symbol
+                self.ws.send(json.dumps(payload))
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro trade: {e}")
@@ -599,12 +598,15 @@ class DerivWebSocketClient:
             self.pending_trade_time = time.time()
             logger.info(f"📤 Enviando DIGITDIFF: barreira={digit}, amount={amount}")
             try:
-                self.ws.send(json.dumps({
+                payload = {
                     "proposal": 1, "amount": amount, "basis": "stake",
                     "contract_type": "DIGITDIFF", "currency": self.currency,
                     "duration": duration, "duration_unit": duration_unit,
-                    "symbol": self.current_symbol, "barrier": digit, "req_id": req_id
-                }))
+                    "barrier": digit,
+                }
+                if not self._is_otp_ws():
+                    payload["symbol"] = self.current_symbol
+                self.ws.send(json.dumps(payload))
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro DIGITDIFF: {e}")
@@ -636,12 +638,15 @@ class DerivWebSocketClient:
             self.pending_trade_time = time.time()
             logger.info(f"📤 Enviando DIGITMATCH: dígito={digit}, amount={amount}")
             try:
-                self.ws.send(json.dumps({
+                payload = {
                     "proposal": 1, "amount": amount, "basis": "stake",
                     "contract_type": "DIGITMATCH", "currency": self.currency,
                     "duration": duration, "duration_unit": duration_unit,
-                    "symbol": self.current_symbol, "barrier": digit, "req_id": req_id
-                }))
+                    "barrier": digit,
+                }
+                if not self._is_otp_ws():
+                    payload["symbol"] = self.current_symbol
+                self.ws.send(json.dumps(payload))
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro DIGITMATCH: {e}")
@@ -706,7 +711,6 @@ class DerivWebSocketClient:
                 if latency_ms > 300:
                     logger.warning(f"⚠️ Latência alta ({latency_ms}ms)")
 
-                # ---- INÍCIO AUDITORIA ENTRADA ----
                 if self._digit_analyzer:
                     entry_tick = self._digit_analyzer.get_current_digit()
                     entry_tick_count = self._digit_analyzer._tick_count
@@ -718,7 +722,6 @@ class DerivWebSocketClient:
                     f"| tick_entrada={entry_tick} "
                     f"| tick_count_entrada={entry_tick_count}"
                 )
-                # ---- FIM AUDITORIA ENTRADA ----
 
                 self.last_trade_latency_ms = latency_ms
 
@@ -802,7 +805,6 @@ class DerivWebSocketClient:
         is_win = profit > 0
         logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}")
 
-        # ---- INÍCIO AUDITORIA POC ----
         if self._digit_analyzer:
             current_tick = self._digit_analyzer.get_current_digit()
             current_tick_count = self._digit_analyzer._tick_count
@@ -815,7 +817,6 @@ class DerivWebSocketClient:
             f"| tick_count_resultado={current_tick_count} "
             f"| profit={profit:.4f} | is_win={is_win}"
         )
-        # ---- FIM AUDITORIA POC ----
 
         trade_info = self.active_trades.get(cid, {})
         if not trade_info:
