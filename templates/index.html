@@ -865,6 +865,10 @@ async function connectWithDeriv() {
         if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
         localStorage.removeItem('oauth_result');
         const popup = window.open(d.url, 'derivOAuth', 'width=800,height=700');
+        if (!popup) {
+            toast('⚠️ Pop‑up bloqueado. Permita janelas emergentes.', 'warning', 5000);
+            return;
+        }
         const checkResult = setInterval(async () => {
             const result = localStorage.getItem('oauth_result');
             const ts = parseInt(localStorage.getItem('oauth_ts') || '0');
@@ -884,7 +888,15 @@ async function connectWithDeriv() {
             }
         }, 500);
         const checkPopup = setInterval(() => {
-            if (!popup || popup.closed) { clearInterval(checkPopup); setTimeout(() => { if (localStorage.getItem('oauth_result') !== 'connected') { clearInterval(checkResult); toast('❌ OAuth cancelado ou falhou', 'loss'); } }, 3000); }
+            if (!popup || popup.closed) {
+                clearInterval(checkPopup);
+                setTimeout(() => {
+                    if (localStorage.getItem('oauth_result') !== 'connected') {
+                        clearInterval(checkResult);
+                        toast('⚠️ Sessão expirada. Tente conectar novamente.', 'warning', 5000);
+                    }
+                }, 3000);
+            }
         }, 500);
         setTimeout(() => { clearInterval(checkResult); clearInterval(checkPopup); }, 300000);
     } catch(e) { toast('❌ Erro OAuth', 'loss'); }
