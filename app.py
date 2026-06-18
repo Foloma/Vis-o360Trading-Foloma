@@ -456,17 +456,17 @@ def _save_martingale_state(user_id, bot):
     except Exception as e:
         logger.error(f"Erro ao guardar martingale: {e}")
 
-# --- NOVA FUNÇÃO: obter OTP para WebSocket ---
+# --- NOVA FUNÇÃO: obter OTP + saldo ---
 def get_otp_ws_url(email, account_type):
-    """Obtém novo URL WebSocket autenticado via OTP."""
+    """Obtém novo URL WebSocket autenticado via OTP e também o saldo da conta."""
     try:
         user = UserStore.get(email)
         if not user:
-            return None
+            return None, 0, 'USD'
         access_token = user.get('tokens', {}).get(account_type)
         if not access_token:
             logger.error("OTP: sem access_token")
-            return None
+            return None, 0, 'USD'
         headers = {
             'Deriv-App-ID': config.DERIV_APP_ID,
             'Authorization': f'Bearer {access_token}',
@@ -482,15 +482,16 @@ def get_otp_ws_url(email, account_type):
         with urllib.request.urlopen(req) as resp:
             accounts = json.loads(resp.read())
         logger.info(f"Contas disponíveis: {accounts.get('data', [])}")
-        # Aceitar qualquer conta ativa (não apenas "deriv")
-        account_id = next(
-            (a['account_id'] for a in accounts.get('data', [])
-             if not a.get('is_disabled')),
+        selected_acc = next(
+            (a for a in accounts.get('data', []) if not a.get('is_disabled')),
             None
         )
-        if not account_id:
+        if not selected_acc:
             logger.error("OTP: nenhuma conta encontrada")
-            return None
+            return None, 0, 'USD'
+        account_id = selected_acc['account_id']
+        balance = float(selected_acc.get('balance', 0))
+        currency = selected_acc.get('currency', 'USD')
         # POST OTP
         req = urllib.request.Request(
             f"{config.DERIV_REST_URL}/trading/v1/options/accounts/{account_id}/otp",
@@ -501,15 +502,15 @@ def get_otp_ws_url(email, account_type):
         with urllib.request.urlopen(req) as resp:
             otp_resp = json.loads(resp.read())
         ws_url = otp_resp.get('data', {}).get('url')
-        logger.info(f"🔑 OTP obtido: {ws_url[:60] if ws_url else 'None'}")
-        return ws_url
+        logger.info(f"🔑 OTP obtido: {ws_url[:60] if ws_url else 'None'} | Saldo: {balance} {currency}")
+        return ws_url, balance, currency
     except urllib.error.HTTPError as e:
         body = e.read().decode('utf-8')
         logger.error(f"OTP HTTP {e.code}: {body}")
-        return None
+        return None, 0, 'USD'
     except Exception as e:
         logger.error(f"Erro OTP: {e}")
-        return None
+        return None, 0, 'USD'
 
 def create_session(user_id, user, force=False, ws_url_override=None):
     with sessions_lock:
@@ -549,10 +550,10 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         client.set_ws_url(ws_url_override)
         logger.info(f"🔗 URL WebSocket personalizado: {ws_url_override}")
 
-    # Injectar callback de renovação OTP
+    # Injectar callback de renovação OTP (apenas o URL)
     user_email = user.get('email', '')
     user_acct = user.get('active_account', 'demo')
-    client._otp_refresh_callback = lambda: get_otp_ws_url(user_email, user_acct)
+    client._otp_refresh_callback = lambda: get_otp_ws_url(user_email, user_acct)[0]
 
     strategy = StrategyManager(client, analyzer)
     bot.strategy = strategy
@@ -668,7 +669,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 with client._connect_lock:
                     client._connecting = False
             if client.authorized:
-                # Se for autenticado via OTP, não validar account type
                 if client.loginid != 'OTP_AUTH':
                     if not validate_account_type(client.loginid, user.get('active_account', 'demo')):
                         logger.warning(f"Token inválido para {user['email']} – a remover sessão.")
@@ -945,10 +945,15 @@ def api_connect():
         token = UserStore.get_active_token(user)
         if not token:
             return jsonify({'error': 'Token não configurado'}), 400
-        ws_url = get_otp_ws_url(email, user.get('active_account', 'demo'))
+        ws_url, balance, currency = get_otp_ws_url(email, user.get('active_account', 'demo'))
         if not ws_url:
             return jsonify({'error': 'Token inválido. Reconecte via OAuth.'}), 400
-        create_session(user_id, user, ws_url_override=ws_url)
+        sess = create_session(user_id, user, ws_url_override=ws_url)
+        if sess and balance > 0:
+            sess['client'].balance = balance
+            sess['client'].currency = currency
+            sess['trading_bot'].balance = balance
+            sess['trading_bot'].currency = currency
         return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
     finally:
         with connecting_lock:
@@ -971,14 +976,19 @@ def auto_connect():
             'account_type': user.get('active_account', 'demo'),
             'balance': sess['client'].balance
         })
-    ws_url = get_otp_ws_url(email, user.get('active_account', 'demo'))
+    ws_url, balance, currency = get_otp_ws_url(email, user.get('active_account', 'demo'))
     if not ws_url:
         return jsonify({
             'status': 'no_token',
             'message': 'Token expirado. Reconecte via botão Deriv.',
             'account_type': user.get('active_account', 'demo')
         })
-    create_session(session['user_id'], user, ws_url_override=ws_url)
+    sess = create_session(session['user_id'], user, ws_url_override=ws_url)
+    if sess and balance > 0:
+        sess['client'].balance = balance
+        sess['client'].currency = currency
+        sess['trading_bot'].balance = balance
+        sess['trading_bot'].currency = currency
     return jsonify({'status': 'connecting', 'account_type': user.get('active_account', 'demo')})
 
 @app.route('/api/auth/switch-account', methods=['POST'])
@@ -1004,8 +1014,13 @@ def switch_account():
             if old_client._ws_thread and old_client._ws_thread.is_alive():
                 old_client._ws_thread.join(timeout=5)
             del sessions[user_id]
-    ws_url = get_otp_ws_url(email, acc_type)
+    ws_url, balance, currency = get_otp_ws_url(email, acc_type)
     sess = create_session(user_id, user, force=True, ws_url_override=ws_url)
+    if sess and balance > 0:
+        sess['client'].balance = balance
+        sess['client'].currency = currency
+        sess['trading_bot'].balance = balance
+        sess['trading_bot'].currency = currency
     reset_bot_state(sess['trading_bot'])
     return jsonify({
         'status': 'connecting',
@@ -1217,38 +1232,19 @@ def oauth_callback():
         if not access_token:
             return redirect('/?error=no_access_token')
 
-        # Obter OTP (REST)
-        rest_headers = {
-            'Deriv-App-ID': config.DERIV_APP_ID,
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'Accept': 'application/json',
-            'Accept-Language': 'en-US,en;q=0.9'
-        }
-        # 1. Listar contas
-        req = urllib.request.Request(f"{config.DERIV_REST_URL}/trading/v1/options/accounts", headers=rest_headers)
-        with urllib.request.urlopen(req) as resp:
-            accounts_resp = json.loads(resp.read().decode('utf-8'))
-        logger.info(f"Contas disponíveis: {accounts_resp.get('data', [])}")
-        account_id = None
-        for acc in accounts_resp.get('data', []):
-            if not acc.get('is_disabled'):
-                account_id = acc.get('account_id')
-                break
-        if not account_id:
-            return redirect('/?error=no_options_account')
+        # Obter OTP e saldo via REST
+        ws_url, balance, currency = get_otp_ws_url(None, None)  # precisa de email e account_type? Vamos usar direto
+        # Na verdade, precisamos do email e account_type para o get_otp_ws_url
+        # Vamos obter o email e account_type a partir do user_id
+        conn2 = sqlite3.connect(DATABASE_PATH, timeout=10)
+        email_row = conn2.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+        conn2.close()
+        if not email_row:
+            return redirect('/?error=user_not_found')
+        email = email_row[0]
 
-        # 2. Pedir OTP
-        req = urllib.request.Request(
-            f"{config.DERIV_REST_URL}/trading/v1/options/accounts/{account_id}/otp",
-            data=json.dumps({}).encode('utf-8'),
-            headers=rest_headers,
-            method='POST'
-        )
-        with urllib.request.urlopen(req) as resp:
-            otp_resp = json.loads(resp.read().decode('utf-8'))
-        ws_url = otp_resp.get('data', {}).get('url')
+        ws_url, balance, currency = get_otp_ws_url(email, account_type)
+
         if not ws_url:
             return redirect('/?error=otp_failed')
 
@@ -1257,11 +1253,7 @@ def oauth_callback():
     finally:
         conn.close()
 
-    email_row = sqlite3.connect(DATABASE_PATH, timeout=10).execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not email_row:
-        return redirect('/?error=user_not_found')
-    email = email_row[0]
-
+    # Guardar token e configurar sessão
     UserStore.add_token(email, account_type, access_token)
     UserStore.set_active_account(email, account_type)
 
@@ -1272,8 +1264,15 @@ def oauth_callback():
     session['user_role'] = user.get('role', 'user')
     session.permanent = True
 
-    create_session(user_id, user, force=True, ws_url_override=ws_url)
-    logger.info(f"✅ OAuth PKCE + OTP concluído para {email} | WS URL: {ws_url}")
+    # Criar sessão e injectar saldo
+    sess = create_session(user_id, user, force=True, ws_url_override=ws_url)
+    if sess and balance > 0:
+        sess['client'].balance = balance
+        sess['client'].currency = currency
+        sess['trading_bot'].balance = balance
+        sess['trading_bot'].currency = currency
+
+    logger.info(f"✅ OAuth PKCE + OTP concluído para {email} | WS URL: {ws_url} | Saldo: {balance} {currency}")
 
     # Retornar página que fecha a janela e notifica a principal
     html = """<!DOCTYPE html>
