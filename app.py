@@ -456,7 +456,7 @@ def _save_martingale_state(user_id, bot):
     except Exception as e:
         logger.error(f"Erro ao guardar martingale: {e}")
 
-# --- NOVA FUNÇÃO: obter OTP + saldo ---
+# --- NOVA FUNÇÃO: obter OTP + saldo (com preferência pelo tipo de conta) ---
 def get_otp_ws_url(email, account_type):
     """Obtém novo URL WebSocket autenticado via OTP e também o saldo da conta."""
     try:
@@ -482,13 +482,23 @@ def get_otp_ws_url(email, account_type):
         with urllib.request.urlopen(req) as resp:
             accounts = json.loads(resp.read())
         logger.info(f"Contas disponíveis: {accounts.get('data', [])}")
-        selected_acc = next(
-            (a for a in accounts.get('data', []) if not a.get('is_disabled')),
-            None
-        )
+
+        # Escolher a conta com o tipo preferido (demo/real)
+        selected_acc = None
+        for a in accounts.get('data', []):
+            if not a.get('is_disabled') and a.get('account_type') == account_type:
+                selected_acc = a
+                break
+        # Se não encontrou a preferida, pega a primeira ativa
+        if not selected_acc:
+            for a in accounts.get('data', []):
+                if not a.get('is_disabled'):
+                    selected_acc = a
+                    break
         if not selected_acc:
             logger.error("OTP: nenhuma conta encontrada")
             return None, 0, 'USD'
+
         account_id = selected_acc['account_id']
         balance = float(selected_acc.get('balance', 0))
         currency = selected_acc.get('currency', 'USD')
