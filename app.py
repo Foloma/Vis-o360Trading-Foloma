@@ -1179,6 +1179,7 @@ def oauth_callback():
             'code_verifier': code_verifier,
             'redirect_uri': f"{os.environ.get('BASE_URL', request.host_url.rstrip('/'))}/oauth/callback"
         }
+        logger.info(f"🔍 Token exchange redirect_uri: {data['redirect_uri']}")
         post_data = urllib.parse.urlencode(data).encode('ascii')
         req = urllib.request.Request(
             token_url, data=post_data,
