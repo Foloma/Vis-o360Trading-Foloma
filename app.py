@@ -469,7 +469,10 @@ def get_otp_ws_url(email, account_type):
             return None
         headers = {
             'Deriv-App-ID': config.DERIV_APP_ID,
-            'Authorization': f'Bearer {access_token}'
+            'Authorization': f'Bearer {access_token}',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9'
         }
         # GET contas
         req = urllib.request.Request(
@@ -1179,11 +1182,17 @@ def oauth_callback():
             'code_verifier': code_verifier,
             'redirect_uri': f"{os.environ.get('BASE_URL', request.host_url.rstrip('/'))}/oauth/callback"
         }
-        logger.info(f"🔍 Token exchange redirect_uri: {data['redirect_uri']}")
         post_data = urllib.parse.urlencode(data).encode('ascii')
         req = urllib.request.Request(
             token_url, data=post_data,
-            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            headers={
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Origin': 'https://visao360-jf.onrender.com',
+                'Referer': 'https://visao360-jf.onrender.com/'
+            }
         )
         try:
             with urllib.request.urlopen(req) as resp:
@@ -1205,7 +1214,10 @@ def oauth_callback():
         rest_headers = {
             'Deriv-App-ID': config.DERIV_APP_ID,
             'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9'
         }
         # 1. Listar contas
         req = urllib.request.Request(f"{config.DERIV_REST_URL}/trading/v1/options/accounts", headers=rest_headers)
