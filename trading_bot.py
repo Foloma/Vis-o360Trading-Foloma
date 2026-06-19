@@ -301,6 +301,8 @@ class TradingBot:
             contract_id = result.get('contract_id')
             profit = result.get('profit', 0)
             is_win = profit > 0
+            exit_digit = result.get('exit_digit')  # dígito real do contrato
+
             target_trade = None
             if contract_id:
                 for trade in self.trades:
@@ -351,22 +353,27 @@ class TradingBot:
 
                 self._daily_stats_dirty = True
 
-                barrier = target_trade.get('digit_barrier', None)
+                # Determinar o dígito a mostrar
                 action = target_trade.get('action', '')
-                if barrier is not None:
-                    if 'DIFFER' in action:
-                        won_digit = barrier if not is_win else '≠' + str(barrier)
-                    elif 'MATCH' in action:
-                        won_digit = barrier if is_win else '≠' + str(barrier)
-                    else:
-                        won_digit = '?'
+                barrier = target_trade.get('digit_barrier', None)
+
+                if exit_digit is not None:
+                    won_digit = str(exit_digit)  # dígito real do contrato
                 else:
-                    if 'DIGITODD' in action or action == 'CALL':
-                        won_digit = 'Ímpar' if is_win else 'Par'
-                    elif 'DIGITEVEN' in action or action == 'PUT':
-                        won_digit = 'Par' if is_win else 'Ímpar'
+                    if barrier is not None:
+                        if 'DIFFER' in action:
+                            won_digit = barrier if not is_win else '≠' + str(barrier)
+                        elif 'MATCH' in action:
+                            won_digit = barrier if is_win else '≠' + str(barrier)
+                        else:
+                            won_digit = '?'
                     else:
-                        won_digit = '?'
+                        if 'DIGITODD' in action or action == 'CALL':
+                            won_digit = 'Ímpar' if is_win else 'Par'
+                        elif 'DIGITEVEN' in action or action == 'PUT':
+                            won_digit = 'Par' if is_win else 'Ímpar'
+                        else:
+                            won_digit = '?'
 
                 self.last_trade_result = {
                     'contract_id': contract_id,
@@ -375,6 +382,7 @@ class TradingBot:
                     'is_win': is_win,
                     'profit': profit,
                     'digit': won_digit,
+                    'exit_digit': exit_digit,  # dígito real do POC
                     'entry_tick': self.digit_analyzer.get_current_digit() if self.digit_analyzer else '?',
                     'entry_tick_count': self.digit_analyzer._tick_count if self.digit_analyzer else 0,
                     'latency_ms': self.client.last_trade_latency_ms if self.client else 0
