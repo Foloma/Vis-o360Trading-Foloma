@@ -565,6 +565,12 @@ def create_session(user_id, user, force=False, ws_url_override=None):
     user_acct = user.get('active_account', 'demo')
     client._otp_refresh_callback = lambda: get_otp_ws_url(user_email, user_acct)[0]
 
+    # NOVO: callback de actualização de saldo via REST
+    def refresh_balance():
+        _, bal, cur = get_otp_ws_url(user_email, user_acct)
+        return bal, cur
+    client._balance_refresh_callback = refresh_balance
+
     strategy = StrategyManager(client, analyzer)
     bot.strategy = strategy
 
