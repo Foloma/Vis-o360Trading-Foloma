@@ -14,6 +14,7 @@ class StrategyManager:
     - Cache de sinais expira após 10 ticks.
     - Entrada apenas no clique (evaluate_*), que consome o estado.
     - Trade Lock com timeout de 30 segundos.
+    - Paridade agora exige 5 ou 6 ocorrências consecutivas do mesmo tipo nos últimos 6 dígitos.
     """
 
     def __init__(self, client, analyzer):
@@ -51,7 +52,7 @@ class StrategyManager:
 
         self._trade_locked = False
         self._trade_locked_at = 0
-        self.TRADE_LOCK_TIMEOUT = 30   # ← aumentado para contratos de 5 ticks
+        self.TRADE_LOCK_TIMEOUT = 30   # contratos de 5 ticks
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -238,29 +239,32 @@ class StrategyManager:
         return None
 
     def _preview_parity_signal(self):
+        """Agora exige 5 ou 6 ocorrências nos últimos 6 dígitos."""
         recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 4:
+        if len(recent) < 6:
             return None
-        last_four = [d % 2 != 0 for d in recent[-4:]]
-        odd_count = sum(last_four)
-        even_count = 4 - odd_count
-        if odd_count >= 3:
+        last_six = [d % 2 != 0 for d in recent[-6:]]  # True = ímpar
+        odd_count = sum(last_six)
+        even_count = 6 - odd_count
+
+        # Só gera sinal se 5 ou 6 do mesmo tipo
+        if odd_count >= 5:   # 5 ou 6 ímpares → apostar em PAR
             if not self._parity_odd_used:
                 return {'recommendation': 'even',
-                        'digits': recent[-4:],
-                        'reason': f"Tendência ÍMPAR ({odd_count}/4) → PAR"}
+                        'digits': recent[-6:],
+                        'reason': f"Tendência ÍMPAR ({odd_count}/6) → PAR"}
             if self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
                 return {'recommendation': 'even',
-                        'digits': recent[-4:],
+                        'digits': recent[-6:],
                         'reason': "Martingale disponível (Tendência ÍMPAR)"}
-        if even_count >= 3:
+        if even_count >= 5:  # 5 ou 6 pares → apostar em ÍMPAR
             if not self._parity_even_used:
                 return {'recommendation': 'odd',
-                        'digits': recent[-4:],
-                        'reason': f"Tendência PAR ({even_count}/4) → ÍMPAR"}
+                        'digits': recent[-6:],
+                        'reason': f"Tendência PAR ({even_count}/6) → ÍMPAR"}
             if self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even':
                 return {'recommendation': 'odd',
-                        'digits': recent[-4:],
+                        'digits': recent[-6:],
                         'reason': "Martingale disponível (Tendência PAR)"}
         return None
 
@@ -312,7 +316,7 @@ class StrategyManager:
         preview = self._preview_parity_signal()
         if preview:
             return True, preview['recommendation'], preview['reason']
-        return False, None, "Nenhuma tendência clara"
+        return False, None, "Nenhuma tendência clara (5/6 necessários)"
 
     def _peek_matches(self):
         if self.is_matches_cooldown:
@@ -397,13 +401,15 @@ class StrategyManager:
             return self._generate_parity_signal()
 
     def _generate_parity_signal(self):
+        """Usa janela de 6 dígitos e threshold 5."""
         recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 4:
+        if len(recent) < 6:
             return None, "Aguardando dados"
-        last_four = [d % 2 != 0 for d in recent[-4:]]
-        odd_count = sum(last_four)
-        even_count = 4 - odd_count
-        if odd_count >= 3:
+        last_six = [d % 2 != 0 for d in recent[-6:]]
+        odd_count = sum(last_six)
+        even_count = 6 - odd_count
+
+        if odd_count >= 5:
             if self._parity_odd_used and not self._parity_martingale_used and self._last_parity_streak_type == 'odd':
                 if not self._can_martingale():
                     return None, "Martingale bloqueado"
@@ -413,11 +419,11 @@ class StrategyManager:
                     return None, "Streak ÍMPAR já utilizado"
                 self._parity_odd_used = True
                 self._last_parity_streak_type = 'odd'
-            signal = self._create_signal('parity', 'even', recent[-4:],
-                                        f"Tendência ÍMPAR ({odd_count}/4) → PAR")
+            signal = self._create_signal('parity', 'even', recent[-6:],
+                                        f"Tendência ÍMPAR ({odd_count}/6) → PAR")
             logger.info(f"✅ PAR/ÍMPAR SINAL GERADO: {signal['id']}")
             return 'even', signal['reason']
-        if even_count >= 3:
+        if even_count >= 5:
             if self._parity_even_used and not self._parity_martingale_used and self._last_parity_streak_type == 'even':
                 if not self._can_martingale():
                     return None, "Martingale bloqueado"
@@ -427,11 +433,11 @@ class StrategyManager:
                     return None, "Streak PAR já utilizado"
                 self._parity_even_used = True
                 self._last_parity_streak_type = 'even'
-            signal = self._create_signal('parity', 'odd', recent[-4:],
-                                        f"Tendência PAR ({even_count}/4) → ÍMPAR")
+            signal = self._create_signal('parity', 'odd', recent[-6:],
+                                        f"Tendência PAR ({even_count}/6) → ÍMPAR")
             logger.info(f"✅ PAR/ÍMPAR SINAL GERADO: {signal['id']}")
             return 'odd', signal['reason']
-        return None, "Nenhuma tendência clara"
+        return None, "Nenhuma tendência clara (5/6 necessários)"
 
     def _can_martingale(self):
         raw = getattr(self.client, '_ping_ms', 0)
