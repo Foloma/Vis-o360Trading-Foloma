@@ -565,7 +565,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
     user_acct = user.get('active_account', 'demo')
     client._otp_refresh_callback = lambda: get_otp_ws_url(user_email, user_acct)[0]
 
-    # NOVO: callback de actualização de saldo via REST
+    # Callback de actualização de saldo via REST
     def refresh_balance():
         _, bal, cur = get_otp_ws_url(user_email, user_acct)
         return bal, cur
@@ -1325,8 +1325,8 @@ def trade_digit():
 
         analyzer = sess['digit_analyzer']
         tr = analyzer.get_ticks_remaining()
-        if tr < 2:
-            return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
+        if tr < 6:  # era < 2 – contratos de 5 ticks exigem margem
+            return jsonify({'error': f'Aguarde novo ciclo. Apenas {tr} tick(s) restantes.'}), 400
 
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
@@ -1386,8 +1386,8 @@ def trade_differ():
 
         analyzer = sess['digit_analyzer']
         tr = analyzer.get_ticks_remaining()
-        if tr < 2:
-            return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
+        if tr < 6:  # era < 2 – contratos de 5 ticks exigem margem
+            return jsonify({'error': f'Aguarde novo ciclo. Apenas {tr} tick(s) restantes.'}), 400
 
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
@@ -1444,8 +1444,8 @@ def trade_matches():
 
         analyzer = sess['digit_analyzer']
         tr = analyzer.get_ticks_remaining()
-        if tr < 2:
-            return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
+        if tr < 6:  # era < 2 – contratos de 5 ticks exigem margem
+            return jsonify({'error': f'Aguarde novo ciclo. Apenas {tr} tick(s) restantes.'}), 400
 
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
@@ -1502,8 +1502,8 @@ def trade_zscore():
 
         analyzer = sess['digit_analyzer']
         tr = analyzer.get_ticks_remaining()
-        if tr < 2:
-            return jsonify({'error': f'Dígito a sair em {tr} tick(s). Aguarde.'}), 400
+        if tr < 6:  # era < 2 – contratos de 5 ticks exigem margem
+            return jsonify({'error': f'Aguarde novo ciclo. Apenas {tr} tick(s) restantes.'}), 400
 
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
