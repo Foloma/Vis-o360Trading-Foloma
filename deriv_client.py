@@ -84,7 +84,7 @@ class DerivWebSocketClient:
         self._otp_refresh_callback = None
         self._balance_refresh_callback = None
 
-    # (todos os outros métodos mantidos exatamente como antes)
+    # (todos os métodos mantidos inalterados até _pre_trade_check)
 
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
@@ -527,7 +527,7 @@ class DerivWebSocketClient:
         return True, None
 
     # ============================================================
-    # MÉTODO AUXILIAR CORRIGIDO: substitui symbol por underlying_symbol no OTP
+    # MÉTODO AUXILIAR: substitui symbol por underlying_symbol no OTP
     # ============================================================
     def _build_proposal(self, base_payload):
         """Corrige payload para a nova API Deriv (OTP): troca 'symbol' por 'underlying_symbol'."""
@@ -827,10 +827,11 @@ class DerivWebSocketClient:
             return
         logger.info(f"📦 POC recebido: contract_id={cid}, is_sold=True")
 
-        bp = c.get('buy_price', 0)
-        sp = c.get('sell_price', 0)
+        # CORRECÇÃO: valores agora podem vir como string; converter para float
+        bp = float(c.get('buy_price', 0) or 0)
+        sp = float(c.get('sell_price', 0) or 0)
 
-        if sp is None:
+        if sp is None:  # manter a verificação original
             with self._processed_lock:
                 if cid in self._processed_contracts:
                     self._processed_contracts.remove(cid)
