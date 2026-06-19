@@ -84,6 +84,8 @@ class DerivWebSocketClient:
         self._otp_refresh_callback = None
         self._balance_refresh_callback = None
 
+    # (todos os métodos mantidos iguais, exceto o _on_poc que tem as novas extrações)
+
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
 
@@ -819,7 +821,7 @@ class DerivWebSocketClient:
                 logger.error(f"Falha ao reassinar {cid}: {e}")
 
     # ============================================================
-    # _on_poc CORRIGIDO (exit_digit)
+    # _on_poc COM DADOS DE AUDITORIA
     # ============================================================
     def _on_poc(self, data):
         c = data.get('proposal_open_contract', {})
@@ -846,20 +848,29 @@ class DerivWebSocketClient:
         profit = sp - bp
         is_win = profit > 0
 
-        # Extrair dígito real do contrato (exit_tick ou exit_spot)
-        exit_tick = c.get('exit_tick') or c.get('exit_spot')
-        exit_digit = None
-        if exit_tick is not None:
+        # Dados de auditoria
+        entry_tick = c.get('entry_tick')
+        exit_tick = c.get('exit_tick')
+        entry_spot = c.get('entry_spot')
+        exit_spot = c.get('exit_spot')
+        entry_tick_time = c.get('entry_tick_time')
+        exit_tick_time = c.get('exit_tick_time')
+
+        entry_digit = None
+        if entry_spot is not None:
             try:
-                exit_str = str(float(exit_tick))
-                for ch in reversed(exit_str):
-                    if ch.isdigit():
-                        exit_digit = int(ch)
-                        break
+                entry_digit = int(str(float(entry_spot)).replace('.', '')[-1])
             except (ValueError, TypeError):
                 pass
 
-        logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}, exit_digit={exit_digit}")
+        exit_digit = None
+        if exit_spot is not None:
+            try:
+                exit_digit = int(str(float(exit_spot)).replace('.', '')[-1])
+            except (ValueError, TypeError):
+                pass
+
+        logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}, entry_digit={entry_digit}, exit_digit={exit_digit}")
 
         if self._digit_analyzer:
             current_tick = self._digit_analyzer.get_current_digit()
@@ -883,8 +894,12 @@ class DerivWebSocketClient:
                 'contract_id': cid, 'buy_price': bp, 'sell_price': sp,
                 'profit': profit, 'amount': trade_info.get('amount', bp),
                 'is_win': is_win,
+                'entry_digit': entry_digit,
                 'exit_digit': exit_digit,
-                'exit_tick': exit_tick
+                'entry_tick_time': entry_tick_time,
+                'exit_tick_time': exit_tick_time,
+                'entry_spot': entry_spot,
+                'exit_spot': exit_spot
             })
         if self.on_result_callback:
             self.on_result_callback({
@@ -895,8 +910,12 @@ class DerivWebSocketClient:
                 'is_differ': trade_info.get('is_differ', False),
                 'is_matches': trade_info.get('is_matches', False),
                 'digit_barrier': trade_info.get('digit_barrier'),
+                'entry_digit': entry_digit,
                 'exit_digit': exit_digit,
-                'exit_tick': exit_tick
+                'entry_tick_time': entry_tick_time,
+                'exit_tick_time': exit_tick_time,
+                'entry_spot': entry_spot,
+                'exit_spot': exit_spot
             })
         if cid in self.active_trades:
             del self.active_trades[cid]
