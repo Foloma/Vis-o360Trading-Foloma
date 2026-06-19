@@ -13,7 +13,7 @@ class StrategyManager:
     - Preview sem efeitos colaterais.
     - Cache de sinais expira após 10 ticks.
     - Entrada apenas no clique (evaluate_*), que consome o estado.
-    - Trade Lock com timeout de 15 segundos.
+    - Trade Lock com timeout de 30 segundos.
     """
 
     def __init__(self, client, analyzer):
@@ -51,7 +51,7 @@ class StrategyManager:
 
         self._trade_locked = False
         self._trade_locked_at = 0
-        self.TRADE_LOCK_TIMEOUT = 15   # ← reduzido para 15 segundos
+        self.TRADE_LOCK_TIMEOUT = 30   # ← aumentado para contratos de 5 ticks
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -535,28 +535,20 @@ class StrategyManager:
             self._trade_locked = False
 
     # ================================================================
-    # CORRECÇÃO NO notify_result
+    # notify_result (versão corrigida para reconhecer todos os prefixos)
     # ================================================================
     def notify_result(self, action, is_win):
-        """Regista o resultado de um trade e aplica cooldowns / stops."""
         with self._lock:
             logger.info(
                 f"📊 notify_result: action='{action}', is_win={is_win}, "
                 f"losses={self._consecutive_losses}"
             )
-            # Libertar imediatamente o trade lock
             self.unlock_trade()
 
-            # Normalizar a action para corresponder aos prefixos esperados
-            # O action pode ser 'CALL', 'PUT', 'DIGITODD', 'DIGITEVEN',
-            # 'DIFFER_X', 'MATCH_X', 'Z_DIFFER', 'Z_MATCH'
             action_upper = action.upper()
 
-            # --- LÓGICA EM CASO DE PERDA ---
             if not is_win:
                 self._consecutive_losses += 1
-
-                # Stop global após 3 perdas consecutivas
                 if self._consecutive_losses >= 3:
                     self._global_stop_until = time.time() + 180
                     logger.warning("🛑 STOP GLOBAL: 3 perdas consecutivas — pausa 3 min")
@@ -564,35 +556,23 @@ class StrategyManager:
                     self.reset_sequence_state()
                     return
 
-                # Cooldown baseado no tipo de estratégia
                 if action_upper.startswith('DIFFER') or action_upper.startswith('Z_DIFFER'):
                     self._apply_cooldown(5)
-
                 elif action_upper in ('CALL', 'PUT', 'DIGITODD', 'DIGITEVEN'):
-                    # Estratégia Par/Ímpar
                     if not self._parity_martingale_used and self._last_parity_streak_type:
-                        # Se ainda não usámos martingale e há um streak registado,
-                        # damos apenas 1 tick de cooldown para tentar o martingale
                         self._apply_cooldown(1)
                         logger.info("🔄 Janela de entrada reiniciada para martingale")
                     else:
                         self._apply_cooldown(5)
-
                 elif action_upper.startswith('MATCH') or action_upper.startswith('Z_MATCH'):
                     self._matches_cooldown_until = time.time() + 150
                     self._apply_cooldown(10)
-
                 else:
-                    # Ação desconhecida – registar e aplicar cooldown genérico
                     logger.warning(f"⚠️ Ação não reconhecida '{action}' – cooldown padrão de 5s")
                     self._apply_cooldown(5)
-
-            # --- LÓGICA EM CASO DE GANHO ---
             else:
                 self._consecutive_losses = 0
                 self.reset_sequence_state()
-
-                # Pequeno cooldown após vitória para evitar sobreposição
                 if action_upper.startswith('DIFFER') or action_upper.startswith('Z_DIFFER'):
                     self._apply_cooldown(1)
                 elif action_upper in ('CALL', 'PUT', 'DIGITODD', 'DIGITEVEN'):
@@ -619,7 +599,6 @@ class StrategyManager:
             else:
                 matches_reason = "Disponível"
 
-            # Tempo restante do trade lock
             if self._trade_locked:
                 trade_lock_remaining = max(0, round(self.TRADE_LOCK_TIMEOUT - (time.time() - self._trade_locked_at)))
             else:
@@ -631,7 +610,7 @@ class StrategyManager:
                 'matches_cooldown': self.is_matches_cooldown,
                 'consecutive_losses': self._consecutive_losses,
                 'trade_locked': self._trade_locked,
-                'trade_lock_seconds_remaining': trade_lock_remaining,   # ← NOVO CAMPO
+                'trade_lock_seconds_remaining': trade_lock_remaining,
                 'differ_available': differ_avail,
                 'differ_digit': differ_digit,
                 'differ_ticks_left': self._ticks_left(self._active_signals.get('differ')),
