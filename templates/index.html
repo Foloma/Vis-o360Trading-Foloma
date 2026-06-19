@@ -230,6 +230,9 @@
       <div id="seqInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
       <div id="entropyInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
       <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
+      <div style="font-size:9px;color:var(--muted);text-align:center;margin-top:4px">
+        ⚠️ O dígito exibido pode diferir do dígito do contrato (latência do servidor)
+      </div>
 
       <div class="card-title" style="margin-top:8px">📊 FREQUÊNCIA DOS DÍGITOS (0-9)</div>
       <div class="freq-grid" id="freqGrid"></div>
@@ -542,12 +545,14 @@ async function updateAll(){
         clearTimeout(_tradeSubmittedTimer);
         clearTimeout(_tradePendingTimer);
         const bd=$_('bigD'), bp=$_('bigP');
-        bd.textContent = ltr.digit !== undefined ? ltr.digit : '?';
+        const displayDigit = ltr.exit_digit !== undefined ? ltr.exit_digit : ltr.digit;
+        bd.textContent = displayDigit !== undefined ? displayDigit : '?';
         bd.className = 'big-d ' + (ltr.is_win ? 'odd' : 'even');
         bp.textContent = (ltr.is_win ? 'GANHOU' : 'PERDEU');
         const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
         const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
-        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${latencyInfo}`, ltr.is_win ? 'win' : 'loss', 4000);
+        const digitInfo = ltr.exit_digit !== undefined ? ` | Dígito: ${ltr.exit_digit}` : '';
+        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${digitInfo}${latencyInfo}`, ltr.is_win ? 'win' : 'loss', 4000);
         _showTradeResult = true;
         setTimeout(() => { _showTradeResult = false; }, 2000);
       }
@@ -738,7 +743,7 @@ function tradeDigit(pred){
       toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
     }
   }, 3000);
-  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prediction:pred,amount:amt})})
+  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})})
   .then(r=>r.json()).then(d=>{
     _tradeSubmitted = false;
     clearTimeout(_tradeSubmittedTimer);
