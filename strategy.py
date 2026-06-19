@@ -11,10 +11,11 @@ class StrategyManager:
     Implementa os módulos da Foloma Visão 360 com sincronização por snapshots.
     - Sinais gerados automaticamente (differ/parity no início do ciclo; matches/zscore sempre).
     - Preview sem efeitos colaterais.
-    - Cache de sinais expira após 10 ticks.
+    - Cache de sinais expira após 5 ticks.
     - Entrada apenas no clique (evaluate_*), que consome o estado.
-    - Trade Lock com timeout de 30 segundos.
-    - Paridade agora exige 5 ou 6 ocorrências consecutivas do mesmo tipo nos últimos 6 dígitos.
+    - Trade Lock com timeout de 20 segundos.
+    - Paridade exige 5 ou 6 ocorrências do mesmo tipo nos últimos 6 dígitos.
+    - Antes de executar, revalida a condição para evitar trades com sinal desatualizado.
     """
 
     def __init__(self, client, analyzer):
@@ -48,11 +49,10 @@ class StrategyManager:
             'zscore': None
         }
 
-        self.SIGNAL_VALIDITY_TICKS = 10
-
+        self.SIGNAL_VALIDITY_TICKS = 5      # ← reduzido (era 10)
         self._trade_locked = False
         self._trade_locked_at = 0
-        self.TRADE_LOCK_TIMEOUT = 30   # contratos de 5 ticks
+        self.TRADE_LOCK_TIMEOUT = 20        # ← reduzido (era 30)
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -239,16 +239,15 @@ class StrategyManager:
         return None
 
     def _preview_parity_signal(self):
-        """Agora exige 5 ou 6 ocorrências nos últimos 6 dígitos."""
+        """Exige 5 ou 6 ocorrências nos últimos 6 dígitos."""
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 6:
             return None
-        last_six = [d % 2 != 0 for d in recent[-6:]]  # True = ímpar
+        last_six = [d % 2 != 0 for d in recent[-6:]]
         odd_count = sum(last_six)
         even_count = 6 - odd_count
 
-        # Só gera sinal se 5 ou 6 do mesmo tipo
-        if odd_count >= 5:   # 5 ou 6 ímpares → apostar em PAR
+        if odd_count >= 5:
             if not self._parity_odd_used:
                 return {'recommendation': 'even',
                         'digits': recent[-6:],
@@ -257,7 +256,7 @@ class StrategyManager:
                 return {'recommendation': 'even',
                         'digits': recent[-6:],
                         'reason': "Martingale disponível (Tendência ÍMPAR)"}
-        if even_count >= 5:  # 5 ou 6 pares → apostar em ÍMPAR
+        if even_count >= 5:
             if not self._parity_even_used:
                 return {'recommendation': 'odd',
                         'digits': recent[-6:],
@@ -340,7 +339,7 @@ class StrategyManager:
         return False, None, None, "Nenhum sinal Z‑Score disponível"
 
     # -----------------------------------------------------------------
-    # Métodos de entrada (evaluate_*) – com efeitos colaterais
+    # Métodos de entrada (evaluate_*) – com REVALIDAÇÃO
     # -----------------------------------------------------------------
     def evaluate_differ(self):
         with self._lock:
@@ -352,6 +351,12 @@ class StrategyManager:
                 return None, "Trade em curso"
             signal = self._active_signals['differ']
             if signal and self._is_signal_still_valid(signal):
+                # Revalidar antes de executar
+                preview = self._preview_differ_signal()
+                if not preview:
+                    self._active_signals['differ'] = None
+                    logger.info("⚠️ Sinal DIFFER invalidado na execução — condição desapareceu")
+                    return None, "Condição de mercado mudou"
                 self._differ_sequence_used.add(signal['recommendation'])
                 self._last_differ_digit = signal['recommendation']
                 logger.info(f"✅ DIFFER executado: snapshot {signal['id']}")
@@ -389,6 +394,12 @@ class StrategyManager:
                 return None, "Trade em curso"
             signal = self._active_signals['parity']
             if signal and self._is_signal_still_valid(signal):
+                # Revalidar antes de executar
+                preview = self._preview_parity_signal()
+                if not preview:
+                    self._active_signals['parity'] = None
+                    logger.info("⚠️ Sinal PAR/ÍMPAR invalidado na execução — condição desapareceu")
+                    return None, "Condição de mercado mudou"
                 rec = signal['recommendation']
                 if rec == 'even':
                     self._parity_odd_used = True
@@ -401,7 +412,6 @@ class StrategyManager:
             return self._generate_parity_signal()
 
     def _generate_parity_signal(self):
-        """Usa janela de 6 dígitos e threshold 5."""
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) < 6:
             return None, "Aguardando dados"
@@ -461,6 +471,12 @@ class StrategyManager:
                 return None, "Cooldown MATCHES ativo"
             signal = self._active_signals['matches']
             if signal and self._is_signal_still_valid(signal):
+                # Revalidar antes de executar
+                preview = self._preview_matches_signal()
+                if not preview:
+                    self._active_signals['matches'] = None
+                    logger.info("⚠️ Sinal MATCHES invalidado na execução — condição desapareceu")
+                    return None, "Condição de mercado mudou"
                 self._matches_sequence_used = True
                 self._last_matches_digit = signal['recommendation']
                 logger.info(f"✅ MATCHES executado: snapshot {signal['id']}")
@@ -497,6 +513,12 @@ class StrategyManager:
                 return None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
             signal = self._active_signals['zscore']
             if signal and self._is_signal_still_valid(signal):
+                # Revalidar antes de executar
+                preview = self._preview_zscore_signal()
+                if not preview:
+                    self._active_signals['zscore'] = None
+                    logger.info("⚠️ Sinal Z‑Score invalidado na execução — condição desapareceu")
+                    return None, None, "Condição de mercado mudou"
                 self._zscore_sequence_used = True
                 self._zscore_cooldown_until = time.time() + 300
                 action = self._last_zscore_action
@@ -541,7 +563,7 @@ class StrategyManager:
             self._trade_locked = False
 
     # ================================================================
-    # notify_result (versão corrigida para reconhecer todos os prefixos)
+    # notify_result
     # ================================================================
     def notify_result(self, action, is_win):
         with self._lock:
