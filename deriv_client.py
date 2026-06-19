@@ -82,9 +82,9 @@ class DerivWebSocketClient:
 
         self._ws_url = None
         self._otp_refresh_callback = None
-        self._balance_refresh_callback = None   # <-- NOVO
+        self._balance_refresh_callback = None
 
-    # (todos os outros métodos mantidos iguais, exceto os já corrigidos)
+    # (todos os outros métodos mantidos exatamente como antes)
 
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
@@ -527,12 +527,13 @@ class DerivWebSocketClient:
         return True, None
 
     # ============================================================
-    # AUXILIAR OTP (symbol)
+    # MÉTODO AUXILIAR CORRIGIDO: substitui symbol por underlying_symbol no OTP
     # ============================================================
     def _build_proposal(self, base_payload):
-        """Remove 'symbol' se estiver em modo OTP, pois o novo endpoint rejeita."""
+        """Corrige payload para a nova API Deriv (OTP): troca 'symbol' por 'underlying_symbol'."""
         if self._is_otp_ws():
-            base_payload.pop('symbol', None)
+            symbol = base_payload.pop('symbol', self.current_symbol)
+            base_payload['underlying_symbol'] = symbol
         return base_payload
 
     # ============================================================
@@ -881,9 +882,7 @@ class DerivWebSocketClient:
         if cid in self.active_trades:
             del self.active_trades[cid]
 
-        # ============================================================
-        # REFRESH DE SALDO VIA REST APÓS TRADE (OTP)
-        # ============================================================
+        # Actualizar saldo via REST após trade (modo OTP)
         if self._is_otp_ws() and self._balance_refresh_callback:
             threading.Thread(target=self._do_refresh_balance, daemon=True).start()
 
