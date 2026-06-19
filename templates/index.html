@@ -664,8 +664,12 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   updateSignalTicks('zscore', strategy.zscore_ticks_left);
 
   const tradeLocked = _tradeSubmitted || strategy.trade_locked;
-  const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 2);
+  const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 6);
+
   const blockerMsg=$_('digitBlockerMsg');
+  if(blockerMsg){
+    blockerMsg.textContent = ticksBlocked ? `⏳ Aguarde novo ciclo. ${ticksRemaining} tick(s) restantes.` : '';
+  }
 
   const btnOdd=$_('btnOdd'), btnEven=$_('btnEven'), parityReasonEl=$_('parityReason');
   if (strategy.parity_available) {
@@ -704,10 +708,6 @@ function updateStrategyDisplay(strategy, ticksRemaining){
     } else {
       zContainer.classList.remove('visible');
     }
-  }
-
-  if(blockerMsg){
-    blockerMsg.textContent = ticksBlocked ? `⏳ Aguarde ${ticksRemaining} tick(s)...` : '';
   }
 
   const matchesReasonEl=$_('matchesReason');
@@ -756,7 +756,7 @@ function tradeDigit(pred){
           _tradePending = false;
           toast('⚠️ Resultado demorou muito. Verifique o histórico.','warning', 6000);
         }
-      }, 15000);
+      }, 10000);
       toast('⏳ Aposta enviada!','info'); 
       scheduleHistoryLoad(5000); 
     }
@@ -788,7 +788,7 @@ async function tradeDiffer(){
           _tradePending = false; 
           toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000);
         }
-      }, 15000);
+      }, 10000);
       toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
     }
   }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
@@ -815,7 +815,7 @@ async function tradeMatches(){
           _tradePending = false; 
           toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000);
         }
-      }, 15000);
+      }, 10000);
       toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
     }
   }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
@@ -842,7 +842,7 @@ async function tradeZscore(){
           _tradePending = false; 
           toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000);
         }
-      }, 15000);
+      }, 10000);
       toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
     }
   }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
