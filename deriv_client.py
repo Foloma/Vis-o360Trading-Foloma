@@ -82,6 +82,9 @@ class DerivWebSocketClient:
 
         self._ws_url = None
         self._otp_refresh_callback = None
+        self._balance_refresh_callback = None   # <-- NOVO
+
+    # (todos os outros métodos mantidos iguais, exceto os já corrigidos)
 
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
@@ -523,6 +526,18 @@ class DerivWebSocketClient:
                     return False, "Trade pendente"
         return True, None
 
+    # ============================================================
+    # AUXILIAR OTP (symbol)
+    # ============================================================
+    def _build_proposal(self, base_payload):
+        """Remove 'symbol' se estiver em modo OTP, pois o novo endpoint rejeita."""
+        if self._is_otp_ws():
+            base_payload.pop('symbol', None)
+        return base_payload
+
+    # ============================================================
+    # MÉTODOS DE TRADE
+    # ============================================================
     def place_trade(self, contract_type, amount, is_digit=False):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
@@ -560,13 +575,17 @@ class DerivWebSocketClient:
             logger.info(f"📤 Enviando proposta: {contract_type_full}, amount={amount}, symbol={self.current_symbol}")
             try:
                 payload = {
-                    "proposal": 1, "amount": amount, "basis": "stake",
-                    "contract_type": contract_type_full, "currency": self.currency,
-                    "duration": duration, "duration_unit": duration_unit,
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": contract_type_full,
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": duration_unit,
+                    "symbol": self.current_symbol,
+                    "req_id": req_id
                 }
-                if not self._is_otp_ws():
-                    payload["symbol"] = self.current_symbol
-                self.ws.send(json.dumps(payload))
+                self.ws.send(json.dumps(self._build_proposal(payload)))
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro trade: {e}")
@@ -591,22 +610,31 @@ class DerivWebSocketClient:
             req_id = self._next_req()
             with self._pending_lock:
                 self.pending_trade = {
-                    'amount': amount, 'contract_type': f'DIFFER_{digit}',
-                    'is_digit': True, 'is_differ': True, 'digit_barrier': digit,
-                    'timestamp': time.time(), 'status': 'waiting_proposal', 'req_id': req_id
+                    'amount': amount,
+                    'contract_type': f'DIFFER_{digit}',
+                    'is_digit': True,
+                    'is_differ': True,
+                    'digit_barrier': digit,
+                    'timestamp': time.time(),
+                    'status': 'waiting_proposal',
+                    'req_id': req_id
                 }
             self.pending_trade_time = time.time()
             logger.info(f"📤 Enviando DIGITDIFF: barreira={digit}, amount={amount}")
             try:
                 payload = {
-                    "proposal": 1, "amount": amount, "basis": "stake",
-                    "contract_type": "DIGITDIFF", "currency": self.currency,
-                    "duration": duration, "duration_unit": duration_unit,
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": "DIGITDIFF",
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": duration_unit,
                     "barrier": digit,
+                    "symbol": self.current_symbol,
+                    "req_id": req_id
                 }
-                if not self._is_otp_ws():
-                    payload["symbol"] = self.current_symbol
-                self.ws.send(json.dumps(payload))
+                self.ws.send(json.dumps(self._build_proposal(payload)))
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro DIGITDIFF: {e}")
@@ -631,22 +659,31 @@ class DerivWebSocketClient:
             req_id = self._next_req()
             with self._pending_lock:
                 self.pending_trade = {
-                    'amount': amount, 'contract_type': f'MATCH_{digit}',
-                    'is_digit': True, 'is_matches': True, 'digit_barrier': digit,
-                    'timestamp': time.time(), 'status': 'waiting_proposal', 'req_id': req_id
+                    'amount': amount,
+                    'contract_type': f'MATCH_{digit}',
+                    'is_digit': True,
+                    'is_matches': True,
+                    'digit_barrier': digit,
+                    'timestamp': time.time(),
+                    'status': 'waiting_proposal',
+                    'req_id': req_id
                 }
             self.pending_trade_time = time.time()
             logger.info(f"📤 Enviando DIGITMATCH: dígito={digit}, amount={amount}")
             try:
                 payload = {
-                    "proposal": 1, "amount": amount, "basis": "stake",
-                    "contract_type": "DIGITMATCH", "currency": self.currency,
-                    "duration": duration, "duration_unit": duration_unit,
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": "DIGITMATCH",
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": duration_unit,
                     "barrier": digit,
+                    "symbol": self.current_symbol,
+                    "req_id": req_id
                 }
-                if not self._is_otp_ws():
-                    payload["symbol"] = self.current_symbol
-                self.ws.send(json.dumps(payload))
+                self.ws.send(json.dumps(self._build_proposal(payload)))
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro DIGITMATCH: {e}")
@@ -654,6 +691,9 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
+    # ============================================================
+    # PROCESSAMENTO DE PROPOSTA / BUY / POC
+    # ============================================================
     def _on_proposal(self, data):
         with self._pending_lock:
             if self.pending_trade is None:
@@ -841,6 +881,29 @@ class DerivWebSocketClient:
         if cid in self.active_trades:
             del self.active_trades[cid]
 
+        # ============================================================
+        # REFRESH DE SALDO VIA REST APÓS TRADE (OTP)
+        # ============================================================
+        if self._is_otp_ws() and self._balance_refresh_callback:
+            threading.Thread(target=self._do_refresh_balance, daemon=True).start()
+
+    def _do_refresh_balance(self):
+        """Chama o callback REST para actualizar o saldo."""
+        try:
+            balance, currency = self._balance_refresh_callback()
+            if balance > 0:
+                self.balance = balance
+                self.currency = currency
+                if self.trading_bot:
+                    self.trading_bot.balance = balance
+                    self.trading_bot.currency = currency
+                logger.info(f"💰 Saldo actualizado REST: {balance} {currency}")
+        except Exception as e:
+            logger.error(f"Erro refresh saldo: {e}")
+
+    # ============================================================
+    # RESTO DOS MÉTODOS (inalterados)
+    # ============================================================
     def _on_api_error(self, data):
         err = data.get('error', {})
         code = err.get('code', 'N/A')
