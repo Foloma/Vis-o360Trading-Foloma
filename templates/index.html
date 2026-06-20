@@ -170,9 +170,69 @@
       <button class="tf-btn active" onclick="scrollToSection('g1')">Par/Ímpar</button>
       <button class="tf-btn" onclick="scrollToSection('g2')">DIFFER</button>
       <button class="tf-btn" onclick="scrollToSection('g3')">MATCHES</button>
-      <button class="tf-btn" onclick="scrollToSection('g4')">Plano $20→$100</button>
+      <button class="tf-btn" onclick="scrollToSection('g4')">Gestão</button>
       <button class="tf-btn" onclick="scrollToSection('g5')">Emocional</button>
+      <button class="tf-btn" onclick="scrollToSection('g6')">Suporte</button>
     </div>
+
+<div id="g1" style="margin-top:16px">
+  <h3>🎲 Par/Ímpar — Como interpretar o sinal</h3>
+  <p>O sistema observa os últimos dígitos e mostra uma tendência (ex: 5 de 6 ímpares). Quando a tendência é forte, o botão da direção oposta fica disponível para entrada.</p>
+  <p><b>Importante:</b> os dígitos no ecrã servem para análise de tendência, mas o contrato real pode abrir 1 a 3 ticks depois do clique, devido ao tempo de processamento da Deriv. Por isso o resultado final pode parecer diferente do que viste no momento do clique — isso é normal e está documentado pela própria Deriv, não é uma falha da plataforma.</p>
+  <p>Usa sempre o painel <b>"🔍 Auditoria do Último Trade"</b> depois de cada operação para veres exatamente qual foi o tick de entrada, o tick de saída e a latência real.</p>
+  <table>
+    <tr><th>Indicador</th><th>O que significa</th></tr>
+    <tr><td>% Ímpar / Par (10, 20, 50 ticks)</td><td>Tendência recente do mercado</td></tr>
+    <tr><td>Tick lock / Trade Lock</td><td>Proteção técnica contra compra dupla acidental</td></tr>
+    <tr><td>Qualidade de conexão</td><td>Quanto melhor (🟢), mais fiável é a entrada</td></tr>
+  </table>
+</div>
+
+<div id="g2" style="margin-top:16px">
+  <h3>🎯 DIFFER — Como funciona</h3>
+  <p>O sistema identifica quando um dígito se repetiu recentemente e sugere apostar que ele <b>não</b> vai repetir-se novamente no próximo resultado. É a estratégia com fundamento estatístico mais sólido entre as disponíveis, porque a Deriv garante distribuição uniforme dos dígitos — uma repetição recente não muda a probabilidade futura, mas o payout do DIFFER compensa melhor esse risco.</p>
+  <p>Sinal válido apenas por alguns ticks — depois disso expira e é gerado um novo, mais ajustado ao mercado atual.</p>
+</div>
+
+<div id="g3" style="margin-top:16px">
+  <h3>🎯 MATCHES — Como funciona</h3>
+  <p>Aposta que um dígito específico (que está ausente há muitos ticks) vai aparecer. O payout é alto (~9x) mas a probabilidade de acerto é de apenas 10% por tentativa — usa valores pequenos e não confies nisto como estratégia principal de renda.</p>
+</div>
+
+<div id="g4" style="margin-top:16px">
+  <h3>📈 Plano de gestão de banca — $20 → $100</h3>
+  <p><b>A regra mais importante:</b> nunca arrisques mais do que conseguires perder sem afetar o teu dia. Os mercados sintéticos são gerados algoritmicamente — não há garantia de lucro, e isso deve estar sempre presente nas tuas decisões.</p>
+  <h3>Meta diária recomendada</h3>
+  <p>Define uma meta de lucro diário entre <b>5% e 10%</b> da tua banca. Por exemplo, com $20, uma meta de 8% equivale a $1.60. Pode parecer pouco, mas a consistência ao longo do tempo é o que realmente faz a banca crescer — <b>metas menores são mais sustentáveis do que metas agressivas</b>.</p>
+  <table>
+    <tr><th>Banca inicial</th><th>Meta diária (8%)</th><th>Stop-loss diário (5%)</th></tr>
+    <tr><td>$20</td><td>~$1.60</td><td>~$1.00</td></tr>
+    <tr><td>$50</td><td>~$4.00</td><td>~$2.50</td></tr>
+    <tr><td>$100</td><td>~$8.00</td><td>~$5.00</td></tr>
+  </table>
+  <h3>Regras de ouro</h3>
+  <p>1. Assim que atingires a tua meta diária, <b>para</b>. Não tentes "esticar" o dia.</p>
+  <p>2. Se atingires o stop-loss diário (perda máxima que definiste), <b>para</b> também — o sistema já tem proteção automática após 3 perdas consecutivas, mas a tua própria disciplina é a primeira linha de defesa.</p>
+  <p>3. Usa valores fixos pequenos ($0.35–$1) enquanto aprendes a interpretar os sinais. Só aumenta o valor por operação depois de teres histórico suficiente para confiar no teu próprio comportamento, não apenas no sistema.</p>
+  <p>4. O Martingale (multiplicar valor após perda) é uma ferramenta de recuperação, não de lucro — usa com um limite rígido de passos (2 no máximo recomendado) e nunca em sequência sem pausas.</p>
+</div>
+
+<div id="g5" style="margin-top:16px">
+  <h3>🧠 Controlo emocional</h3>
+  <p>A maior causa de perdas em trading não é a estratégia — é a reação emocional após uma perda ou um ganho. Reconhece estes três momentos de risco:</p>
+  <p><b>Depois de uma perda:</b> a vontade de "recuperar rápido" leva a apostas maiores e mais impulsivas. Se sentires isso, para, fecha a app por alguns minutos e volta com a cabeça fria.</p>
+  <p><b>Depois de vários ganhos seguidos:</b> a confiança excessiva leva a ignorar a gestão de banca. Lembra-te: cada operação é independente das anteriores, ganhos passados não garantem ganhos futuros.</p>
+  <p><b>Quando o mercado "parece óbvio":</b> nenhuma sequência de dígitos garante o próximo resultado. Se sentires certeza absoluta, é sinal para reduzir o valor, não para aumentar.</p>
+  <p>Define os teus limites <b>antes</b> de começar a operar (meta de lucro, limite de perda, número máximo de operações por dia) e respeita-os mesmo quando a emoção disser o contrário. Disciplina vence convicção.</p>
+</div>
+
+<div id="g6" style="margin-top:16px">
+  <h3>📲 Suporte e recursos</h3>
+  <p>Ainda não tens conta na Deriv? Cria a tua conta através deste link:</p>
+  <p><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" style="color:var(--accent);font-weight:700">👉 Criar conta na Deriv</a></p>
+  <p>Tens dúvidas, queres partilhar resultados ou precisas de ajuda com a plataforma? Junta-te ao grupo de suporte:</p>
+  <p><a href="https://chat.whatsapp.com/L8e0ituCsH68uIk3PMlQc9" target="_blank" style="color:var(--accent);font-weight:700">👉 Grupo de Suporte Foloma Visão 360</a></p>
+</div>
   </div>
 </div>
 
@@ -274,6 +334,13 @@
       <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
       <div class="ms">
         Martingale: <span id="mgtActDig">INATIVO</span> | Próx: <span id="mgtNxtDig">$0.35</span>
+        <div style="margin-top:4px">
+          <label style="font-size:9px;color:var(--muted)">Máx. passos (1-4):</label>
+          <input type="number" id="mgtMaxSteps" value="2" min="1" max="4" style="width:50px;padding:4px;font-size:11px;display:inline-block">
+        </div>
+        <div style="font-size:9px;color:var(--warning);margin-top:2px">
+          ⚠️ Cada passo dobra o valor. 4 passos = 16x o valor inicial.
+        </div>
         <div class="inline-actions">
           <button class="bm" id="btnMgtMultiply" onclick="mgtMultiply('amtDigit')">✕</button>
           <button class="bmr" onclick="mgtDivide('amtDigit')">÷</button>
@@ -631,12 +698,15 @@ async function updateAll(){
     const dAct=$_('mgtActDig'); if(dAct) dAct.textContent = act;
     const dNxt=$_('mgtNxtDig'); if(dNxt) dNxt.textContent = nxt;
     const ad=$_('amtDigit'); const indicator=$_('martingaleIndicator');
+    const maxStepsInput = $_('mgtMaxSteps');
     if(m.active){
       if(ad) { ad.value = (m.next_amount||0.35).toFixed(2); ad.classList.add('martingale-active'); }
       if(indicator) indicator.textContent = '🔄 Martingale pronto — clique no botão';
+      if(maxStepsInput) maxStepsInput.disabled = true;
     } else {
       if(ad) ad.classList.remove('martingale-active');
       if(indicator) indicator.textContent = '';
+      if(maxStepsInput) maxStepsInput.disabled = false;
     }
   }
 }
@@ -996,8 +1066,10 @@ async function mgtMultiply(fieldId){
     if(_mgtLocked){ toast('⏳ Aguarde...', 'warning'); return; }
     _mgtLocked = true;
     const input=$_(fieldId); const currentAmount=parseFloat(input.value)||0.35;
+    const maxStepsInput = $_('mgtMaxSteps');
+    const maxSteps = maxStepsInput ? Math.min(4, Math.max(1, parseInt(maxStepsInput.value)||2)) : 2;
     try{
-        const r=await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:currentAmount})});
+        const r=await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:currentAmount, max_steps:maxSteps})});
         const d=await r.json();
         if(d.error){ toast('❌ '+d.error,'loss'); }
         else { const nextAmount=d.martingale.next_amount; $_( 'amtDigit').value=nextAmount.toFixed(2); toast('📈 '+d.martingale.message,'info'); }
