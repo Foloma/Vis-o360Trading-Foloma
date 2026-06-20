@@ -58,9 +58,9 @@ class TradingBot:
 
         self.last_trade_result = None
 
-        # Novos atributos para auditoria de sincronização
-        self._last_click_time = None      # timestamp do clique (definido pelo app.py)
-        self._last_click_tick = None      # dígito visto no ecrã no clique (definido pelo app.py)
+        # Atributos para auditoria de sincronização
+        self._last_click_time = None
+        self._last_click_tick = None
 
     def start(self, client):
         self.client = client
@@ -169,7 +169,7 @@ class TradingBot:
                 'step': self.martingale['step'],
                 'original_amount': self.martingale['original_amount'],
                 'next_amount': self.get_martingale_amount(config.DEFAULT_STAKE),
-                'max_steps': config.MARTINGALE_CONFIG.get('max_steps', 2),
+                'system_max_steps': config.MARTINGALE_CONFIG.get('max_steps', 4),
                 'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0)
             }
 
@@ -180,9 +180,11 @@ class TradingBot:
             multiplier = config.MARTINGALE_CONFIG.get('multiplier', 2.0)
             return base_amount * (multiplier ** self.martingale['step'])
 
-    def apply_martingale_after_loss(self, last_trade_amount):
+    def apply_martingale_after_loss(self, last_trade_amount, user_max_steps=None):
         with self._state_lock:
-            max_steps = config.MARTINGALE_CONFIG.get('max_steps', 2)
+            system_max = config.MARTINGALE_CONFIG.get('max_steps', 4)
+            max_steps = min(user_max_steps, system_max) if user_max_steps else system_max
+
             if self.martingale['step'] >= max_steps:
                 return False, f"Máximo de {max_steps} perdas consecutivas atingido"
             self.martingale['step'] += 1
@@ -196,6 +198,7 @@ class TradingBot:
                 'step': self.martingale['step'],
                 'next_amount': nxt,
                 'multiplier': config.MARTINGALE_CONFIG.get('multiplier', 2.0),
+                'max_steps': max_steps,
                 'message': f"📈 Martingale ativo - Passo {self.martingale['step']}/{max_steps} | Próximo: ${nxt:.2f}"
             }
 
@@ -305,7 +308,7 @@ class TradingBot:
             contract_id = result.get('contract_id')
             profit = result.get('profit', 0)
             is_win = profit > 0
-            exit_digit = result.get('exit_digit')  # dígito real do contrato
+            exit_digit = result.get('exit_digit')
 
             target_trade = None
             if contract_id:
@@ -357,19 +360,18 @@ class TradingBot:
 
                 self._daily_stats_dirty = True
 
-                # Calcular latência total entre clique e entrada (se disponível)
+                # Calcular latência total entre clique e entrada
                 click_time = self._last_click_time
                 entry_time = result.get('entry_tick_time')
                 latency_total_ms = None
                 if click_time and entry_time:
                     latency_total_ms = round((entry_time - click_time) * 1000)
 
-                # Determinar o dígito a mostrar (fallback para comportamento anterior)
                 action = target_trade.get('action', '')
                 barrier = target_trade.get('digit_barrier', None)
 
                 if exit_digit is not None:
-                    won_digit = str(exit_digit)  # dígito real do contrato
+                    won_digit = str(exit_digit)
                 else:
                     if barrier is not None:
                         if 'DIFFER' in action:
@@ -386,16 +388,15 @@ class TradingBot:
                         else:
                             won_digit = '?'
 
-                # Construir objeto completo de auditoria
                 self.last_trade_result = {
                     'contract_id': contract_id,
                     'action': action,
                     'barrier': barrier,
                     'is_win': is_win,
                     'profit': profit,
-                    'digit': won_digit,                         # fallback para exibição
-                    'entry_digit': result.get('entry_digit'),   # dígito real de entrada
-                    'exit_digit': exit_digit,                   # dígito real de saída
+                    'digit': won_digit,
+                    'entry_digit': result.get('entry_digit'),
+                    'exit_digit': exit_digit,
                     'entry_spot': result.get('entry_spot'),
                     'exit_spot': result.get('exit_spot'),
                     'entry_tick_time': entry_time,
