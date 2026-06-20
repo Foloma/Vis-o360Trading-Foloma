@@ -58,6 +58,10 @@ class TradingBot:
 
         self.last_trade_result = None
 
+        # Novos atributos para auditoria de sincronização
+        self._last_click_time = None      # timestamp do clique (definido pelo app.py)
+        self._last_click_tick = None      # dígito visto no ecrã no clique (definido pelo app.py)
+
     def start(self, client):
         self.client = client
         self.daily_stats['start_balance'] = self.balance
@@ -353,7 +357,14 @@ class TradingBot:
 
                 self._daily_stats_dirty = True
 
-                # Determinar o dígito a mostrar
+                # Calcular latência total entre clique e entrada (se disponível)
+                click_time = self._last_click_time
+                entry_time = result.get('entry_tick_time')
+                latency_total_ms = None
+                if click_time and entry_time:
+                    latency_total_ms = round((entry_time - click_time) * 1000)
+
+                # Determinar o dígito a mostrar (fallback para comportamento anterior)
                 action = target_trade.get('action', '')
                 barrier = target_trade.get('digit_barrier', None)
 
@@ -375,17 +386,22 @@ class TradingBot:
                         else:
                             won_digit = '?'
 
+                # Construir objeto completo de auditoria
                 self.last_trade_result = {
                     'contract_id': contract_id,
                     'action': action,
                     'barrier': barrier,
                     'is_win': is_win,
                     'profit': profit,
-                    'digit': won_digit,
-                    'exit_digit': exit_digit,  # dígito real do POC
-                    'entry_tick': self.digit_analyzer.get_current_digit() if self.digit_analyzer else '?',
-                    'entry_tick_count': self.digit_analyzer._tick_count if self.digit_analyzer else 0,
-                    'latency_ms': self.client.last_trade_latency_ms if self.client else 0
+                    'digit': won_digit,                         # fallback para exibição
+                    'entry_digit': result.get('entry_digit'),   # dígito real de entrada
+                    'exit_digit': exit_digit,                   # dígito real de saída
+                    'entry_spot': result.get('entry_spot'),
+                    'exit_spot': result.get('exit_spot'),
+                    'entry_tick_time': entry_time,
+                    'exit_tick_time': result.get('exit_tick_time'),
+                    'latency_total_ms': latency_total_ms,
+                    'click_tick': self._last_click_tick,
                 }
 
             self.update_stats()
