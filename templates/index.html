@@ -190,6 +190,7 @@
         </div>
       </div>
       <div id="conSt" style="text-align:center;font-size:10px;color:#ffaa00"></div>
+      <div id="connQuality" style="font-size:10px;text-align:center;margin-top:2px"></div>
       <div class="latency-warning" id="latencyWarning">⚠️ Latência alta</div>
       <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:2px">Preço: <span id="priceEl" style="color:var(--accent)">---</span></div>
       <div id="strategyStatus" style="margin-top:6px; font-size:10px;"></div>
@@ -230,6 +231,21 @@
       <div id="seqInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
       <div id="entropyInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
       <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
+      <!-- Percentagens de ÍMPAR -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:6px;font-size:10px">
+        <div style="background:#020617;padding:4px;border-radius:6px;text-align:center">
+          <div style="color:var(--muted);font-size:8px">ÍMPAR 10t</div>
+          <div id="pctOdd10" style="color:var(--accent);font-weight:700">--%</div>
+        </div>
+        <div style="background:#020617;padding:4px;border-radius:6px;text-align:center">
+          <div style="color:var(--muted);font-size:8px">ÍMPAR 20t</div>
+          <div id="pctOdd20" style="color:var(--accent);font-weight:700">--%</div>
+        </div>
+        <div style="background:#020617;padding:4px;border-radius:6px;text-align:center">
+          <div style="color:var(--muted);font-size:8px">ÍMPAR 50t</div>
+          <div id="pctOdd50" style="color:var(--accent);font-weight:700">--%</div>
+        </div>
+      </div>
       <div style="font-size:9px;color:var(--muted);text-align:center;margin-top:4px">
         ⚠️ O dígito exibido pode diferir do dígito do contrato (latência do servidor)
       </div>
@@ -264,6 +280,12 @@
           <button class="bmr" onclick="rstMgt()">⟲</button>
         </div>
       </div>
+    </div>
+
+    <!-- PAINEL DE AUDITORIA DO ÚLTIMO TRADE -->
+    <div class="card" id="auditCard" style="display:none">
+      <div class="card-title">🔍 AUDITORIA DO ÚLTIMO TRADE</div>
+      <div id="auditContent" style="font-size:10px;line-height:1.8"></div>
     </div>
 
     <!-- HISTÓRICO -->
@@ -485,6 +507,12 @@ function updateSignalTicks(strategy, ticksLeft) {
     }
 }
 
+function calcPct(digits, n) {
+    const last = digits.slice(-n);
+    if(last.length === 0) return '--';
+    return Math.round(last.filter(d => d%2!==0).length / last.length * 100) + '%';
+}
+
 async function updateAll(){
   const [statusResp, martingaleResp] = await Promise.allSettled([
     fetch('/api/status').then(r=>r.json()),
@@ -504,6 +532,17 @@ async function updateAll(){
     $_( 'bal').textContent=(bot.balance||0).toFixed(2);
     $_( 'cur').textContent=bot.currency||'USD';
     const priceEl=$_('priceEl'); if(priceEl) priceEl.textContent=(bot.price||0).toFixed(4);
+
+    // Qualidade de conexão
+    if (_lastValidPing > 0 || bot.last_valid_ping_ms) {
+        _lastValidPing = bot.last_valid_ping_ms || _lastValidPing;
+        const quality = _lastValidPing < 80 ? '🟢 Excelente' 
+                      : _lastValidPing < 150 ? '🟡 Boa' 
+                      : _lastValidPing < 250 ? '🟠 Média' 
+                      : '🔴 Fraca';
+        const qEl = $_('connQuality');
+        if(qEl && isConnected) qEl.textContent = `Conexão: ${quality} (${_lastValidPing}ms)`;
+    }
 
     if (bot.has_pending_trade && !_tradePending && !_tradeSubmitted) {
         _tradePending = true;
@@ -553,6 +592,32 @@ async function updateAll(){
         const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
         const digitInfo = ltr.exit_digit !== undefined ? ` | Dígito: ${ltr.exit_digit}` : '';
         toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${digitInfo}${latencyInfo}`, ltr.is_win ? 'win' : 'loss', 4000);
+        
+        // Aviso de latência alta
+        if(ltr.latency_total_ms > 500){
+            toast(`⚠️ Alta latência (${ltr.latency_total_ms}ms) — tick de entrada pode diferir do observado`, 'warning', 5000);
+        }
+
+        // Mostrar painel de auditoria
+        const auditCard = $_('auditCard');
+        const auditContent = $_('auditContent');
+        if(auditCard && auditContent){
+            auditCard.style.display = 'block';
+            auditContent.innerHTML = `
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+                  <div>📌 Tick no clique: <b>${ltr.click_tick ?? '—'}</b></div>
+                  <div>🎯 Tick entrada: <b>${ltr.entry_digit ?? '—'}</b></div>
+                  <div>🏁 Tick saída: <b style="color:${ltr.is_win?'var(--accent)':'var(--danger)'}">${ltr.exit_digit ?? '—'}</b></div>
+                  <div>⏱ Latência: <b>${ltr.latency_total_ms ? ltr.latency_total_ms+'ms' : '—'}</b></div>
+                  <div>📊 Estratégia: <b>${ltr.action ?? '—'}</b></div>
+                  <div>💰 Resultado: <b style="color:${ltr.is_win?'var(--accent)':'var(--danger)'}">${ltr.is_win?'WIN':'LOSS'}</b></div>
+                </div>
+                <div style="margin-top:4px;color:var(--muted);font-size:9px">
+                  Clique → Compra → Resultado ${ltr.latency_total_ms ? '('+ltr.latency_total_ms+'ms total)' : ''}
+                </div>
+            `;
+        }
+
         _showTradeResult = true;
         setTimeout(() => { _showTradeResult = false; }, 2000);
       }
@@ -601,6 +666,15 @@ function updateDigits(digits){
     let html=''; recent.forEach((d)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
     $_( 'histRow').innerHTML=html;
     $_( 'histScroll').scrollLeft=$_('histScroll').scrollWidth;
+    
+    // Atualizar percentagens
+    const allDigits = recent;
+    if(allDigits.length > 0) {
+        const el10 = $_('pctOdd10'), el20 = $_('pctOdd20'), el50 = $_('pctOdd50');
+        if(el10) el10.textContent = calcPct(allDigits, 10);
+        if(el20) el20.textContent = calcPct(allDigits, 20);
+        if(el50) el50.textContent = calcPct(allDigits, 50);
+    }
   }
   const analysis=digits.analysis;
   if(analysis){
