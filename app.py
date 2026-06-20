@@ -1363,7 +1363,6 @@ def trade_digit():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
-        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1431,7 +1430,6 @@ def trade_differ():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
-        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1496,7 +1494,6 @@ def trade_matches():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
-        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1561,7 +1558,6 @@ def trade_zscore():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
-        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1653,6 +1649,14 @@ def martingale_status():
 def martingale_apply():
     d = request.json
     la = float(d.get('last_amount', 0))
+    user_max = d.get('max_steps')
+    if user_max is not None:
+        try:
+            user_max = int(user_max)
+            if user_max < 1 or user_max > 4:
+                return jsonify({'error': 'max_steps deve estar entre 1 e 4'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'error': 'max_steps inválido'}), 400
     if la <= 0:
         return jsonify({'error': 'Valor inválido'}), 400
     sess = get_session(session['user_id'])
@@ -1660,7 +1664,7 @@ def martingale_apply():
         return jsonify({'error': 'Sessão não encontrada'}), 500
 
     bot = sess['trading_bot']
-    ok, res = bot.apply_martingale_after_loss(la)
+    ok, res = bot.apply_martingale_after_loss(la, user_max_steps=user_max)
     if ok:
         _save_martingale_state(session['user_id'], bot)
         return jsonify({'status': 'ok', 'martingale': res})
