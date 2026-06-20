@@ -29,14 +29,15 @@ class Config:
     CONTRACT_DURATION = 10
     CONTRACT_DURATION_UNIT = 't'
 
-    DIGIT_CONTRACT_DURATION = 5          # ← duração reduzida para 5 ticks (era 10)
+    DIGIT_CONTRACT_DURATION = 5
     DIGIT_CONTRACT_DURATION_UNIT = 't'
 
     MARKUP_PERCENTAGE = 0.5
 
     MARTINGALE_CONFIG = {
         'multiplier': 2.0,
-        'max_steps': 2
+        'max_steps': 4,             # ← novo tecto absoluto do sistema (era 2)
+        'user_configurable': True   # ← permite ao utilizador escolher até 4 passos
     }
 
     RISK_LIMITS = {
