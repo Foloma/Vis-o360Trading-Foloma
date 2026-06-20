@@ -167,6 +167,15 @@ def init_db():
         c.execute("ALTER TABLE oauth_states ADD COLUMN code_verifier TEXT")
     except sqlite3.OperationalError:
         pass
+
+    # Novas colunas de auditoria
+    for col in ['entry_digit', 'exit_digit', 'entry_spot', 'exit_spot',
+                'entry_tick_time', 'exit_tick_time', 'click_tick', 'latency_ms']:
+        try:
+            c.execute(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass
+
     c.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
     conn.commit()
     conn.close()
@@ -398,13 +407,22 @@ def persist_trade(user_id, trade_data):
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
         conn.execute('''INSERT OR REPLACE INTO trades
-            (user_id, contract_id, symbol, action, amount, buy_price, sell_price, profit, result, timestamp)
-            VALUES (?,?,?,?,?,?,?,?,?,?)''',
+            (user_id, contract_id, symbol, action, amount, buy_price, sell_price, profit, result, timestamp,
+             entry_digit, exit_digit, entry_spot, exit_spot, entry_tick_time, exit_tick_time, click_tick, latency_ms)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (user_id, trade_data.get('contract_id'), trade_data.get('symbol'),
              trade_data.get('action'), trade_data.get('amount'),
              trade_data.get('buy_price', 0), trade_data.get('sell_price', 0),
              trade_data.get('profit', 0), trade_data.get('result', 'unknown'),
-             time.time()))
+             time.time(),
+             str(trade_data.get('entry_digit')) if trade_data.get('entry_digit') is not None else None,
+             str(trade_data.get('exit_digit')) if trade_data.get('exit_digit') is not None else None,
+             str(trade_data.get('entry_spot')) if trade_data.get('entry_spot') is not None else None,
+             str(trade_data.get('exit_spot')) if trade_data.get('exit_spot') is not None else None,
+             str(trade_data.get('entry_tick_time')) if trade_data.get('entry_tick_time') is not None else None,
+             str(trade_data.get('exit_tick_time')) if trade_data.get('exit_tick_time') is not None else None,
+             str(trade_data.get('click_tick')) if trade_data.get('click_tick') is not None else None,
+             str(trade_data.get('latency_ms')) if trade_data.get('latency_ms') is not None else None))
         conn.commit()
     except Exception as e:
         logger.error(f"Erro ao persistir trade: {e}")
@@ -592,7 +610,15 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 'buy_price': trade.get('buy_price', 0),
                 'sell_price': trade.get('sell_price', 0),
                 'profit': profit,
-                'result': result
+                'result': result,
+                'entry_digit': trade.get('entry_digit'),
+                'exit_digit': trade.get('exit_digit'),
+                'entry_spot': trade.get('entry_spot'),
+                'exit_spot': trade.get('exit_spot'),
+                'entry_tick_time': trade.get('entry_tick_time'),
+                'exit_tick_time': trade.get('exit_tick_time'),
+                'click_tick': getattr(bot, '_last_click_tick', None),
+                'latency_ms': getattr(bot, 'last_trade_result', {}).get('latency_total_ms')
             })
             _save_martingale_state(user_id, bot)
             strategy.notify_result(action, is_win)
@@ -1325,8 +1351,8 @@ def trade_digit():
 
         analyzer = sess['digit_analyzer']
         tr = analyzer.get_ticks_remaining()
-        if tr < 6:  # era < 2 – contratos de 5 ticks exigem margem
-            return jsonify({'error': f'Aguarde novo ciclo. Apenas {tr} tick(s) restantes.'}), 400
+        if tr < 6:
+            logger.info(f"Trade em ciclo avançado: {tr} ticks restantes – utilizador avisado no frontend.")
 
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
@@ -1337,6 +1363,10 @@ def trade_digit():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
+        # Passar dados de auditoria para o bot
+        sess['trading_bot']._last_click_time = audit_click_time
+        sess['trading_bot']._last_click_tick = audit_tick
+
         contract = 'CALL' if action == 'odd' else 'PUT'
         ok = sess['client'].place_trade(contract, amt, True)
         if ok:
@@ -1346,12 +1376,15 @@ def trade_digit():
                 f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
             )
             label = 'ÍMPAR' if action == 'odd' else 'PAR'
-            return jsonify({
+            resp = {
                 'status': 'ok',
                 'message': f'✅ {label} por ${amt:.2f}',
                 'ticks_remaining': tr,
                 'executed_action': action
-            })
+            }
+            if tr < 6:
+                resp['warning'] = f'Contrato aberto com apenas {tr} ticks restantes.'
+            return jsonify(resp)
         return jsonify({'error': 'Falha no trade'}), 500
     except Exception:
         logger.exception("Erro trade dígito")
@@ -1386,8 +1419,8 @@ def trade_differ():
 
         analyzer = sess['digit_analyzer']
         tr = analyzer.get_ticks_remaining()
-        if tr < 6:  # era < 2 – contratos de 5 ticks exigem margem
-            return jsonify({'error': f'Aguarde novo ciclo. Apenas {tr} tick(s) restantes.'}), 400
+        if tr < 6:
+            logger.info(f"Trade em ciclo avançado: {tr} ticks restantes – utilizador avisado no frontend.")
 
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
@@ -1398,6 +1431,10 @@ def trade_differ():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
+        # Passar dados de auditoria para o bot
+        sess['trading_bot']._last_click_time = audit_click_time
+        sess['trading_bot']._last_click_tick = audit_tick
+
         ok = sess['client'].place_differ_trade(digit, amt)
         if ok:
             strategy.lock_trade()
@@ -1405,11 +1442,14 @@ def trade_differ():
             logger.info(
                 f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
             )
-            return jsonify({
+            resp = {
                 'status': 'ok',
                 'message': f'🎯 DIFFER no dígito {digit} por ${amt:.2f}',
                 'digit': digit
-            })
+            }
+            if tr < 6:
+                resp['warning'] = f'Contrato aberto com apenas {tr} ticks restantes.'
+            return jsonify(resp)
         return jsonify({'error': 'Falha no trade DIFFER'}), 500
     except Exception:
         logger.exception("Erro trade differ")
@@ -1444,8 +1484,8 @@ def trade_matches():
 
         analyzer = sess['digit_analyzer']
         tr = analyzer.get_ticks_remaining()
-        if tr < 6:  # era < 2 – contratos de 5 ticks exigem margem
-            return jsonify({'error': f'Aguarde novo ciclo. Apenas {tr} tick(s) restantes.'}), 400
+        if tr < 6:
+            logger.info(f"Trade em ciclo avançado: {tr} ticks restantes – utilizador avisado no frontend.")
 
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
@@ -1456,6 +1496,10 @@ def trade_matches():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
+        # Passar dados de auditoria para o bot
+        sess['trading_bot']._last_click_time = audit_click_time
+        sess['trading_bot']._last_click_tick = audit_tick
+
         ok = sess['client'].place_matches_trade(digit, amt)
         if ok:
             strategy.lock_trade()
@@ -1463,11 +1507,14 @@ def trade_matches():
             logger.info(
                 f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
             )
-            return jsonify({
+            resp = {
                 'status': 'ok',
                 'message': f'🎯 MATCHES no dígito {digit} por ${amt:.2f}',
                 'digit': digit
-            })
+            }
+            if tr < 6:
+                resp['warning'] = f'Contrato aberto com apenas {tr} ticks restantes.'
+            return jsonify(resp)
         return jsonify({'error': 'Falha no trade MATCHES'}), 500
     except Exception:
         logger.exception("Erro trade matches")
@@ -1502,8 +1549,8 @@ def trade_zscore():
 
         analyzer = sess['digit_analyzer']
         tr = analyzer.get_ticks_remaining()
-        if tr < 6:  # era < 2 – contratos de 5 ticks exigem margem
-            return jsonify({'error': f'Aguarde novo ciclo. Apenas {tr} tick(s) restantes.'}), 400
+        if tr < 6:
+            logger.info(f"Trade em ciclo avançado: {tr} ticks restantes – utilizador avisado no frontend.")
 
         audit_tick = analyzer.get_current_digit()
         audit_tick_count = analyzer._tick_count
@@ -1513,6 +1560,10 @@ def trade_zscore():
             f"| tick_count={audit_tick_count} "
             f"| hora_clique={audit_click_time:.3f}"
         )
+
+        # Passar dados de auditoria para o bot
+        sess['trading_bot']._last_click_time = audit_click_time
+        sess['trading_bot']._last_click_tick = audit_tick
 
         if action == 'DIFFER':
             ok = sess['client'].place_differ_trade(digit, amt)
@@ -1528,11 +1579,14 @@ def trade_zscore():
             logger.info(
                 f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
             )
-            return jsonify({
+            resp = {
                 'status': 'ok',
                 'message': f'🎯 Z‑Score {action} no dígito {digit} por ${amt:.2f}',
                 'digit': digit
-            })
+            }
+            if tr < 6:
+                resp['warning'] = f'Contrato aberto com apenas {tr} ticks restantes.'
+            return jsonify(resp)
         return jsonify({'error': 'Falha no trade Z‑Score'}), 500
     except Exception:
         logger.exception("Erro trade zscore")
