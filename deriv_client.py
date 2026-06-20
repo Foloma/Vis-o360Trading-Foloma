@@ -84,7 +84,9 @@ class DerivWebSocketClient:
         self._otp_refresh_callback = None
         self._balance_refresh_callback = None
 
-    # (todos os métodos mantidos iguais, exceto o _on_poc que tem as novas extrações)
+        # Novos campos para auditoria
+        self._last_buy_time = None
+        self._last_buy_contract_id = None
 
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
@@ -766,6 +768,10 @@ class DerivWebSocketClient:
 
                 self.last_trade_latency_ms = latency_ms
 
+                # Registar hora exata de compra
+                self._last_buy_time = time.time()
+                self._last_buy_contract_id = cid
+
                 if self.trading_bot:
                     self.trading_bot.register_trade({
                         'contract_id': cid, 'symbol': self.current_symbol,
@@ -821,7 +827,7 @@ class DerivWebSocketClient:
                 logger.error(f"Falha ao reassinar {cid}: {e}")
 
     # ============================================================
-    # _on_poc COM DADOS DE AUDITORIA
+    # _on_poc COM DADOS DE AUDITORIA COMPLETOS
     # ============================================================
     def _on_poc(self, data):
         c = data.get('proposal_open_contract', {})
@@ -848,7 +854,7 @@ class DerivWebSocketClient:
         profit = sp - bp
         is_win = profit > 0
 
-        # Dados de auditoria
+        # Dados de auditoria completos
         entry_tick = c.get('entry_tick')
         exit_tick = c.get('exit_tick')
         entry_spot = c.get('entry_spot')
@@ -896,10 +902,10 @@ class DerivWebSocketClient:
                 'is_win': is_win,
                 'entry_digit': entry_digit,
                 'exit_digit': exit_digit,
+                'entry_spot': entry_spot,
+                'exit_spot': exit_spot,
                 'entry_tick_time': entry_tick_time,
                 'exit_tick_time': exit_tick_time,
-                'entry_spot': entry_spot,
-                'exit_spot': exit_spot
             })
         if self.on_result_callback:
             self.on_result_callback({
@@ -912,10 +918,10 @@ class DerivWebSocketClient:
                 'digit_barrier': trade_info.get('digit_barrier'),
                 'entry_digit': entry_digit,
                 'exit_digit': exit_digit,
+                'entry_spot': entry_spot,
+                'exit_spot': exit_spot,
                 'entry_tick_time': entry_tick_time,
                 'exit_tick_time': exit_tick_time,
-                'entry_spot': entry_spot,
-                'exit_spot': exit_spot
             })
         if cid in self.active_trades:
             del self.active_trades[cid]
