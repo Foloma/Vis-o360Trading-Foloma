@@ -173,6 +173,7 @@
       <button class="tf-btn" onclick="scrollToSection('g4')">Gestão</button>
       <button class="tf-btn" onclick="scrollToSection('g5')">Emocional</button>
       <button class="tf-btn" onclick="scrollToSection('g6')">Suporte</button>
+      <button class="tf-btn" onclick="scrollToSection('g7')">Como Funciona</button>
     </div>
 
 <div id="g1" style="margin-top:16px">
@@ -232,6 +233,20 @@
   <p><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" style="color:var(--accent);font-weight:700">👉 Criar conta na Deriv</a></p>
   <p>Tens dúvidas, queres partilhar resultados ou precisas de ajuda com a plataforma? Junta-te ao grupo de suporte:</p>
   <p><a href="https://chat.whatsapp.com/L8e0ituCsH68uIk3PMlQc9" target="_blank" style="color:var(--accent);font-weight:700">👉 Grupo de Suporte Foloma Visão 360</a></p>
+</div>
+
+<div id="g7" style="margin-top:16px">
+  <h3>⚖️ Como Funciona Realmente</h3>
+  <p>A Foloma Visão 360 é uma ferramenta de execução e análise — não um sistema de previsão garantida. Os índices sintéticos (R_100, R_75, R_50) usam geradores de números aleatórios auditados externamente. Isto significa que <b>nenhuma estratégia pode garantir lucro em cada operação</b>, incluindo as nossas.</p>
+  <p>O que a plataforma oferece de verdade:</p>
+  <p>✅ Transparência total sobre cada trade — vê sempre o painel de Auditoria após operar</p>
+  <p>✅ Ferramentas reais de gestão de risco — Martingale com tecto, stop-loss diário</p>
+  <p>✅ Uma estratégia com vantagem estrutural: o <b>DIFFER</b></p>
+  <h3>🎯 Porque o DIFFER é a melhor forma de escalar a tua banca</h3>
+  <p>Entre as estratégias disponíveis, o DIFFER é a única com vantagem matemática real. Apostas que um dígito específico <b>não</b> vai sair, e há 9 em 10 dígitos possíveis a teu favor — o payout está estruturado para compensar esse risco menor, o que dá uma ligeira vantagem estrutural a teu favor ao longo de muitas operações.</p>
+  <p><b>Nota importante:</b> o DIFFER tem maior probabilidade de acerto, mas paga menos por vitória. Para bater a tua meta diária, vais precisar de mais operações do que com outras estratégias. Cada operação individual tem alta probabilidade a teu favor, mas a meta é atingida pela soma de várias operações pequenas — não por uma jogada isolada.</p>
+  <p>PAR/ÍMPAR é 50/50 puro (sem vantagem matemática). MATCHES tem payout alto mas probabilidade baixa — usa-os com moderação, não como plano principal de crescimento.</p>
+  <p>Perder faz parte do processo, mesmo no DIFFER. Gere a tua banca como se estivesses preparado para isso — e deixa que as sessões positivas compensem as negativas ao longo do tempo, não dentro de uma única sessão.</p>
 </div>
   </div>
 </div>
@@ -326,11 +341,6 @@
       <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (dígito mais frequente) — payout ~9x</button>
       <div class="signal-ticks" id="matchesTicks"></div>
       <div id="matchesReason" style="font-size:9px; color: var(--muted); text-align:center; margin-top:2px;"></div>
-      <div class="zscore-container" id="zscoreContainer">
-        <button class="zscore-btn" id="btnZscore" onclick="tradeZscore()">🎯 Z‑SCORE</button>
-        <button class="ignore-btn" id="btnIgnoreZscore" onclick="ignoreZscore()">🚫 Ignorar</button>
-      </div>
-      <div class="signal-ticks" id="zscoreTicks"></div>
       <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
       <div class="ms">
         Martingale: <span id="mgtActDig">INATIVO</span> | Próx: <span id="mgtNxtDig">$0.35</span>
@@ -794,7 +804,6 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   html += '<span class="strat-badge ' + (strategy.differ_available ? 'ready' : 'blocked') + '">DIFFER</span>';
   html += '<span class="strat-badge ' + (strategy.parity_available ? 'ready' : 'blocked') + '">PAR/ÍMPAR</span>';
   html += '<span class="strat-badge ' + (strategy.matches_available ? 'ready' : 'blocked') + '">MATCHES</span>';
-  html += '<span class="strat-badge ' + (strategy.zscore_available ? 'ready' : 'blocked') + '">Z‑SCORE</span>';
   html += '</div>';
 
   if(strategy.consecutive_losses > 0){
@@ -805,7 +814,6 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   updateSignalTicks('parity', strategy.parity_ticks_left);
   updateSignalTicks('differ', strategy.differ_ticks_left);
   updateSignalTicks('matches', strategy.matches_ticks_left);
-  updateSignalTicks('zscore', strategy.zscore_ticks_left);
 
   const tradeLocked = _tradeSubmitted || strategy.trade_locked;
   const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 6);
@@ -836,23 +844,6 @@ function updateStrategyDisplay(strategy, ticksRemaining){
 
   $_( 'btnDiffer').disabled = !strategy.differ_available || tradeLocked;
   $_( 'btnMatches').disabled = !strategy.matches_available || tradeLocked;
-
-  const zContainer=$_('zscoreContainer'), btnZscore=$_('btnZscore');
-  if (zContainer && btnZscore) {
-    if (strategy.zscore_available) {
-      zContainer.classList.add('visible');
-      btnZscore.disabled = tradeLocked;
-      if (strategy.zscore_action === 'DIFFER') {
-        btnZscore.textContent = `🎯 Z‑Score DIFFER no dígito ${strategy.zscore_digit}`;
-      } else if (strategy.zscore_action === 'MATCHES') {
-        btnZscore.textContent = `🎯 Z‑Score MATCHES no dígito ${strategy.zscore_digit}`;
-      } else {
-        btnZscore.textContent = '🎯 Z‑SCORE';
-      }
-    } else {
-      zContainer.classList.remove('visible');
-    }
-  }
 
   const matchesReasonEl=$_('matchesReason');
   if (matchesReasonEl) {
@@ -965,6 +956,7 @@ async function tradeMatches(){
   }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
 }
 
+// Funções Z-Score mantidas inativas
 async function tradeZscore(){
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   const amt=parseFloat($_( 'amtDigit').value)||0.35;
