@@ -195,7 +195,7 @@ def _cleanup_loop():
             conn.commit()
             conn.close()
 
-            # NOVO: limpar sessões WebSocket inactivas >30min
+            # Limpar sessões WebSocket inactivas >30min
             now = time.time()
             with sessions_lock:
                 to_remove = []
@@ -555,12 +555,14 @@ def get_otp_ws_url(email, account_type):
         return None, 0, 'USD'
 
 def create_session(user_id, user, force=False, ws_url_override=None):
+    # Ponto 5: Lock atómico — todo o processo de criação/atribuição dentro do mesmo lock
     with sessions_lock:
         if user_id in sessions:
             existing = sessions[user_id]
             client = existing['client']
             if not force and client.authorized and client.connected:
                 return existing
+            # Limpar sessão antiga
             if 'trading_bot' in existing:
                 existing['trading_bot'].on_disconnect()
             client._stop_event.set()
@@ -568,145 +570,155 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 client._ws_thread.join(timeout=5)
             del sessions[user_id]
 
-    from deriv_client import DerivWebSocketClient
-    from trading_bot import TradingBot
-    from synthetics import DigitAnalyzer
-    from strategy import StrategyManager
+        from deriv_client import DerivWebSocketClient
+        from trading_bot import TradingBot
+        from synthetics import DigitAnalyzer
+        from strategy import StrategyManager
 
-    bot = TradingBot()
-    analyzer = DigitAnalyzer(
-        max_digits=1000,
-        diff_min_window=50,
-        diff_max_pct=5,
-        diff_absent_ticks=20,
-        volatile_unique=8
-    )
+        bot = TradingBot()
+        analyzer = DigitAnalyzer(
+            max_digits=1000,
+            diff_min_window=50,
+            diff_max_pct=5,
+            diff_absent_ticks=20,
+            volatile_unique=8
+        )
 
-    client = DerivWebSocketClient(config, on_tick_callback=None, on_result_callback=None)
-    client.set_trading_bot(bot)
-    client.set_digit_analyzer(analyzer)
-    bot.client = client
-    bot.digit_analyzer = analyzer
+        client = DerivWebSocketClient(config, on_tick_callback=None, on_result_callback=None)
+        client.set_trading_bot(bot)
+        client.set_digit_analyzer(analyzer)
+        bot.client = client
+        bot.digit_analyzer = analyzer
 
-    if ws_url_override:
-        client.set_ws_url(ws_url_override)
-        logger.info(f"🔗 URL WebSocket personalizado: {ws_url_override}")
+        if ws_url_override:
+            if not ws_url_override.startswith(('wss://', 'ws://')):
+                logger.error(f"URL inválido: {ws_url_override}")
+                return None
+            client.set_ws_url(ws_url_override)
+            logger.info(f"🔗 URL WebSocket personalizado: {ws_url_override}")
 
-    # Injectar callback de renovação OTP
-    user_email = user.get('email', '')
-    user_acct = user.get('active_account', 'demo')
-    client._otp_refresh_callback = lambda: get_otp_ws_url(user_email, user_acct)[0]
+        # Injectar callback de renovação OTP
+        user_email = user.get('email', '')
+        user_acct = user.get('active_account', 'demo')
+        client._otp_refresh_callback = lambda: get_otp_ws_url(user_email, user_acct)[0]
 
-    # Callback de actualização de saldo via REST
-    def refresh_balance():
-        _, bal, cur = get_otp_ws_url(user_email, user_acct)
-        return bal, cur
-    client._balance_refresh_callback = refresh_balance
+        # Callback de actualização de saldo via REST
+        def refresh_balance():
+            _, bal, cur = get_otp_ws_url(user_email, user_acct)
+            return bal, cur
+        client._balance_refresh_callback = refresh_balance
 
-    strategy = StrategyManager(client, analyzer)
-    bot.strategy = strategy
+        strategy = StrategyManager(client, analyzer)
+        bot.strategy = strategy
 
-    def on_trade_result(trade):
-        try:
-            result = 'win' if trade.get('is_win') else 'loss'
-            action = trade.get('action', '')
-            is_win = trade.get('is_win', False)
-            contract_id = trade.get('contract_id', 'N/A')
-            profit = trade.get('profit', 0)
+        def on_trade_result(trade):
+            try:
+                result = 'win' if trade.get('is_win') else 'loss'
+                action = trade.get('action', '')
+                is_win = trade.get('is_win', False)
+                contract_id = trade.get('contract_id', 'N/A')
+                profit = trade.get('profit', 0)
 
-            logger.info(f"📊 RESULTADO: ação={action}, is_win={is_win}, profit={profit}, contract_id={contract_id}")
+                logger.info(f"📊 RESULTADO: ação={action}, is_win={is_win}, profit={profit}, contract_id={contract_id}")
 
-            persist_trade(user_id, {
-                'contract_id': contract_id,
-                'symbol': trade.get('symbol', 'R_100'),
-                'action': action,
-                'amount': trade.get('amount', 0),
-                'buy_price': trade.get('buy_price', 0),
-                'sell_price': trade.get('sell_price', 0),
-                'profit': profit,
-                'result': result,
-                'entry_digit': trade.get('entry_digit'),
-                'exit_digit': trade.get('exit_digit'),
-                'entry_spot': trade.get('entry_spot'),
-                'exit_spot': trade.get('exit_spot'),
-                'entry_tick_time': trade.get('entry_tick_time'),
-                'exit_tick_time': trade.get('exit_tick_time'),
-                'click_tick': getattr(bot, '_last_click_tick', None),
-                'latency_ms': getattr(bot, 'last_trade_result', {}).get('latency_total_ms')
-            })
-            _save_martingale_state(user_id, bot)
-            strategy.notify_result(action, is_win)
-        except Exception as e:
-            logger.error(f"Callback de trade falhou: {e}")
+                persist_trade(user_id, {
+                    'contract_id': contract_id,
+                    'symbol': trade.get('symbol', 'R_100'),
+                    'action': action,
+                    'amount': trade.get('amount', 0),
+                    'buy_price': trade.get('buy_price', 0),
+                    'sell_price': trade.get('sell_price', 0),
+                    'profit': profit,
+                    'result': result,
+                    'entry_digit': trade.get('entry_digit'),
+                    'exit_digit': trade.get('exit_digit'),
+                    'entry_spot': trade.get('entry_spot'),
+                    'exit_spot': trade.get('exit_spot'),
+                    'entry_tick_time': trade.get('entry_tick_time'),
+                    'exit_tick_time': trade.get('exit_tick_time'),
+                    'click_tick': getattr(bot, '_last_click_tick', None),
+                    'latency_ms': getattr(bot, 'last_trade_result', {}).get('latency_total_ms')
+                })
+                _save_martingale_state(user_id, bot)
+                strategy.notify_result(action, is_win)
+                
+                # Se o strategy activou STOP GLOBAL, resetar também o martingale
+                if strategy.is_global_stop:
+                    bot.reset_martingale()
+                    _save_martingale_state(user_id, bot)
+                    logger.info("🛑 Martingale resetado por STOP GLOBAL")
+            except Exception as e:
+                logger.error(f"Callback de trade falhou: {e}")
 
-    def tick_callback(tick):
-        bot.on_tick(tick)
-        if strategy:
-            strategy.on_tick(tick)
+        def tick_callback(tick):
+            bot.on_tick(tick)
+            if strategy:
+                strategy.on_tick(tick)
 
-    client.on_tick_callback = tick_callback
-    client.on_result_callback = on_trade_result
+        client.on_tick_callback = tick_callback
+        client.on_result_callback = on_trade_result
 
-    saved_daily = user.get('daily_stats')
-    if saved_daily:
-        bot.set_daily_stats_from_db(saved_daily)
-    else:
-        bot.reset_daily_stats()
-    bot._daily_stats_dirty = False
+        saved_daily = user.get('daily_stats')
+        if saved_daily:
+            bot.set_daily_stats_from_db(saved_daily)
+        else:
+            bot.reset_daily_stats()
+        bot._daily_stats_dirty = False
 
-    _load_martingale_state(user_id, bot)
+        _load_martingale_state(user_id, bot)
 
-    def on_signal(signal_data):
-        try:
-            conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-            conn.execute('''INSERT INTO signals 
-                (user_id, timestamp, symbol, signal, confidence, tech_confidence, digit_confidence, digit_action, regime)
-                VALUES (?,?,?,?,?,?,?,?,?)''',
-                (user_id, time.time(), signal_data.get('symbol', bot.current_symbol),
-                 signal_data['signal'], signal_data['confidence'],
-                 signal_data.get('tech_confidence', 0), signal_data.get('digit_confidence', 0),
-                 signal_data.get('digit_action'), 'UNKNOWN'))
-            conn.commit()
-            signal_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-            conn.close()
-            bot._last_signal_id = signal_id
-            logger.info(f"📡 Sinal registado na BD: ID={signal_id}, {signal_data['signal']} ({signal_data['confidence']:.1f}%)")
-        except Exception as e:
-            logger.error(f"Erro ao registar sinal: {e}")
+        def on_signal(signal_data):
+            try:
+                conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+                conn.execute('''INSERT INTO signals 
+                    (user_id, timestamp, symbol, signal, confidence, tech_confidence, digit_confidence, digit_action, regime)
+                    VALUES (?,?,?,?,?,?,?,?,?)''',
+                    (user_id, time.time(), signal_data.get('symbol', bot.current_symbol),
+                     signal_data['signal'], signal_data['confidence'],
+                     signal_data.get('tech_confidence', 0), signal_data.get('digit_confidence', 0),
+                     signal_data.get('digit_action'), 'UNKNOWN'))
+                conn.commit()
+                signal_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+                conn.close()
+                bot._last_signal_id = signal_id
+                logger.info(f"📡 Sinal registado na BD: ID={signal_id}, {signal_data['signal']} ({signal_data['confidence']:.1f}%)")
+            except Exception as e:
+                logger.error(f"Erro ao registar sinal: {e}")
 
-    def on_signal_result(signal_id, result, profit):
-        if not signal_id:
-            return
-        try:
-            conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-            conn.execute('UPDATE signals SET executed=1, result=?, profit=? WHERE id=?',
-                         (result, profit, signal_id))
-            conn.commit()
-            conn.close()
-            logger.info(f"📡 Sinal ID={signal_id} atualizado: {result}, profit={profit}")
-        except Exception as e:
-            logger.error(f"Erro ao atualizar sinal: {e}")
+        def on_signal_result(signal_id, result, profit):
+            if not signal_id:
+                return
+            try:
+                conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+                conn.execute('UPDATE signals SET executed=1, result=?, profit=? WHERE id=?',
+                             (result, profit, signal_id))
+                conn.commit()
+                conn.close()
+                logger.info(f"📡 Sinal ID={signal_id} atualizado: {result}, profit={profit}")
+            except Exception as e:
+                logger.error(f"Erro ao atualizar sinal: {e}")
 
-    bot.on_signal_callback = on_signal
-    bot.on_signal_result_callback = on_signal_result
-    bot._last_signal_id = None
+        bot.on_signal_callback = on_signal
+        bot.on_signal_result_callback = on_signal_result
+        bot._last_signal_id = None
 
-    new_sess = {
-        'client': client,
-        'trading_bot': bot,
-        'digit_analyzer': analyzer,
-        'strategy': strategy,
-        'candles': []
-    }
+        new_sess = {
+            'client': client,
+            'trading_bot': bot,
+            'digit_analyzer': analyzer,
+            'strategy': strategy,
+            'candles': []
+        }
 
-    def on_candles(candles):
-        new_sess['candles'] = candles
+        def on_candles(candles):
+            new_sess['candles'] = candles
 
-    client.on_candles_callback = on_candles
+        client.on_candles_callback = on_candles
 
-    with sessions_lock:
+        # Atribuir a sessão DENTRO do lock atómico
         sessions[user_id] = new_sess
 
+    # Fora do sessions_lock, iniciar a conexão
     token = UserStore.get_active_token(user)
     if token:
         client.set_user_token(token)
@@ -1360,6 +1372,13 @@ def trade_digit():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
+        # Ponto 6: Verificar contratos ativos e trades pendentes
+        client = sess['client']
+        if client.pending_trade is not None:
+            return jsonify({'error': 'Trade pendente, aguarde'}), 400
+        if client.active_trades:
+            return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
+
         action, reason = strategy.evaluate_parity()
         if not action:
             return jsonify({'error': f'⛔ {reason}'}), 400
@@ -1383,7 +1402,6 @@ def trade_digit():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
-        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1428,6 +1446,13 @@ def trade_differ():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
+        # Ponto 6: Verificar contratos ativos e trades pendentes
+        client = sess['client']
+        if client.pending_trade is not None:
+            return jsonify({'error': 'Trade pendente, aguarde'}), 400
+        if client.active_trades:
+            return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
+
         digit, reason = strategy.evaluate_differ()
         if digit is None:
             return jsonify({'error': f'⛔ {reason}'}), 400
@@ -1451,7 +1476,6 @@ def trade_differ():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
-        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1493,6 +1517,13 @@ def trade_matches():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
+        # Ponto 6: Verificar contratos ativos e trades pendentes
+        client = sess['client']
+        if client.pending_trade is not None:
+            return jsonify({'error': 'Trade pendente, aguarde'}), 400
+        if client.active_trades:
+            return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
+
         digit, reason = strategy.evaluate_matches()
         if digit is None:
             return jsonify({'error': f'⛔ {reason}'}), 400
@@ -1516,7 +1547,6 @@ def trade_matches():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
-        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1558,6 +1588,13 @@ def trade_zscore():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
+        # Ponto 6: Verificar contratos ativos e trades pendentes
+        client = sess['client']
+        if client.pending_trade is not None:
+            return jsonify({'error': 'Trade pendente, aguarde'}), 400
+        if client.active_trades:
+            return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
+
         action, digit, reason = strategy.evaluate_zscore()
         if action is None:
             return jsonify({'error': f'⛔ {reason}'}), 400
@@ -1581,7 +1618,6 @@ def trade_zscore():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
-        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1688,6 +1724,10 @@ def martingale_apply():
         return jsonify({'error': 'Sessão não encontrada'}), 500
 
     bot = sess['trading_bot']
+    strategy = sess.get('strategy') or getattr(bot, 'strategy', None)
+    if strategy and strategy.is_global_stop:
+        return jsonify({'error': '🛑 STOP GLOBAL ativo. Aguarde 3 minutos antes de aplicar Martingale.'}), 400
+
     ok, res = bot.apply_martingale_after_loss(la, user_max_steps=user_max)
     if ok:
         _save_martingale_state(session['user_id'], bot)
