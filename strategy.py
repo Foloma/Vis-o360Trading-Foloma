@@ -16,6 +16,7 @@ class StrategyManager:
     - Trade Lock com timeout de 20 segundos.
     - Paridade exige 5 ou 6 ocorrências do mesmo tipo nos últimos 6 dígitos.
     - Antes de executar, revalida a condição para evitar trades com sinal desatualizado.
+    - Geração de sinais bloqueada quando há trade pendente no cliente (Ponto 7).
     """
 
     def __init__(self, client, analyzer):
@@ -145,10 +146,17 @@ class StrategyManager:
         Gera sinais automaticamente:
         - differ/parity apenas no início do ciclo (ticks_remaining >= 9)
         - matches/zscore a qualquer momento
+        - Bloqueado se há trade pendente no cliente (Ponto 7)
         """
         with self._lock:
+            # Ponto 7: Não gerar sinais se há trade pendente ou lock interno
             if self._trade_locked:
                 return
+            if self.client and self.client.pending_trade is not None:
+                return
+            if self.client and self.client.active_trades:
+                return
+
             tpd = self.analyzer.TICKS_PER_DIGIT if hasattr(self.analyzer, 'TICKS_PER_DIGIT') else 10
             tr = self.analyzer.get_ticks_remaining()
             inicio_ciclo = tr >= tpd - 1
