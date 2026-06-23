@@ -49,10 +49,14 @@ class StrategyManager:
             'zscore': None
         }
 
-        self.SIGNAL_VALIDITY_TICKS = 5      # ← reduzido (era 10)
+        self.SIGNAL_VALIDITY_TICKS = 5
         self._trade_locked = False
         self._trade_locked_at = 0
-        self.TRADE_LOCK_TIMEOUT = 20        # ← reduzido (era 30)
+        self.TRADE_LOCK_TIMEOUT = 20
+
+        # Novos thresholds
+        self.MATCHES_ABSENCE_THRESHOLD = 20      # era 15
+        self.MARKET_SPIKE_THRESHOLD = 0.002      # 0.2% de variação
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -108,22 +112,23 @@ class StrategyManager:
             avg_price = sum(recent) / len(recent)
             for price in recent:
                 variation = abs(price - avg_price) / avg_price if avg_price > 0 else 0
-                if variation > 0.002:
+                if variation > self.MARKET_SPIKE_THRESHOLD:
                     return False, f"Spike detetado (variação {variation:.3%})"
         return True, "OK"
 
     # -----------------------------------------------------------------
-    # Atualização a cada tick
+    # Atualização a cada tick (CORRIGIDA: race condition eliminada)
     # -----------------------------------------------------------------
     def on_tick(self, tick):
         price = tick.get('price', 0)
-        if price:
-            with self._lock:
+        with self._lock:
+            if price:
                 self._price_history.append(price)
                 if len(self._price_history) > 20:
                     self._price_history.pop(0)
-        self.refresh_signals()
-        self._maybe_generate_signals()
+            # refresh e geração de sinais agora dentro do mesmo lock
+            self.refresh_signals()
+            self._maybe_generate_signals()
 
     def refresh_signals(self):
         """Remove sinais expirados. NUNCA gera novos."""
@@ -274,7 +279,7 @@ class StrategyManager:
         if not absence:
             return None
         for digit, count in absence().items():
-            if count >= 15 and not self._matches_sequence_used:
+            if count >= self.MATCHES_ABSENCE_THRESHOLD and not self._matches_sequence_used:
                 return {'recommendation': digit,
                         'digits': [],
                         'reason': f"Dígito {digit} ausente há {count} ticks"}
@@ -351,7 +356,6 @@ class StrategyManager:
                 return None, "Trade em curso"
             signal = self._active_signals['differ']
             if signal and self._is_signal_still_valid(signal):
-                # Revalidar antes de executar
                 preview = self._preview_differ_signal()
                 if not preview:
                     self._active_signals['differ'] = None
@@ -394,7 +398,6 @@ class StrategyManager:
                 return None, "Trade em curso"
             signal = self._active_signals['parity']
             if signal and self._is_signal_still_valid(signal):
-                # Revalidar antes de executar
                 preview = self._preview_parity_signal()
                 if not preview:
                     self._active_signals['parity'] = None
@@ -471,7 +474,6 @@ class StrategyManager:
                 return None, "Cooldown MATCHES ativo"
             signal = self._active_signals['matches']
             if signal and self._is_signal_still_valid(signal):
-                # Revalidar antes de executar
                 preview = self._preview_matches_signal()
                 if not preview:
                     self._active_signals['matches'] = None
@@ -488,7 +490,7 @@ class StrategyManager:
         if not absence:
             return None, "Contador de ausência indisponível"
         for digit, count in absence().items():
-            if count >= 15 and not self._matches_sequence_used:
+            if count >= self.MATCHES_ABSENCE_THRESHOLD and not self._matches_sequence_used:
                 self._matches_sequence_used = True
                 self._last_matches_digit = digit
                 signal = self._create_signal('matches', digit, [],
@@ -496,7 +498,7 @@ class StrategyManager:
                 logger.info(f"✅ MATCHES SINAL GERADO: {signal['id']}")
                 return digit, signal['reason']
         self._matches_sequence_used = False
-        return None, "Nenhum dígito ausente ≥15 ticks"
+        return None, f"Nenhum dígito ausente ≥{self.MATCHES_ABSENCE_THRESHOLD} ticks"
 
     def evaluate_zscore(self):
         with self._lock:
@@ -513,7 +515,6 @@ class StrategyManager:
                 return None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
             signal = self._active_signals['zscore']
             if signal and self._is_signal_still_valid(signal):
-                # Revalidar antes de executar
                 preview = self._preview_zscore_signal()
                 if not preview:
                     self._active_signals['zscore'] = None
@@ -563,7 +564,7 @@ class StrategyManager:
             self._trade_locked = False
 
     # ================================================================
-    # notify_result
+    # notify_result — unlock_trade FORA do lock
     # ================================================================
     def notify_result(self, action, is_win):
         with self._lock:
@@ -571,7 +572,6 @@ class StrategyManager:
                 f"📊 notify_result: action='{action}', is_win={is_win}, "
                 f"losses={self._consecutive_losses}"
             )
-            self.unlock_trade()
 
             action_upper = action.upper()
 
@@ -582,6 +582,7 @@ class StrategyManager:
                     logger.warning("🛑 STOP GLOBAL: 3 perdas consecutivas — pausa 3 min")
                     self._consecutive_losses = 0
                     self.reset_sequence_state()
+                    # unlock será chamado fora do with
                     return
 
                 if action_upper.startswith('DIFFER') or action_upper.startswith('Z_DIFFER'):
@@ -610,6 +611,9 @@ class StrategyManager:
                 else:
                     self._apply_cooldown(1)
 
+        # unlock FORA do lock — estado já consistente
+        self.unlock_trade()
+
     # -----------------------------------------------------------------
     # Status para o frontend
     # -----------------------------------------------------------------
@@ -623,7 +627,7 @@ class StrategyManager:
             if self.is_matches_cooldown:
                 matches_reason = f"Cooldown {self._matches_cooldown_until - time.time():.0f}s"
             elif not matches_avail:
-                matches_reason = "Nenhum dígito ausente ≥15 ticks"
+                matches_reason = f"Nenhum dígito ausente ≥{self.MATCHES_ABSENCE_THRESHOLD} ticks"
             else:
                 matches_reason = "Disponível"
 
