@@ -286,7 +286,7 @@ class TradingBot:
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
                 is_digit = trade.get('is_digit', False)
-                timeout = 60 if is_digit else 180
+                timeout = 15 if is_digit else 60  # era 60 para todos
                 if elapsed > timeout:
                     with self._state_lock:
                         if trade.get('result') == 'expired':
