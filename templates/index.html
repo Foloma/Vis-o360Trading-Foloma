@@ -424,6 +424,7 @@
 let selectedAcct='demo', curSym='R_100';
 let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
+let _isPolling=false;
 let isConnected = false;
 let _loggingIn = false;
 let _registering = false;
@@ -474,9 +475,17 @@ function closeGuide(){ const el=$_('guideModal'); if(el){ el.style.display='none
 function closeAuthModal(){ const el=$_('authModal'); if(el){ el.style.display='none'; document.body.classList.remove('modal-open'); } }
 function scrollToSection(id){ const el=$_(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); document.querySelectorAll('.guide-nav .tf-btn').forEach(b=>b.classList.remove('active')); if(event&&event.target) event.target.classList.add('active'); }
 
-function startPolling(){ if(_updateInterval) return; scheduleNextPoll(); }
-function stopPolling(){ if(_updateInterval){ clearTimeout(_updateInterval); _updateInterval=null; } }
+function startPolling(){ 
+    if(_isPolling) return; 
+    _isPolling = true;
+    scheduleNextPoll(); 
+}
+function stopPolling(){ 
+    _isPolling = false;
+    if(_updateInterval){ clearTimeout(_updateInterval); _updateInterval=null; } 
+}
 function scheduleNextPoll(){
+  if(!_isPolling) return;
   const d = isConnected ? 3000 : 8000;
   _updateInterval = setTimeout(async () => {
     if(_pollRunning){ scheduleNextPoll(); return; }
@@ -544,6 +553,7 @@ function chgSym(s,el){
   fetch('/api/symbol/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})});
   document.querySelectorAll('.sym-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
+  loadCandles();  // Ponto 9: atualizar gráfico ao mudar símbolo
 }
 
 function initCandleChart(){
@@ -699,6 +709,14 @@ async function updateAll(){
         setTimeout(() => { _showTradeResult = false; }, 2000);
       }
     }
+  } else {
+    // Ponto 19: Tratar erro quando statusResp é 'rejected'
+    console.error('Status fetch failed:', statusResp.reason);
+    isConnected = false;
+    $_( 'sDot').className = 'dot';
+    $_( 'connStatus').textContent = 'Erro de conexão';
+    $_( 'connectOAuthBtn').disabled = false;
+    $_( 'connectTokenBtn').disabled = false;
   }
 
   if(martingaleResp.status === 'fulfilled'){
@@ -815,7 +833,8 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   updateSignalTicks('differ', strategy.differ_ticks_left);
   updateSignalTicks('matches', strategy.matches_ticks_left);
 
-  const tradeLocked = _tradeSubmitted || strategy.trade_locked;
+  // Ponto 8: _tradePending também desabilita todos os botões
+  const tradeLocked = _tradeSubmitted || _tradePending || strategy.trade_locked;
   const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 6);
 
   const blockerMsg=$_('digitBlockerMsg');
@@ -878,6 +897,11 @@ function tradeDigit(pred){
       toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
     }
   }, 3000);
+  
+  // Ponto 10: Limpar painel de auditoria ao enviar novo trade
+  const auditCard = $_('auditCard');
+  if(auditCard) auditCard.style.display = 'none';
+  
   fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})})
   .then(r=>r.json()).then(d=>{
     _tradeSubmitted = false;
@@ -910,6 +934,11 @@ async function tradeDiffer(){
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
+  
+  // Ponto 10: Limpar painel de auditoria ao enviar novo trade
+  const auditCard = $_('auditCard');
+  if(auditCard) auditCard.style.display = 'none';
+  
   try{
     const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
@@ -937,6 +966,11 @@ async function tradeMatches(){
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
+  
+  // Ponto 10: Limpar painel de auditoria ao enviar novo trade
+  const auditCard = $_('auditCard');
+  if(auditCard) auditCard.style.display = 'none';
+  
   try{
     const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
@@ -965,6 +999,11 @@ async function tradeZscore(){
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
+  
+  // Ponto 10: Limpar painel de auditoria ao enviar novo trade
+  const auditCard = $_('auditCard');
+  if(auditCard) auditCard.style.display = 'none';
+  
   try{
     const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
     const d=await r.json();
