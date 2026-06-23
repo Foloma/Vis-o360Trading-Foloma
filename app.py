@@ -194,7 +194,21 @@ def _cleanup_loop():
                          (time.time() - OAUTH_STATE_TTL,))
             conn.commit()
             conn.close()
-            logger.debug("Limpeza periódica executada.")
+
+            # NOVO: limpar sessões WebSocket inactivas >30min
+            now = time.time()
+            with sessions_lock:
+                to_remove = []
+                for uid, sess in sessions.items():
+                    client = sess.get('client')
+                    last_tick = getattr(client, '_last_tick_time', 0)
+                    if last_tick and (now - last_tick) > 1800:
+                        sess['trading_bot'].on_disconnect()
+                        client._stop_event.set()
+                        to_remove.append(uid)
+                        logger.info(f"🧹 Sessão inactiva removida: {uid}")
+                for uid in to_remove:
+                    sessions.pop(uid, None)
         except Exception as e:
             logger.error(f"Erro na limpeza periódica: {e}")
 
@@ -757,10 +771,15 @@ app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'norep
 if EMAIL_ENABLED:
     mail.init_app(app)
 
+# Rate limiting por utilizador (em vez de IP)
+def get_user_or_ip():
+    if 'user_id' in session:
+        return f"user:{session['user_id']}"
+    return f"ip:{request.remote_addr}"
+
 try:
     from flask_limiter import Limiter
-    from flask_limiter.util import get_remote_address
-    limiter = Limiter(get_remote_address, app=app,
+    limiter = Limiter(get_user_or_ip, app=app,
                       default_limits=["120 per minute", "10000 per day"],
                       storage_uri="memory://")
 except ImportError:
@@ -1140,6 +1159,7 @@ def sync_daily_stats():
     return jsonify({'error': 'Sem sessão'}), 400
 
 @app.route('/api/debug')
+@require_admin
 def debug():
     if 'user_id' not in session:
         abort(401)
@@ -1363,6 +1383,7 @@ def trade_digit():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
+        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1430,6 +1451,7 @@ def trade_differ():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
+        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1494,6 +1516,7 @@ def trade_matches():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
+        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
@@ -1558,6 +1581,7 @@ def trade_zscore():
             f"| hora_clique={audit_click_time:.3f}"
         )
 
+        # Passar dados de auditoria para o bot
         sess['trading_bot']._last_click_time = audit_click_time
         sess['trading_bot']._last_click_tick = audit_tick
 
