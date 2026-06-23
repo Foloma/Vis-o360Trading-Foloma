@@ -280,16 +280,20 @@ class TradingBot:
             self.stats['total_return'] = (profit_loss / self.stats['total_invested']) * 100 if self.stats['total_invested'] > 0 else 0
 
     def check_pending_trades(self):
+        """Verifica trades pendentes e marca como expirados se ultrapassarem o timeout.
+        CORRIGIDO: verifica novamente o estado dentro do lock antes de sobrescrever."""
         now = datetime.now()
         updated = False
         for trade in list(self.trades):
             if trade.get('result') == 'pending':
                 elapsed = (now - trade['timestamp']).total_seconds()
                 is_digit = trade.get('is_digit', False)
-                timeout = 15 if is_digit else 60  # era 60 para todos
+                timeout = 15 if is_digit else 60
                 if elapsed > timeout:
                     with self._state_lock:
-                        if trade.get('result') == 'expired':
+                        # Verificar novamente DENTRO do lock se ainda é 'pending'
+                        if trade.get('result') != 'pending':
+                            logger.info(f"Trade {trade.get('contract_id')} já resolvido como '{trade.get('result')}' — a ignorar expiração")
                             continue
                         trade['result'] = 'expired'
                         trade['profit'] = 0
@@ -311,18 +315,24 @@ class TradingBot:
             exit_digit = result.get('exit_digit')
 
             target_trade = None
-            if contract_id:
-                for trade in self.trades:
-                    if trade.get('contract_id') == contract_id:
-                        target_trade = trade
-                        break
+            with self._state_lock:
+                if contract_id:
+                    for trade in self.trades:
+                        if trade.get('contract_id') == contract_id:
+                            target_trade = trade
+                            break
 
-            if not target_trade:
-                with self._state_lock:
+                if not target_trade:
                     pending = [t for t in self.trades if t.get('result') == 'pending']
                     if pending:
                         target_trade = pending[-1]
-                        logger.info(f"⚡ Fallback: usando último trade pendente (contract_id original: {contract_id})")
+                        pending_ids = [t.get('contract_id') for t in pending]
+                        logger.warning(
+                            f"⚠️ FALLBACK: contract_id {contract_id} não encontrado. "
+                            f"Usando último trade pendente (ID: {target_trade.get('contract_id')}). "
+                            f"Pendentes: {pending_ids}. "
+                            f"Resultado original: action={result.get('action')}, profit={profit}, is_win={is_win}"
+                        )
                     else:
                         logger.warning(f"⚠️ Nenhum trade pendente para contract_id {contract_id}. Ignorando.")
                         return
@@ -425,9 +435,9 @@ class TradingBot:
     def get_trade_report(self):
         self.check_pending_trades()
         hoje = datetime.now().date()
-        trades_snapshot = list(self.trades)
-        trades_hoje = [t for t in trades_snapshot if t['timestamp'].date() == hoje]
         with self._state_lock:
+            trades_snapshot = list(self.trades)
+            trades_hoje = [t for t in trades_snapshot if t['timestamp'].date() == hoje]
             return {
                 'resumo': {
                     'total_trades': self.stats['total'],
