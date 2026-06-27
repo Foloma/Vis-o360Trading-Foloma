@@ -269,6 +269,7 @@
       <div class="latency-warning" id="latencyWarning">⚠️ Latência alta</div>
       <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:2px">Preço: <span id="priceEl" style="color:var(--accent)">---</span></div>
       <div id="strategyStatus" style="margin-top:6px; font-size:10px;"></div>
+      <div id="debugInfo" style="font-size:9px;color:var(--muted);text-align:center;margin-top:2px"></div>
     </div>
 
     <!-- PLACAR DE TRADES HOJE -->
@@ -448,6 +449,10 @@ let _mgtLocked = false;
 let _lastTradeLatency = 0;
 let _lastValidPing = 0;
 
+// Novas variáveis para beep quando sinal aparece
+let _prevDifferAvail = false;
+let _prevParityAvail = false;
+
 function $_(id) { return document.getElementById(id); }
 
 function toast(msg,type='info',ms=3500){
@@ -553,7 +558,7 @@ function chgSym(s,el){
   fetch('/api/symbol/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:s})});
   document.querySelectorAll('.sym-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  loadCandles();  // Ponto 9: atualizar gráfico ao mudar símbolo
+  loadCandles();
 }
 
 function initCandleChart(){
@@ -610,12 +615,14 @@ async function updateAll(){
     const data = statusResp.value;
     if(data.error) return;
     const bot=data.bot; if(!bot) return;
-    const conn=bot.connected&&bot.authorized; isConnected=conn;
+    const tickFresh = (bot.last_tick_seconds_ago || 999) < 2.5;
+    const conn = bot.connected && bot.authorized && bot.streaming && tickFresh;
+    isConnected=conn;
     $_( 'connectOAuthBtn').disabled=conn;
     $_( 'connectTokenBtn').disabled=conn;
     $_( 'reconnectBtn').style.display=conn?'none':'inline-block';
     $_( 'sDot').className='dot'+(conn?' on':'');
-    $_( 'connStatus').textContent=conn?'Conectado':'Desconectado';
+    $_( 'connStatus').textContent=conn?'Conectado':(bot.connected?'Sem stream':'Desconectado');
     $_( 'bal').textContent=(bot.balance||0).toFixed(2);
     $_( 'cur').textContent=bot.currency||'USD';
     const priceEl=$_('priceEl'); if(priceEl) priceEl.textContent=(bot.price||0).toFixed(4);
@@ -660,7 +667,7 @@ async function updateAll(){
 
     if(data.strategy){
       const tr = data.digits?.ticks_remaining;
-      updateStrategyDisplay(data.strategy, tr);
+      updateStrategyDisplay(data.strategy, tr, data.bot);
     }
 
     if(bot.last_trade_result){
@@ -710,7 +717,6 @@ async function updateAll(){
       }
     }
   } else {
-    // Ponto 19: Tratar erro quando statusResp é 'rejected'
     console.error('Status fetch failed:', statusResp.reason);
     isConnected = false;
     $_( 'sDot').className = 'dot';
@@ -802,7 +808,7 @@ function updateHistSummary(bot){
   sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${s.total||0}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WIN RATE</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${s.win_rate||0}%</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">P/L</div><div style="font-size:16px;font-weight:bold;color:${cor}">${sinal}$${Math.abs(pl).toFixed(2)}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${d?d.trades:0}</div></div>`;
 }
 
-function updateStrategyDisplay(strategy, ticksRemaining){
+function updateStrategyDisplay(strategy, ticksRemaining, bot){
   if(!strategy) return;
   const el = $_( 'strategyStatus');
   if(!el) return;
@@ -833,7 +839,26 @@ function updateStrategyDisplay(strategy, ticksRemaining){
   updateSignalTicks('differ', strategy.differ_ticks_left);
   updateSignalTicks('matches', strategy.matches_ticks_left);
 
-  // Ponto 8: _tradePending também desabilita todos os botões
+  // Beep quando sinal aparece (transição false -> true)
+  if(!_prevDifferAvail && strategy.differ_available){
+      playBeep();
+  }
+  if(!_prevParityAvail && strategy.parity_available){
+      playBeep();
+  }
+  _prevDifferAvail = strategy.differ_available;
+  _prevParityAvail = strategy.parity_available;
+
+  // Debug card
+  const debugInfo = $_('debugInfo');
+  if(debugInfo && isConnected){
+    debugInfo.innerHTML = `
+      Parity: ${strategy.parity_direction || '—'} | 
+      Bloqueio: ${strategy.parity_reason || strategy.cooldown_reason || '—'} |
+      Tick: ${(bot?.last_tick_seconds_ago ?? '?')}s atrás
+    `;
+  }
+
   const tradeLocked = _tradeSubmitted || _tradePending || strategy.trade_locked;
   const ticksBlocked = (ticksRemaining !== undefined && ticksRemaining < 6);
 
@@ -898,7 +923,6 @@ function tradeDigit(pred){
     }
   }, 3000);
   
-  // Ponto 10: Limpar painel de auditoria ao enviar novo trade
   const auditCard = $_('auditCard');
   if(auditCard) auditCard.style.display = 'none';
   
@@ -935,7 +959,6 @@ async function tradeDiffer(){
     if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
   
-  // Ponto 10: Limpar painel de auditoria ao enviar novo trade
   const auditCard = $_('auditCard');
   if(auditCard) auditCard.style.display = 'none';
   
@@ -967,7 +990,6 @@ async function tradeMatches(){
     if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
   
-  // Ponto 10: Limpar painel de auditoria ao enviar novo trade
   const auditCard = $_('auditCard');
   if(auditCard) auditCard.style.display = 'none';
   
@@ -1000,7 +1022,6 @@ async function tradeZscore(){
     if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
   
-  // Ponto 10: Limpar painel de auditoria ao enviar novo trade
   const auditCard = $_('auditCard');
   if(auditCard) auditCard.style.display = 'none';
   
