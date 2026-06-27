@@ -31,6 +31,7 @@ class DerivWebSocketClient:
         self.subscribed_symbols = set()
         self.user_token = None
         self.active_trades = {}
+        self._active_trades_lock = threading.RLock()
         self.pending_trade = None
         self.pending_trade_time = 0
         self._trade_lock = threading.Lock()
@@ -43,6 +44,7 @@ class DerivWebSocketClient:
         self._watchdog_stop = threading.Event()
         self._poller_stop = threading.Event()
         self._last_tick_time = None
+        self._last_tick_epoch = None
         self._last_trade_time = 0
         self._processed_contracts = deque(maxlen=1000)
         self._processed_lock = threading.Lock()
@@ -84,11 +86,8 @@ class DerivWebSocketClient:
         self._otp_refresh_callback = None
         self._balance_refresh_callback = None
 
-        # Novos campos para auditoria
         self._last_buy_time = None
         self._last_buy_contract_id = None
-
-        # Set auxiliar para tracking de contratos com sell_price=None (Ponto 13)
         self._null_sell_price_contracts = set()
 
     def set_digit_analyzer(self, a): 
@@ -116,6 +115,12 @@ class DerivWebSocketClient:
 
     def _is_otp_ws(self):
         return self._ws_url and 'otp=' in self._ws_url
+
+    def get_last_tick_seconds_ago(self):
+        """Retorna quantos segundos se passaram desde o último tick."""
+        if self._last_tick_time is None:
+            return 999
+        return round(time.time() - self._last_tick_time, 1)
 
     def connect(self):
         self._stop_event.set()
@@ -158,7 +163,7 @@ class DerivWebSocketClient:
                 ws_url = self._get_ws_url()
                 logger.info(f"🔌 A ligar à Deriv em {ws_url}...")
                 self.ws = websocket.create_connection(ws_url, timeout=5)
-                self.ws.settimeout(3.0)  # Ponto 3 timeout aumentado de 1.0 para 3.0
+                self.ws.settimeout(3.0)
                 self.connected = True
                 if not self._authorize_and_wait():
                     logger.error("Falha na autorização")
@@ -227,10 +232,12 @@ class DerivWebSocketClient:
         while not self._poller_stop.wait(timeout=8):
             if self._stop_event.is_set() or not self.authorized:
                 break
-            if not self.active_trades:
-                continue
+            with self._active_trades_lock:
+                if not self.active_trades:
+                    continue
+                trades_snapshot = dict(self.active_trades)
             now = time.time()
-            for cid, trade in list(self.active_trades.items()):
+            for cid, trade in trades_snapshot.items():
                 if now - trade.get('timestamp', now) > 30:
                     logger.info(f"🔍 Poller: a forçar verificação do contrato {cid}")
                     try:
@@ -253,6 +260,7 @@ class DerivWebSocketClient:
         self.authorized = False
         self.streaming = False
         self._last_tick_time = None
+        self._last_tick_epoch = None
         self.state = self.ST_DISCONNECTED
         self.loginid = None
         self.auth_error = None
@@ -377,7 +385,6 @@ class DerivWebSocketClient:
             if not self.ws or not self.connected:
                 break
             try:
-                # Ponto 15: Verificar se já há ping pendente antes de enviar novo
                 if self._ping_pending:
                     continue
                 self._ping_sent_at = time.time()
@@ -437,7 +444,6 @@ class DerivWebSocketClient:
                 break
             if self.streaming and self._last_tick_time is not None:
                 if time.time() - self._last_tick_time > 180:
-                    # Ponto 14: Verificar se há trades ativos antes de fechar
                     if self.active_trades:
                         logger.warning("🛑 Watchdog: >180s sem ticks, mas há trades ativos — a aguardar")
                         continue
@@ -505,11 +511,12 @@ class DerivWebSocketClient:
             self.state = self.ST_STREAMING
             logger.info("📡 Estado STREAMING ativado!")
         self._last_tick_time = time.time()
+        self._last_tick_epoch = tick.get('epoch', time.time())
         if self.on_tick_callback:
             self.on_tick_callback({
                 'symbol':    tick.get('symbol', self.current_symbol),
                 'price':     float(tick.get('quote', 0)),
-                'timestamp': tick.get('epoch', time.time())
+                'timestamp': self._last_tick_epoch
             })
 
     def _next_req(self):
@@ -522,6 +529,8 @@ class DerivWebSocketClient:
             return False, "Reconexão recente"
         if not self.streaming:
             return False, "Sem streaming"
+        if self._last_tick_time and (time.time() - self._last_tick_time) > 2.5:
+            return False, "Tick desactualizado (>2.5s)"
         if self.balance <= 0:
             return False, "Saldo não carregado"
         if self.balance < 0.35:
@@ -542,7 +551,6 @@ class DerivWebSocketClient:
     # MÉTODO AUXILIAR: substitui symbol por underlying_symbol no OTP
     # ============================================================
     def _build_proposal(self, base_payload):
-        """Corrige payload para a nova API Deriv (OTP): troca 'symbol' por 'underlying_symbol'."""
         if self._is_otp_ws():
             symbol = base_payload.pop('symbol', self.current_symbol)
             base_payload['underlying_symbol'] = symbol
@@ -612,7 +620,6 @@ class DerivWebSocketClient:
             return False
 
         with self._trade_lock:
-            # Ponto 4: Adicionar _pre_trade_check()
             ok, err = self._pre_trade_check()
             if not ok:
                 logger.warning(f"🚫 Trade bloqueado: {err}")
@@ -662,7 +669,6 @@ class DerivWebSocketClient:
             return False
 
         with self._trade_lock:
-            # Ponto 4: Adicionar _pre_trade_check()
             ok, err = self._pre_trade_check()
             if not ok:
                 logger.warning(f"🚫 Trade bloqueado: {err}")
@@ -709,9 +715,7 @@ class DerivWebSocketClient:
     # ============================================================
     # PROCESSAMENTO DE PROPOSTA / BUY / POC
     # ============================================================
-
     def _on_proposal(self, data):
-        # Ponto 3: Todo o processamento do buy agora dentro do lock
         with self._pending_lock:
             if self.pending_trade is None:
                 logger.debug("📨 Proposta recebida mas sem pending_trade")
@@ -734,8 +738,6 @@ class DerivWebSocketClient:
                 return
             self.pending_trade['proposal_id'] = pid
             logger.info(f"📥 Proposta recebida: id={pid}, ask_price={ask}")
-
-            # Envio do buy agora DENTRO do lock (evita duplicação)
             try:
                 self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
                 logger.info(f"🛒 Buy enviado para proposta {pid}")
@@ -771,7 +773,7 @@ class DerivWebSocketClient:
 
                 if self._digit_analyzer:
                     entry_tick = self._digit_analyzer.get_current_digit()
-                    entry_tick_count = self._digit_analyzer._tick_count
+                    entry_tick_count = self._digit_analyzer.get_tick_count()
                 else:
                     entry_tick = 'N/A'
                     entry_tick_count = 'N/A'
@@ -783,7 +785,6 @@ class DerivWebSocketClient:
 
                 self.last_trade_latency_ms = latency_ms
 
-                # Registar hora exata de compra
                 self._last_buy_time = time.time()
                 self._last_buy_contract_id = cid
 
@@ -795,13 +796,14 @@ class DerivWebSocketClient:
                         'is_differ': is_differ, 'is_matches': is_matches,
                         'digit_barrier': digit_barrier
                     })
-                self.active_trades[cid] = {
-                    'contract_id': cid, 'amount': amt, 'buy_price': bp,
-                    'timestamp': time.time(), 'action': action,
-                    'is_digit': is_digit, 'is_differ': is_differ,
-                    'is_matches': is_matches, 'digit_barrier': digit_barrier,
-                    'symbol': self.current_symbol
-                }
+                with self._active_trades_lock:
+                    self.active_trades[cid] = {
+                        'contract_id': cid, 'amount': amt, 'buy_price': bp,
+                        'timestamp': time.time(), 'action': action,
+                        'is_digit': is_digit, 'is_differ': is_differ,
+                        'is_matches': is_matches, 'digit_barrier': digit_barrier,
+                        'symbol': self.current_symbol
+                    }
                 try:
                     self._subscribe_contract(cid)
                 except Exception as e:
@@ -821,18 +823,20 @@ class DerivWebSocketClient:
             raise
 
     def _resubscribe_active_trades(self):
-        if not self.active_trades:
-            return
-        now = time.time()
-        expired = [cid for cid, t in self.active_trades.items()
-                   if now - t.get('timestamp', now) > 120]
-        for cid in expired:
-            logger.warning(f"⚠️ Trade {cid} expirado (120s+) — removido")
-            del self.active_trades[cid]
-        if not self.active_trades:
-            return
-        logger.info(f"🔄 Reassinar {len(self.active_trades)} contrato(s)...")
-        for cid in list(self.active_trades.keys()):
+        with self._active_trades_lock:
+            if not self.active_trades:
+                return
+            now = time.time()
+            expired = [cid for cid, t in self.active_trades.items()
+                       if now - t.get('timestamp', now) > 120]
+            for cid in expired:
+                logger.warning(f"⚠️ Trade {cid} expirado (120s+) — removido")
+                del self.active_trades[cid]
+            if not self.active_trades:
+                return
+            trades_snapshot = dict(self.active_trades)
+        logger.info(f"🔄 Reassinar {len(trades_snapshot)} contrato(s)...")
+        for cid in trades_snapshot.keys():
             try:
                 self.ws.send(json.dumps({
                     "proposal_open_contract": 1, "contract_id": cid,
@@ -842,7 +846,7 @@ class DerivWebSocketClient:
                 logger.error(f"Falha ao reassinar {cid}: {e}")
 
     # ============================================================
-    # _on_poc COM DADOS DE AUDITORIA COMPLETOS + SET AUXILIAR (Ponto 13)
+    # _on_poc COM DADOS DE AUDITORIA COMPLETOS + SET AUXILIAR
     # ============================================================
     def _on_poc(self, data):
         c = data.get('proposal_open_contract', {})
@@ -854,17 +858,13 @@ class DerivWebSocketClient:
         bp = float(c.get('buy_price', 0) or 0)
         sp = float(c.get('sell_price', 0) or 0)
 
-        # Ponto 13: Usar set auxiliar em vez de remover do deque
         if sp is None:
             self._null_sell_price_contracts.add(cid)
             logger.warning(f"⚠️ POC ignorado: sell_price ausente para {cid} — a aguardar próximo POC")
             return
 
-        # Verificar se o contrato já foi processado
         if cid in self._null_sell_price_contracts:
             self._null_sell_price_contracts.discard(cid)
-            # Não processar agora — já foi marcado como pendente
-            # Continua para processar o resultado real
 
         with self._processed_lock:
             if cid in self._processed_contracts:
@@ -874,7 +874,6 @@ class DerivWebSocketClient:
         profit = sp - bp
         is_win = profit > 0
 
-        # Dados de auditoria completos
         entry_tick = c.get('entry_tick')
         exit_tick = c.get('exit_tick')
         entry_spot = c.get('entry_spot')
@@ -900,7 +899,7 @@ class DerivWebSocketClient:
 
         if self._digit_analyzer:
             current_tick = self._digit_analyzer.get_current_digit()
-            current_tick_count = self._digit_analyzer._tick_count
+            current_tick_count = self._digit_analyzer.get_tick_count()
         else:
             current_tick = 'N/A'
             current_tick_count = 'N/A'
@@ -911,9 +910,10 @@ class DerivWebSocketClient:
             f"| profit={profit:.4f} | is_win={is_win}"
         )
 
-        trade_info = self.active_trades.get(cid, {})
-        if not trade_info:
-            logger.warning(f"⚠️ POC para contrato desconhecido: {cid}")
+        with self._active_trades_lock:
+            trade_info = self.active_trades.get(cid, {})
+            if not trade_info:
+                logger.warning(f"⚠️ POC para contrato desconhecido: {cid}")
 
         if self.trading_bot:
             self.trading_bot.on_trade_result({
@@ -943,18 +943,16 @@ class DerivWebSocketClient:
                 'entry_tick_time': entry_tick_time,
                 'exit_tick_time': exit_tick_time,
             })
-        if cid in self.active_trades:
-            del self.active_trades[cid]
+        with self._active_trades_lock:
+            if cid in self.active_trades:
+                del self.active_trades[cid]
 
-        # Limpar do set auxiliar
         self._null_sell_price_contracts.discard(cid)
 
-        # Actualizar saldo via REST após trade (modo OTP)
         if self._is_otp_ws() and self._balance_refresh_callback:
             threading.Thread(target=self._do_refresh_balance, daemon=True).start()
 
     def _do_refresh_balance(self):
-        """Chama o callback REST para actualizar o saldo."""
         try:
             balance, currency = self._balance_refresh_callback()
             if balance > 0:
