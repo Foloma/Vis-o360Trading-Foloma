@@ -208,10 +208,6 @@ class DigitAnalyzer:
             return most_digit
 
     def get_digit_absence_counts(self):
-        """
-        Retorna contagem de AUSÊNCIAS em dígitos lentos (1 dígito lento = 10 ticks reais).
-        Exemplo: um dígito ausente há 150 ticks reais terá count=15.
-        """
         with self._lock:
             absence = {}
             total_slow = len(self.slow_digits)
@@ -438,14 +434,21 @@ class DigitAnalyzer:
         with self._lock:
             return self._digit_counter
 
+    # --- NOVOS MÉTODOS THREAD-SAFE ---
+    def get_tick_count(self):
+        with self._lock:
+            return self._tick_count
+
     def get_current_digit(self):
-        return self.current_digit
+        with self._lock:
+            return self.current_digit
 
     def get_current_parity(self):
-        return self.current_parity
+        with self._lock:
+            return self.current_parity
 
     def get_next_display_digit(self):
-        return self.current_digit, self.current_parity, self.get_ticks_remaining()
+        return self.get_current_digit(), self.get_current_parity(), self.get_ticks_remaining()
 
     def get_analysis(self):
         with self._lock:
@@ -476,14 +479,6 @@ class DigitAnalyzer:
                 'current_streak':streak,'streak_parity':sp,'recent':snap[-20:]}
 
     def get_zscore_digit(self):
-        """
-        Calcula o Z-Score para cada dígito com base nos últimos 100 dígitos lentos.
-        Retorna uma tupla (zscore_diff, digit_diff, zscore_match, digit_match)
-        onde:
-          - zscore_diff > 3.0 → dígito sobrerrepresentado (DIFFER)
-          - zscore_match < -3.0 → dígito sub-representado (MATCHES)
-        Se não houver sinal significativo, retorna None para o respetivo.
-        """
         with self._lock:
             window = list(self.slow_digits)[-100:]
             if len(window) < 100:
