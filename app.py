@@ -555,14 +555,12 @@ def get_otp_ws_url(email, account_type):
         return None, 0, 'USD'
 
 def create_session(user_id, user, force=False, ws_url_override=None):
-    # Ponto 5: Lock atómico — todo o processo de criação/atribuição dentro do mesmo lock
     with sessions_lock:
         if user_id in sessions:
             existing = sessions[user_id]
             client = existing['client']
             if not force and client.authorized and client.connected:
                 return existing
-            # Limpar sessão antiga
             if 'trading_bot' in existing:
                 existing['trading_bot'].on_disconnect()
             client._stop_event.set()
@@ -715,10 +713,8 @@ def create_session(user_id, user, force=False, ws_url_override=None):
 
         client.on_candles_callback = on_candles
 
-        # Atribuir a sessão DENTRO do lock atómico
         sessions[user_id] = new_sess
 
-    # Fora do sessions_lock, iniciar a conexão
     token = UserStore.get_active_token(user)
     if token:
         client.set_user_token(token)
@@ -1132,6 +1128,10 @@ def status():
     bot_status['last_valid_ping_ms'] = getattr(
         client, '_last_valid_ping_ms', 0
     ) if client else 0
+    # NOVO: expor last_tick_seconds_ago e last_tick_epoch
+    bot_status['last_tick_seconds_ago'] = client.get_last_tick_seconds_ago() if client else 999
+    bot_status['last_tick_epoch'] = getattr(client, '_last_tick_epoch', None) if client else None
+
     analysis = analyzer.get_analysis()
     digit_frequencies = analyzer.get_digit_frequencies()
     least_frequent = analyzer.get_least_frequent_digit()
@@ -1372,7 +1372,7 @@ def trade_digit():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
-        # Ponto 6: Verificar contratos ativos e trades pendentes
+        # Verificar contratos ativos e trades pendentes
         client = sess['client']
         if client.pending_trade is not None:
             return jsonify({'error': 'Trade pendente, aguarde'}), 400
@@ -1394,7 +1394,7 @@ def trade_digit():
             logger.info(f"Trade em ciclo avançado: {tr} ticks restantes – utilizador avisado no frontend.")
 
         audit_tick = analyzer.get_current_digit()
-        audit_tick_count = analyzer._tick_count
+        audit_tick_count = analyzer.get_tick_count()
         audit_click_time = time.time()
         logger.info(
             f"🔍 AUDITORIA | tick_no_clique={audit_tick} "
@@ -1446,7 +1446,7 @@ def trade_differ():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
-        # Ponto 6: Verificar contratos ativos e trades pendentes
+        # Verificar contratos ativos e trades pendentes
         client = sess['client']
         if client.pending_trade is not None:
             return jsonify({'error': 'Trade pendente, aguarde'}), 400
@@ -1468,7 +1468,7 @@ def trade_differ():
             logger.info(f"Trade em ciclo avançado: {tr} ticks restantes – utilizador avisado no frontend.")
 
         audit_tick = analyzer.get_current_digit()
-        audit_tick_count = analyzer._tick_count
+        audit_tick_count = analyzer.get_tick_count()
         audit_click_time = time.time()
         logger.info(
             f"🔍 AUDITORIA | tick_no_clique={audit_tick} "
@@ -1517,7 +1517,7 @@ def trade_matches():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
-        # Ponto 6: Verificar contratos ativos e trades pendentes
+        # Verificar contratos ativos e trades pendentes
         client = sess['client']
         if client.pending_trade is not None:
             return jsonify({'error': 'Trade pendente, aguarde'}), 400
@@ -1539,7 +1539,7 @@ def trade_matches():
             logger.info(f"Trade em ciclo avançado: {tr} ticks restantes – utilizador avisado no frontend.")
 
         audit_tick = analyzer.get_current_digit()
-        audit_tick_count = analyzer._tick_count
+        audit_tick_count = analyzer.get_tick_count()
         audit_click_time = time.time()
         logger.info(
             f"🔍 AUDITORIA | tick_no_clique={audit_tick} "
@@ -1588,7 +1588,7 @@ def trade_zscore():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
-        # Ponto 6: Verificar contratos ativos e trades pendentes
+        # Verificar contratos ativos e trades pendentes
         client = sess['client']
         if client.pending_trade is not None:
             return jsonify({'error': 'Trade pendente, aguarde'}), 400
@@ -1610,7 +1610,7 @@ def trade_zscore():
             logger.info(f"Trade em ciclo avançado: {tr} ticks restantes – utilizador avisado no frontend.")
 
         audit_tick = analyzer.get_current_digit()
-        audit_tick_count = analyzer._tick_count
+        audit_tick_count = analyzer.get_tick_count()
         audit_click_time = time.time()
         logger.info(
             f"🔍 AUDITORIA | tick_no_clique={audit_tick} "
