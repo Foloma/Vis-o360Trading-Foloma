@@ -19,6 +19,7 @@ class StrategyManager:
     - Geração de sinais bloqueada quando há trade pendente no cliente.
     - Gates Hard: tick desactualizado (>2.5s) e fim de ciclo (<7 ticks restantes).
     - Snapshots com metadados (mode, expires_in_ticks).
+    - DIFFER com dois modos: REPEAT (consecutivo) e RARITY (ausente há ≥25 ticks).
     """
 
     def __init__(self, client, analyzer):
@@ -59,6 +60,7 @@ class StrategyManager:
 
         self.MATCHES_ABSENCE_THRESHOLD = 20
         self.MARKET_SPIKE_THRESHOLD = 0.002
+        self.DIFFER_RARITY_THRESHOLD = 25  # NOVO: ausência mínima para DIFFER por raridade
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -176,7 +178,7 @@ class StrategyManager:
                         if preview:
                             self._create_signal(strategy, preview['recommendation'],
                                                 preview.get('digits', []), preview['reason'],
-                                                mode=strategy)
+                                                mode=preview.get('mode', strategy))
 
             for strategy in ('matches', 'zscore'):
                 if self._active_signals.get(strategy) and self._is_signal_still_valid(self._active_signals[strategy]):
@@ -187,7 +189,7 @@ class StrategyManager:
                     if preview:
                         self._create_signal(strategy, preview['recommendation'],
                                             preview.get('digits', []), preview['reason'],
-                                            mode=strategy)
+                                            mode=preview.get('mode', strategy))
 
     def _is_signal_still_valid(self, signal):
         if not signal:
@@ -247,18 +249,35 @@ class StrategyManager:
     # Métodos de preview SEM efeitos colaterais
     # -----------------------------------------------------------------
     def _preview_differ_signal(self):
+        """
+        DIFFER com dois modos:
+        1. REPEAT — dígito repetido consecutivamente (XX)
+        2. RARITY — dígito ausente há ≥25 ticks
+        """
         recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 2:
-            return None
-        last_two = recent[-2:]
-        if last_two[0] == last_two[1]:
-            digit = last_two[0]
-            last_ten = recent[-10:] if len(recent) >= 10 else recent
-            if last_ten.count(digit) >= 2 and digit not in self._differ_sequence_used:
-                return {'recommendation': digit,
-                        'digits': last_two[-2:],
-                        'reason': f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos",
-                        'mode': 'repeat'}
+
+        # Modo 1: REPEAT (já existia)
+        if len(recent) >= 2:
+            last_two = recent[-2:]
+            if last_two[0] == last_two[1]:
+                digit = last_two[0]
+                last_ten = recent[-10:] if len(recent) >= 10 else recent
+                if last_ten.count(digit) >= 2 and digit not in self._differ_sequence_used:
+                    return {'recommendation': digit,
+                            'digits': last_two[-2:],
+                            'reason': f"DIFFER {digit}: repetição consecutiva",
+                            'mode': 'repeat'}
+
+        # Modo 2: RARITY (NOVO) — dígito ausente há muito tempo
+        absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
+        if absence:
+            for digit, count in absence().items():
+                if count >= self.DIFFER_RARITY_THRESHOLD and digit not in self._differ_sequence_used:
+                    return {'recommendation': digit,
+                            'digits': [],
+                            'reason': f"DIFFER {digit}: ausente há {count} ticks",
+                            'mode': 'rarity'}
+
         return None
 
     def _preview_parity_signal(self):
@@ -395,22 +414,37 @@ class StrategyManager:
 
     def _generate_differ_signal(self):
         recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 2:
-            return None, "Aguardando dados"
-        last_two = recent[-2:]
-        if last_two[0] == last_two[1]:
-            digit = last_two[0]
-            last_ten = recent[-10:] if len(recent) >= 10 else recent
-            if last_ten.count(digit) >= 2:
-                if digit in self._differ_sequence_used:
-                    return None, f"Dígito {digit} já utilizado"
-                self._differ_sequence_used.add(digit)
-                self._last_differ_digit = digit
-                signal = self._create_signal('differ', digit, last_two[-2:],
-                                            f"DIFFER {digit}: {last_two[0]}{last_two[1]} consecutivos",
-                                            mode='repeat')
-                logger.info(f"✅ DIFFER SINAL GERADO: {signal['id']}")
-                return digit, signal['reason']
+
+        # Modo REPEAT
+        if len(recent) >= 2:
+            last_two = recent[-2:]
+            if last_two[0] == last_two[1]:
+                digit = last_two[0]
+                last_ten = recent[-10:] if len(recent) >= 10 else recent
+                if last_ten.count(digit) >= 2:
+                    if digit in self._differ_sequence_used:
+                        return None, f"Dígito {digit} já utilizado"
+                    self._differ_sequence_used.add(digit)
+                    self._last_differ_digit = digit
+                    signal = self._create_signal('differ', digit, last_two[-2:],
+                                                f"DIFFER {digit}: repetição consecutiva",
+                                                mode='repeat')
+                    logger.info(f"✅ DIFFER SINAL GERADO: {signal['id']}")
+                    return digit, signal['reason']
+
+        # Modo RARITY
+        absence = getattr(self.analyzer, 'get_digit_absence_counts', None)
+        if absence:
+            for digit, count in absence().items():
+                if count >= self.DIFFER_RARITY_THRESHOLD and digit not in self._differ_sequence_used:
+                    self._differ_sequence_used.add(digit)
+                    self._last_differ_digit = digit
+                    signal = self._create_signal('differ', digit, [],
+                                                f"DIFFER {digit}: ausente há {count} ticks",
+                                                mode='rarity')
+                    logger.info(f"✅ DIFFER SINAL GERADO: {signal['id']}")
+                    return digit, signal['reason']
+
         if len(recent) >= 3 and recent[-3] != recent[-2]:
             self._differ_sequence_used.clear()
         return None, "Nenhum padrão DIFFER"
