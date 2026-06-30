@@ -117,7 +117,6 @@ class DerivWebSocketClient:
         return self._ws_url and 'otp=' in self._ws_url
 
     def get_last_tick_seconds_ago(self):
-        """Retorna quantos segundos se passaram desde o último tick."""
         if self._last_tick_time is None:
             return 999
         return round(time.time() - self._last_tick_time, 1)
@@ -846,7 +845,22 @@ class DerivWebSocketClient:
                 logger.error(f"Falha ao reassinar {cid}: {e}")
 
     # ============================================================
-    # _on_poc COM DADOS DE AUDITORIA COMPLETOS + SET AUXILIAR
+    # NOVA FUNÇÃO: extrair último dígito com 2 casas decimais fixas
+    # ============================================================
+    def _extract_last_digit(self, value):
+        if value is None:
+            return None
+        try:
+            s = f"{float(value):.2f}"
+            for ch in reversed(s):
+                if ch.isdigit():
+                    return int(ch)
+            return None
+        except (ValueError, TypeError):
+            return None
+
+    # ============================================================
+    # _on_poc COM DADOS DE AUDITORIA E LOG TEMPORÁRIO DO PAYLOAD
     # ============================================================
     def _on_poc(self, data):
         c = data.get('proposal_open_contract', {})
@@ -854,6 +868,9 @@ class DerivWebSocketClient:
         if not cid or not c.get('is_sold'):
             return
         logger.info(f"📦 POC recebido: contract_id={cid}, is_sold=True")
+
+        # LOG TEMPORÁRIO: payload completo para debug
+        logger.info(f"🔍 POC FULL PAYLOAD: {json.dumps(c)}")
 
         bp = float(c.get('buy_price', 0) or 0)
         sp = float(c.get('sell_price', 0) or 0)
@@ -881,19 +898,9 @@ class DerivWebSocketClient:
         entry_tick_time = c.get('entry_tick_time')
         exit_tick_time = c.get('exit_tick_time')
 
-        entry_digit = None
-        if entry_spot is not None:
-            try:
-                entry_digit = int(str(float(entry_spot)).replace('.', '')[-1])
-            except (ValueError, TypeError):
-                pass
-
-        exit_digit = None
-        if exit_spot is not None:
-            try:
-                exit_digit = int(str(float(exit_spot)).replace('.', '')[-1])
-            except (ValueError, TypeError):
-                pass
+        # Usar a nova função robusta para extrair o último dígito
+        entry_digit = self._extract_last_digit(entry_spot)
+        exit_digit = self._extract_last_digit(exit_spot)
 
         logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}, entry_digit={entry_digit}, exit_digit={exit_digit}")
 
