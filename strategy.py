@@ -20,6 +20,7 @@ class StrategyManager:
     - Gates Hard: tick desactualizado (>2.5s) e fim de ciclo (<7 ticks restantes).
     - Snapshots com metadados (mode, expires_in_ticks).
     - DIFFER com dois modos: REPEAT (consecutivo) e RARITY (dígito mais ausente ≥25 ticks).
+    - Histórico de preços reiniciado ao mudar de símbolo (evita falsos spikes).
     """
 
     def __init__(self, client, analyzer):
@@ -45,6 +46,7 @@ class StrategyManager:
         self._zscore_sequence_used = False
         self._zscore_cooldown_until = 0
         self._price_history = []
+        self._last_symbol = None
 
         self._active_signals = {
             'differ': None,
@@ -60,7 +62,7 @@ class StrategyManager:
 
         self.MATCHES_ABSENCE_THRESHOLD = 20
         self.MARKET_SPIKE_THRESHOLD = 0.002
-        self.DIFFER_RARITY_THRESHOLD = 25  # ausência mínima para DIFFER por raridade
+        self.DIFFER_RARITY_THRESHOLD = 25
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -126,15 +128,25 @@ class StrategyManager:
             for price in recent:
                 variation = abs(price - avg_price) / avg_price if avg_price > 0 else 0
                 if variation > self.MARKET_SPIKE_THRESHOLD:
+                    logger.warning(
+                        f"⚠️ SPIKE BLOQUEIO | preços={recent} | avg={avg_price:.5f} | variação={variation:.3%}"
+                    )
                     return False, f"Spike detetado (variação {variation:.3%})"
         return True, "OK"
 
     # -----------------------------------------------------------------
-    # Atualização a cada tick
+    # Atualização a cada tick (CORRIGIDA: limpa histórico ao mudar símbolo)
     # -----------------------------------------------------------------
     def on_tick(self, tick):
         price = tick.get('price', 0)
+        symbol = tick.get('symbol')
         with self._lock:
+            # Limpar histórico se mudou de símbolo — evita misturar escalas de preço
+            if symbol and self._last_symbol is not None and self._last_symbol != symbol:
+                self._price_history = []
+                logger.info(f"🔄 Símbolo mudou de {self._last_symbol} para {symbol} — histórico de preço limpo")
+            if symbol:
+                self._last_symbol = symbol
             if price:
                 self._price_history.append(price)
                 if len(self._price_history) > 20:
