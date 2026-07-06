@@ -526,7 +526,7 @@ async function autoConnect(){
             isConnected=true;
             _autoConnectAttempts = 0;
         } else if (d.status === 'connecting') {
-            $_( 'conSt').textContent = '🔄 Auto-conectando...';
+            $_( 'conSt').textContent = '🔄 A renovar sessão...';
             let attempts = 0;
             const check = setInterval(() => {
                 attempts++;
@@ -542,6 +542,10 @@ async function autoConnect(){
                 }
             }, 2000);
         } else if (d.status === 'no_token'){
+        } else if (d.status === 'token_expired'){
+            _autoConnectAttempts = MAX_AUTO_CONNECT_ATTEMPTS;
+            $_( 'conSt').innerHTML = '<a href="#" onclick="connectWithDeriv()" style="color:var(--accent);font-weight:700">👉 Sessão expirada. Clique aqui para reconectar</a>';
+            toast('⚠️ ' + (d.message || 'Sessão expirada. Reconecte via botão Deriv.'), 'warning', 6000);
         } else {
             _autoConnectAttempts++;
         }
@@ -623,7 +627,19 @@ async function updateAll(){
     $_( 'connectTokenBtn').disabled=conn;
     $_( 'reconnectBtn').style.display=conn?'none':'inline-block';
     $_( 'sDot').className='dot'+(conn?' on':'');
-    $_( 'connStatus').textContent=conn?'Conectado':(bot.connected?'Sem stream':'Desconectado');
+
+    // CORRECÇÃO 3: Mensagem accionável quando token expirado
+    if(conn){
+        $_( 'connStatus').textContent = 'Conectado';
+    } else if(bot.token_expired){
+        $_( 'connStatus').innerHTML = '⚠️ Sessão expirada';
+        $_( 'conSt').innerHTML = '<a href="#" onclick="connectWithDeriv()" style="color:var(--accent);font-weight:700">👉 Clique aqui para reconectar</a>';
+    } else if(bot.connected){
+        $_( 'connStatus').textContent = 'Sem stream';
+    } else {
+        $_( 'connStatus').textContent = 'Desconectado';
+    }
+
     $_( 'bal').textContent=(bot.balance||0).toFixed(2);
     $_( 'cur').textContent=bot.currency||'USD';
     const priceEl=$_('priceEl'); if(priceEl) priceEl.textContent=(bot.price||0).toFixed(4);
