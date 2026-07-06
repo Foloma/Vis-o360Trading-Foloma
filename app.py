@@ -998,6 +998,19 @@ def reset_password_confirm():
     return jsonify({'status': 'ok', 'message': 'Senha alterada com sucesso.'})
 
 # ==================== CONEXÃO / TRADING ====================
+
+# --- Função auxiliar para obter OTP com retry ---
+def _get_otp_with_retry(email, account_type, max_attempts=2):
+    """Tenta obter OTP até max_attempts vezes, com 1s entre tentativas."""
+    for attempt in range(max_attempts):
+        ws_url, balance, currency = get_otp_ws_url(email, account_type)
+        if ws_url:
+            return ws_url, balance, currency
+        logger.warning(f"OTP falhou na tentativa {attempt + 1} para {email}")
+        if attempt < max_attempts - 1:
+            time.sleep(1)
+    return None, 0, 'USD'
+
 @app.route('/api/connect', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1014,9 +1027,12 @@ def api_connect():
         token = UserStore.get_active_token(user)
         if not token:
             return jsonify({'error': 'Token não configurado'}), 400
-        ws_url, balance, currency = get_otp_ws_url(email, user.get('active_account', 'demo'))
+
+        # NOVO: retry automático de OTP
+        ws_url, balance, currency = _get_otp_with_retry(email, user.get('active_account', 'demo'))
         if not ws_url:
-            return jsonify({'error': 'Token inválido. Reconecte via OAuth.'}), 400
+            return jsonify({'error': 'Sessão expirada. Clique em Reconectar.'}), 400
+
         sess = create_session(user_id, user, ws_url_override=ws_url)
         if sess and balance > 0:
             sess['client'].balance = balance
@@ -1034,31 +1050,27 @@ def auto_connect():
     email = session['user_email']
     user = UserStore.get(email)
     if not UserStore.get_active_token(user):
-        return jsonify({
-            'status': 'no_token',
-            'account_type': user.get('active_account', 'demo')
-        })
+        return jsonify({'status': 'no_token'})
+
     sess = get_session(session['user_id'])
     if sess and sess['client'].connected and sess['client'].authorized:
-        return jsonify({
-            'status': 'already_connected',
-            'account_type': user.get('active_account', 'demo'),
-            'balance': sess['client'].balance
-        })
-    ws_url, balance, currency = get_otp_ws_url(email, user.get('active_account', 'demo'))
+        return jsonify({'status': 'already_connected', 'balance': sess['client'].balance})
+
+    # NOVO: retry automático de OTP
+    ws_url, balance, currency = _get_otp_with_retry(email, user.get('active_account', 'demo'))
     if not ws_url:
         return jsonify({
-            'status': 'no_token',
-            'message': 'Token expirado. Reconecte via botão Deriv.',
-            'account_type': user.get('active_account', 'demo')
+            'status': 'token_expired',
+            'message': 'Sessão expirada. Clique em Reconectar.'
         })
+
     sess = create_session(session['user_id'], user, ws_url_override=ws_url)
     if sess and balance > 0:
         sess['client'].balance = balance
         sess['client'].currency = currency
         sess['trading_bot'].balance = balance
         sess['trading_bot'].currency = currency
-    return jsonify({'status': 'connecting', 'account_type': user.get('active_account', 'demo')})
+    return jsonify({'status': 'connecting'})
 
 @app.route('/api/auth/switch-account', methods=['POST'])
 @require_auth
@@ -1131,6 +1143,12 @@ def status():
     # NOVO: expor last_tick_seconds_ago e last_tick_epoch
     bot_status['last_tick_seconds_ago'] = client.get_last_tick_seconds_ago() if client else 999
     bot_status['last_tick_epoch'] = getattr(client, '_last_tick_epoch', None) if client else None
+    # NOVO: expor auth_error e token_expired
+    bot_status['auth_error'] = getattr(client, 'auth_error', None) if client else None
+    bot_status['token_expired'] = (
+        isinstance(getattr(client, 'auth_error', None), dict) and
+        getattr(client, 'auth_error', {}).get('code') in ('InvalidToken', 'TokenExpired')
+    ) if client else False
 
     analysis = analyzer.get_analysis()
     digit_frequencies = analyzer.get_digit_frequencies()
