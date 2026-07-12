@@ -1005,7 +1005,8 @@ class DerivWebSocketClient:
             with self._candles_cache_lock:
                 self._candles_cache = {'data': candles, 'timestamp': time.time()}
             if self.on_candles_callback:
-                self.on_candles_callback(candles)
+                req_id = data.get('req_id')
+                self.on_candles_callback(candles, req_id)
 
     def get_cached_candles(self, max_age=None):
         if max_age is None:
