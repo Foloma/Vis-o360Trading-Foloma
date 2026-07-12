@@ -90,8 +90,15 @@ def init_db():
         role TEXT DEFAULT 'user',
         affiliate_earnings REAL DEFAULT 0.0,
         referral_link_code TEXT,
-        daily_stats_json TEXT
+        daily_stats_json TEXT,
+        plan TEXT DEFAULT 'free'
     )''')
+    # Adicionar coluna plan se não existir (migration segura)
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN plan TEXT DEFAULT 'free'")
+    except sqlite3.OperationalError:
+        pass
+
     c.execute('''CREATE TABLE IF NOT EXISTS user_tokens (
         email TEXT,
         account_type TEXT,
@@ -217,14 +224,14 @@ threading.Thread(target=_cleanup_loop, daemon=True).start()
 def load_markup_from_db():
     try:
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-        row = conn.execute("SELECT value FROM settings WHERE key='markup_percentage'").fetchone()
+        row = conn.execute("SELECT value FROM settings WHERE key='referral_commission_percentage'").fetchone()
         if row:
             from config import config
-            config.MARKUP_PERCENTAGE = float(row[0])
-            logger.info(f"Markup carregado da BD: {config.MARKUP_PERCENTAGE}%")
+            config.REFERRAL_COMMISSION_PERCENTAGE = float(row[0])
+            logger.info(f"Comissão de referral carregada da BD: {config.REFERRAL_COMMISSION_PERCENTAGE}%")
         conn.close()
     except Exception as e:
-        logger.error(f"Erro ao carregar markup: {e}")
+        logger.error(f"Erro ao carregar comissão: {e}")
 
 load_markup_from_db()
 
@@ -280,7 +287,7 @@ class UserStore:
             if not row:
                 return None
             keys = ['email','id','name','password_hash','active_account','created_at','last_login',
-                    'referral_code','active','role','affiliate_earnings','referral_link_code','daily_stats_json']
+                    'referral_code','active','role','affiliate_earnings','referral_link_code','daily_stats_json','plan']
             user = dict(zip(keys, row))
             tokens = conn.execute('SELECT account_type, token FROM user_tokens WHERE email = ?', (email,)).fetchall()
             user['tokens'] = {acc: decrypt_token(tok) for acc, tok in tokens}
@@ -301,12 +308,13 @@ class UserStore:
         try:
             daily_json = json.dumps(user.get('daily_stats')) if user.get('daily_stats') else None
             conn.execute('''INSERT OR REPLACE INTO users (email, id, name, password_hash, active_account,
-                            created_at, last_login, referral_code, active, role, affiliate_earnings, referral_link_code, daily_stats_json)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                            created_at, last_login, referral_code, active, role, affiliate_earnings, referral_link_code, daily_stats_json, plan)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                          (user['email'], user['id'], user['name'], user['password_hash'],
                           user.get('active_account','demo'), user.get('created_at'), user.get('last_login'),
                           user.get('referral_code'), user.get('active',1), user.get('role','user'),
-                          user.get('affiliate_earnings',0.0), user.get('referral_link_code'), daily_json))
+                          user.get('affiliate_earnings',0.0), user.get('referral_link_code'), daily_json,
+                          user.get('plan','free')))
             conn.execute('DELETE FROM user_tokens WHERE email = ?', (user['email'],))
             for acc, tok in user.get('tokens', {}).items():
                 if tok:
@@ -341,7 +349,8 @@ class UserStore:
             'affiliate_earnings': 0.0,
             'referral_link_code': ref_link,
             'tokens': {},
-            'daily_stats': None
+            'daily_stats': None,
+            'plan': 'free'
         }
         UserStore.save(user)
         return user
@@ -572,6 +581,8 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         from trading_bot import TradingBot
         from synthetics import DigitAnalyzer
         from strategy import StrategyManager
+        from forex_data import ForexDataManager
+        from forex_signals import ForexSignals
 
         bot = TradingBot()
         analyzer = DigitAnalyzer(
@@ -587,6 +598,11 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         client.set_digit_analyzer(analyzer)
         bot.client = client
         bot.digit_analyzer = analyzer
+
+        # --- Módulo Forex (NOVO) ---
+        forex_mgr = ForexDataManager()
+        forex_mgr.set_client(client)
+        forex_signals = ForexSignals(forex_mgr)
 
         if ws_url_override:
             if not ws_url_override.startswith(('wss://', 'ws://')):
@@ -652,6 +668,8 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             bot.on_tick(tick)
             if strategy:
                 strategy.on_tick(tick)
+            # Alimentar o módulo Forex (NOVO)
+            forex_mgr.on_tick(tick)
 
         client.on_tick_callback = tick_callback
         client.on_result_callback = on_trade_result
@@ -705,11 +723,15 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             'trading_bot': bot,
             'digit_analyzer': analyzer,
             'strategy': strategy,
-            'candles': []
+            'candles': [],
+            'forex_data': forex_mgr,
+            'forex_signals': forex_signals
         }
 
-        def on_candles(candles):
+        def on_candles(candles, req_id=None):
             new_sess['candles'] = candles
+            # Encaminhar também para o módulo Forex (NOVO - com req_id)
+            forex_mgr.on_candles({'candles': candles}, req_id=req_id)
 
         client.on_candles_callback = on_candles
 
@@ -743,6 +765,15 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                         return
                 bot.start(client)
                 bot.daily_stats['start_balance'] = bot.balance
+
+                # Subscrever ticks de Forex se o utilizador for Pro (NOVO)
+                if user.get('plan') == 'pro':
+                    forex_mgr.subscribe_all()
+                    # Pedir velas históricas para alimentar SMA200 (NOVO)
+                    from forex_data import FOREX_SYMBOLS
+                    for symbol in FOREX_SYMBOLS:
+                        forex_mgr.request_candles(symbol, granularity=60, count=250)
+
             else:
                 auth_err = getattr(client, 'auth_error', None)
                 if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
@@ -821,6 +852,18 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
+def require_pro(f):
+    """Middleware que restringe o acesso a utilizadores com plano Pro."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return jsonify({'error': 'Não autenticado'}), 401
+        user = UserStore.get(session.get('user_email'))
+        if not user or user.get('plan') != 'pro':
+            return jsonify({'error': 'Funcionalidade exclusiva do plano Pro'}), 402
+        return f(*args, **kwargs)
+    return decorated
+
 # ==================== ROTAS ====================
 @app.route('/')
 def index():
@@ -845,7 +888,8 @@ def auth_status():
                     'has_deriv_token': bool(UserStore.get_active_token(user)),
                     'active_account': user.get('active_account'),
                     'has_demo_token': bool(tokens.get('demo')),
-                    'has_real_token': bool(tokens.get('real'))
+                    'has_real_token': bool(tokens.get('real')),
+                    'plan': user.get('plan', 'free')
                 }
             })
     return jsonify({'authenticated': False})
@@ -882,7 +926,8 @@ def register():
                 'email': user['email'],
                 'role': user.get('role'),
                 'has_deriv_token': False,
-                'active_account': 'demo'
+                'active_account': 'demo',
+                'plan': user.get('plan', 'free')
             },
             'referral_code': user['referral_link_code']
         })
@@ -909,7 +954,8 @@ def login():
         return jsonify({'status': 'ok', 'user': {
             'id': user['id'], 'name': user['name'], 'email': user['email'],
             'role': session['user_role'], 'has_deriv_token': bool(UserStore.get_active_token(user)),
-            'active_account': user.get('active_account')
+            'active_account': user.get('active_account'),
+            'plan': user.get('plan', 'free')
         }})
     except Exception:
         logger.exception("Erro no login")
@@ -1028,7 +1074,7 @@ def api_connect():
         if not token:
             return jsonify({'error': 'Token não configurado'}), 400
 
-        # NOVO: retry automático de OTP
+        # Retry automático de OTP
         ws_url, balance, currency = _get_otp_with_retry(email, user.get('active_account', 'demo'))
         if not ws_url:
             return jsonify({'error': 'Sessão expirada. Clique em Reconectar.'}), 400
@@ -1056,7 +1102,7 @@ def auto_connect():
     if sess and sess['client'].connected and sess['client'].authorized:
         return jsonify({'status': 'already_connected', 'balance': sess['client'].balance})
 
-    # NOVO: retry automático de OTP
+    # Retry automático de OTP
     ws_url, balance, currency = _get_otp_with_retry(email, user.get('active_account', 'demo'))
     if not ws_url:
         return jsonify({
@@ -1140,10 +1186,10 @@ def status():
     bot_status['last_valid_ping_ms'] = getattr(
         client, '_last_valid_ping_ms', 0
     ) if client else 0
-    # NOVO: expor last_tick_seconds_ago e last_tick_epoch
+    # Expor last_tick_seconds_ago e last_tick_epoch
     bot_status['last_tick_seconds_ago'] = client.get_last_tick_seconds_ago() if client else 999
     bot_status['last_tick_epoch'] = getattr(client, '_last_tick_epoch', None) if client else None
-    # NOVO: expor auth_error e token_expired
+    # Expor auth_error e token_expired
     bot_status['auth_error'] = getattr(client, 'auth_error', None) if client else None
     bot_status['token_expired'] = (
         isinstance(getattr(client, 'auth_error', None), dict) and
@@ -1156,6 +1202,9 @@ def status():
     most_frequent = analyzer.get_most_frequent_digit()
 
     _save_daily_stats_to_db(session.get('user_email'), bot)
+
+    # Incluir estado do módulo Forex
+    forex_status = sess.get('forex_data').get_status() if sess.get('forex_data') else {}
 
     return jsonify({
         'bot': bot_status,
@@ -1175,7 +1224,8 @@ def status():
         },
         'strategy': strategy.get_status() if strategy else {},
         'symbols': config.AVAILABLE_SYMBOLS,
-        'loginid': client.loginid if client else None
+        'loginid': client.loginid if client else None,
+        'forex': forex_status  # NOVO
     })
 
 @app.route('/api/daily-stats/sync', methods=['POST'])
@@ -1427,7 +1477,7 @@ def trade_digit():
         ok = sess['client'].place_trade(contract, amt, True)
         if ok:
             strategy.lock_trade()
-            credit_affiliate_commission(session['user_email'], amt)
+            credit_referral_commission(session['user_email'], amt)
             logger.info(
                 f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
             )
@@ -1500,7 +1550,7 @@ def trade_differ():
         ok = sess['client'].place_differ_trade(digit, amt)
         if ok:
             strategy.lock_trade()
-            credit_affiliate_commission(session['user_email'], amt)
+            credit_referral_commission(session['user_email'], amt)
             logger.info(
                 f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
             )
@@ -1571,7 +1621,7 @@ def trade_matches():
         ok = sess['client'].place_matches_trade(digit, amt)
         if ok:
             strategy.lock_trade()
-            credit_affiliate_commission(session['user_email'], amt)
+            credit_referral_commission(session['user_email'], amt)
             logger.info(
                 f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
             )
@@ -1649,7 +1699,7 @@ def trade_zscore():
         if ok:
             strategy._zscore_sequence_used = True
             strategy.lock_trade()
-            credit_affiliate_commission(session['user_email'], amt)
+            credit_referral_commission(session['user_email'], amt)
             logger.info(
                 f"🔍 AUDITORIA | latencia_execucao={getattr(sess['client'], 'last_trade_latency_ms', 0)}ms"
             )
@@ -1818,7 +1868,7 @@ def signals_scoreboard():
         'win_rate': round(win_rate, 1)
     })
 
-def credit_affiliate_commission(user_email, amount):
+def credit_referral_commission(user_email, amount):
     user = UserStore.get(user_email)
     if not user or not user.get('referral_code'):
         return
@@ -1827,14 +1877,158 @@ def credit_affiliate_commission(user_email, amount):
     try:
         ref_user = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref_code,)).fetchone()
         if ref_user:
-            commission = amount * (config.MARKUP_PERCENTAGE / 100)
+            commission = amount * (config.REFERRAL_COMMISSION_PERCENTAGE / 100)
             conn.execute('UPDATE users SET affiliate_earnings = affiliate_earnings + ? WHERE email = ?',
                          (commission, ref_user[0]))
             conn.commit()
     except Exception as e:
-        logger.error(f"Erro ao creditar comissão: {e}")
+        logger.error(f"Erro ao creditar comissão de referral: {e}")
     finally:
         conn.close()
+
+# ==================== NOVAS ROTAS FOREX (PLANO PRO) ====================
+
+@app.route('/api/forex/signals')
+@require_pro
+def forex_signals():
+    sess = get_session(session['user_id'])
+    if not sess or not sess.get('forex_signals'):
+        return jsonify({'error': 'Módulo Forex indisponível'}), 503
+
+    signals = sess['forex_signals'].get_all_signals()
+    return jsonify({'signals': signals})
+
+@app.route('/api/forex/status')
+@require_pro
+def forex_status():
+    sess = get_session(session['user_id'])
+    if not sess or not sess.get('forex_data'):
+        return jsonify({'error': 'Módulo Forex indisponível'}), 503
+
+    return jsonify(sess['forex_data'].get_status())
+
+@app.route('/api/forex/candles/<symbol>')
+@require_pro
+def forex_candles(symbol):
+    sess = get_session(session['user_id'])
+    if not sess or not sess.get('forex_data'):
+        return jsonify({'error': 'Módulo Forex indisponível'}), 503
+
+    granularity = request.args.get('granularity', 60, type=int)
+    count = request.args.get('count', 50, type=int)
+
+    # Pedir velas (serão recebidas assincronamente)
+    sess['forex_data'].request_candles(symbol, granularity=granularity, count=count)
+
+    # Tentar devolver as velas já em cache
+    candles = sess['forex_data'].get_recent_candles(symbol, count=count)
+    return jsonify({'candles': candles, 'symbol': symbol})
+
+# ==================== ROTAS ADMIN (mantidas) ====================
+
+@app.route('/api/admin/users')
+@require_admin
+def admin_users():
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        rows = conn.execute('SELECT email, name, active FROM users').fetchall()
+        return jsonify({'users': [{'email': r[0], 'name': r[1], 'active': bool(r[2])} for r in rows]})
+    finally:
+        conn.close()
+
+@app.route('/api/admin/toggle-user', methods=['POST'])
+@require_admin
+def toggle_user():
+    d = request.json
+    email = d.get('email')
+    en = d.get('enable', True)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        conn.execute('UPDATE users SET active = ? WHERE email = ?', (1 if en else 0, email))
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({'status': 'ok', 'message': f'Utilizador {"ativado" if en else "desativado"}.'})
+
+@app.route('/api/admin/clear-tokens', methods=['POST'])
+@require_admin
+def admin_clear_tokens():
+    d = request.json
+    email = d.get('email', '').strip().lower()
+    user = UserStore.get(email) if email else None
+    target_uid = user['id'] if user else None
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        if email:
+            conn.execute('DELETE FROM user_tokens WHERE email = ?', (email,))
+            conn.commit()
+            logger.info(f"Tokens removidos para {email}")
+            conn.execute('UPDATE users SET active_account = ? WHERE email = ?', ('demo', email))
+            conn.commit()
+        else:
+            conn.execute('DELETE FROM user_tokens')
+            conn.execute('UPDATE users SET active_account = ?', ('demo',))
+            conn.commit()
+            logger.info("Todos os tokens removidos")
+    finally:
+        conn.close()
+    with sessions_lock:
+        for uid, sess in list(sessions.items()):
+            if (target_uid and uid == target_uid) or not target_uid:
+                sess['trading_bot'].on_disconnect()
+                sess['client']._stop_event.set()
+                del sessions[uid]
+                logger.info(f"Sessão de {uid} encerrada")
+    return jsonify({'status': 'ok', 'message': 'Tokens removidos. Utilizador terá que refazer OAuth.'})
+
+@app.route('/api/admin/settings')
+@require_admin
+def admin_settings():
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key='referral_commission_percentage'").fetchone()
+        referral = float(row[0]) if row else config.REFERRAL_COMMISSION_PERCENTAGE
+    finally:
+        conn.close()
+    return jsonify({'referral_commission_percentage': referral})
+
+@app.route('/api/admin/set-markup', methods=['POST'])
+@require_admin
+def set_markup():
+    d = request.json
+    pct = float(d.get('percentage', 0.5))
+    if not (0.0 <= pct <= 3.0):
+        return jsonify({'error': 'Percentagem deve estar entre 0% e 3%'}), 400
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('referral_commission_percentage', ?)",
+                     (str(pct),))
+        conn.commit()
+    finally:
+        conn.close()
+    config.REFERRAL_COMMISSION_PERCENTAGE = pct
+    logger.info(f"Comissão de referral alterada para {pct}%")
+    return jsonify({'status': 'ok', 'referral_commission_percentage': pct})
+
+# NOVO: Admin pode alterar o plano de um utilizador
+@app.route('/api/admin/set-plan', methods=['POST'])
+@require_admin
+def set_plan():
+    d = request.json
+    email = d.get('email', '').strip().lower()
+    plan = d.get('plan', 'free')
+    if plan not in ('free', 'pro'):
+        return jsonify({'error': 'Plano inválido. Use "free" ou "pro".'}), 400
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        conn.execute('UPDATE users SET plan = ? WHERE email = ?', (plan, email))
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info(f"Plano de {email} alterado para {plan}")
+    return jsonify({'status': 'ok', 'message': f'Plano de {email} alterado para {plan}.'})
+
+# ==================== ROTAS AFILIADO / PAGAMENTO (mantidas) ====================
 
 @app.route('/api/affiliate/stats')
 @require_auth
@@ -1959,90 +2153,7 @@ def withdraw():
         logger.exception("Erro levantamento")
         return jsonify({'error': 'Erro interno'}), 500
 
-@app.route('/api/admin/users')
-@require_admin
-def admin_users():
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        rows = conn.execute('SELECT email, name, active FROM users').fetchall()
-        return jsonify({'users': [{'email': r[0], 'name': r[1], 'active': bool(r[2])} for r in rows]})
-    finally:
-        conn.close()
-
-@app.route('/api/admin/toggle-user', methods=['POST'])
-@require_admin
-def toggle_user():
-    d = request.json
-    email = d.get('email')
-    en = d.get('enable', True)
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        conn.execute('UPDATE users SET active = ? WHERE email = ?', (1 if en else 0, email))
-        conn.commit()
-    finally:
-        conn.close()
-    return jsonify({'status': 'ok', 'message': f'Utilizador {"ativado" if en else "desativado"}.'})
-
-@app.route('/api/admin/clear-tokens', methods=['POST'])
-@require_admin
-def admin_clear_tokens():
-    d = request.json
-    email = d.get('email', '').strip().lower()
-    user = UserStore.get(email) if email else None
-    target_uid = user['id'] if user else None
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        if email:
-            conn.execute('DELETE FROM user_tokens WHERE email = ?', (email,))
-            conn.commit()
-            logger.info(f"Tokens removidos para {email}")
-            conn.execute('UPDATE users SET active_account = ? WHERE email = ?', ('demo', email))
-            conn.commit()
-        else:
-            conn.execute('DELETE FROM user_tokens')
-            conn.execute('UPDATE users SET active_account = ?', ('demo',))
-            conn.commit()
-            logger.info("Todos os tokens removidos")
-    finally:
-        conn.close()
-    with sessions_lock:
-        for uid, sess in list(sessions.items()):
-            if (target_uid and uid == target_uid) or not target_uid:
-                sess['trading_bot'].on_disconnect()
-                sess['client']._stop_event.set()
-                del sessions[uid]
-                logger.info(f"Sessão de {uid} encerrada")
-    return jsonify({'status': 'ok', 'message': 'Tokens removidos. Utilizador terá que refazer OAuth.'})
-
-@app.route('/api/admin/settings')
-@require_admin
-def admin_settings():
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        row = conn.execute("SELECT value FROM settings WHERE key='markup_percentage'").fetchone()
-        markup = float(row[0]) if row else config.MARKUP_PERCENTAGE
-    finally:
-        conn.close()
-    return jsonify({'markup': markup})
-
-@app.route('/api/admin/set-markup', methods=['POST'])
-@require_admin
-def set_markup():
-    d = request.json
-    pct = float(d.get('percentage', 0.5))
-    if not (0.0 <= pct <= 3.0):
-        return jsonify({'error': 'Percentagem deve estar entre 0% e 3%'}), 400
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    try:
-        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('markup_percentage', ?)",
-                     (str(pct),))
-        conn.commit()
-    finally:
-        conn.close()
-    config.MARKUP_PERCENTAGE = pct
-    logger.info(f"Markup alterado para {pct}%")
-    return jsonify({'status': 'ok', 'percentage': pct})
-
+# ==================== INICIALIZAÇÃO ====================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
