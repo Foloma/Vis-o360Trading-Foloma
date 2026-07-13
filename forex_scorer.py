@@ -4,10 +4,6 @@ from typing import Dict, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 class ForexScorer:
-    """
-    Calcula uma pontuação de 0 a 100 para um sinal de Forex,
-    baseada em vários indicadores e filtros.
-    """
     def __init__(self, weights: Optional[Dict[str, int]] = None):
         self.weights = weights or {
             'trend': 20,
@@ -25,8 +21,6 @@ class ForexScorer:
     def score(self, ind: dict) -> Tuple[int, str, dict]:
         direction = 'HOLD'
         breakdown = {k: 0 for k in self.weights}
-        total = 0
-
         latest = ind.get('latest_price')
         sma200 = ind.get('sma_200')
         ema50 = ind.get('ema_50')
@@ -41,7 +35,7 @@ class ForexScorer:
         if latest is None or sma200 is None:
             return 0, 'HOLD', breakdown
 
-        # --- 1. Tendência ---
+        # --- Tendência ---
         if ema50 is not None:
             if ema50 > sma200:
                 breakdown['trend'] = self.weights['trend']
@@ -57,7 +51,7 @@ class ForexScorer:
                 breakdown['trend'] = self.weights['trend'] // 2
                 direction = 'SELL'
 
-        # --- 2. RSI ---
+        # --- RSI ---
         if rsi is not None:
             if direction == 'BUY' and rsi < 30:
                 breakdown['rsi'] = self.weights['rsi']
@@ -68,7 +62,7 @@ class ForexScorer:
             else:
                 breakdown['rsi'] = self.weights['rsi'] // 2
 
-        # --- 3. MACD ---
+        # --- MACD ---
         if macd_line is not None and signal_line is not None:
             if direction == 'BUY' and macd_line > signal_line:
                 breakdown['macd'] = self.weights['macd']
@@ -77,7 +71,7 @@ class ForexScorer:
             else:
                 breakdown['macd'] = 0
 
-        # --- 4. ADX ---
+        # --- ADX ---
         if adx is not None:
             if adx > self.adx_minimum:
                 adx_factor = min(1.0, (adx - self.adx_minimum) / 20)
@@ -85,7 +79,7 @@ class ForexScorer:
             else:
                 breakdown['adx'] = 0
 
-        # --- 5. ATR / Volatilidade ---
+        # --- ATR ---
         if atr is not None and latest > 0:
             atr_pct = (atr / latest) * 100
             if 0.05 <= atr_pct <= 0.5:
@@ -95,21 +89,21 @@ class ForexScorer:
             else:
                 breakdown['atr_volatility'] = 0
 
-        # --- 6. Bollinger ---
+        # --- Bollinger ---
         if upper and lower:
             if direction == 'BUY' and latest <= lower * 1.002:
                 breakdown['bollinger'] = self.weights['bollinger']
             elif direction == 'SELL' and latest >= upper * 0.998:
                 breakdown['bollinger'] = self.weights['bollinger']
 
-        # --- 7. Momentum ---
+        # --- Momentum ---
         if momentum is not None:
             if direction == 'BUY' and momentum > 0:
                 breakdown['momentum'] = self.weights['momentum']
             elif direction == 'SELL' and momentum < 0:
                 breakdown['momentum'] = self.weights['momentum']
 
-        # --- 8. Market Quality (simplificado) ---
+        # --- Market Quality ---
         mqi = 0
         if adx and adx > self.adx_minimum:
             mqi += 40
