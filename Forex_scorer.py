@@ -1,4 +1,3 @@
-# forex_scorer.py
 import logging
 from typing import Dict, Optional, Tuple
 
