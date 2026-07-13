@@ -93,7 +93,6 @@ def init_db():
         daily_stats_json TEXT,
         plan TEXT DEFAULT 'free'
     )''')
-    # Adicionar coluna plan se não existir (migration segura)
     try:
         c.execute("ALTER TABLE users ADD COLUMN plan TEXT DEFAULT 'free'")
     except sqlite3.OperationalError:
@@ -175,7 +174,6 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
-    # Novas colunas de auditoria
     for col in ['entry_digit', 'exit_digit', 'entry_spot', 'exit_spot',
                 'entry_tick_time', 'exit_tick_time', 'click_tick', 'latency_ms']:
         try:
@@ -202,7 +200,6 @@ def _cleanup_loop():
             conn.commit()
             conn.close()
 
-            # Limpar sessões WebSocket inactivas >30min
             now = time.time()
             with sessions_lock:
                 to_remove = []
@@ -497,9 +494,7 @@ def _save_martingale_state(user_id, bot):
     except Exception as e:
         logger.error(f"Erro ao guardar martingale: {e}")
 
-# --- NOVA FUNÇÃO: obter OTP + saldo (com preferência pelo tipo de conta) ---
 def get_otp_ws_url(email, account_type):
-    """Obtém novo URL WebSocket autenticado via OTP e também o saldo da conta."""
     try:
         user = UserStore.get(email)
         if not user:
@@ -515,7 +510,6 @@ def get_otp_ws_url(email, account_type):
             'Accept': 'application/json',
             'Accept-Language': 'en-US,en;q=0.9'
         }
-        # GET contas
         req = urllib.request.Request(
             f"{config.DERIV_REST_URL}/trading/v1/options/accounts",
             headers=headers
@@ -524,13 +518,11 @@ def get_otp_ws_url(email, account_type):
             accounts = json.loads(resp.read())
         logger.info(f"Contas disponíveis: {accounts.get('data', [])}")
 
-        # Escolher a conta com o tipo preferido (demo/real)
         selected_acc = None
         for a in accounts.get('data', []):
             if not a.get('is_disabled') and a.get('account_type') == account_type:
                 selected_acc = a
                 break
-        # Se não encontrou a preferida, pega a primeira ativa
         if not selected_acc:
             for a in accounts.get('data', []):
                 if not a.get('is_disabled'):
@@ -543,7 +535,6 @@ def get_otp_ws_url(email, account_type):
         account_id = selected_acc['account_id']
         balance = float(selected_acc.get('balance', 0))
         currency = selected_acc.get('currency', 'USD')
-        # POST OTP
         req = urllib.request.Request(
             f"{config.DERIV_REST_URL}/trading/v1/options/accounts/{account_id}/otp",
             data=b'{}',
@@ -563,6 +554,11 @@ def get_otp_ws_url(email, account_type):
         logger.error(f"Erro OTP: {e}")
         return None, 0, 'USD'
 
+# Importar módulos Forex
+from forex_data import ForexDataManager, FOREX_SYMBOLS
+from forex_indicators import ForexIndicators
+from forex_signals import ForexSignals
+
 def create_session(user_id, user, force=False, ws_url_override=None):
     with sessions_lock:
         if user_id in sessions:
@@ -581,8 +577,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         from trading_bot import TradingBot
         from synthetics import DigitAnalyzer
         from strategy import StrategyManager
-        from forex_data import ForexDataManager
-        from forex_signals import ForexSignals
 
         bot = TradingBot()
         analyzer = DigitAnalyzer(
@@ -599,9 +593,9 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         bot.client = client
         bot.digit_analyzer = analyzer
 
-        # --- Módulo Forex (NOVO) ---
         forex_mgr = ForexDataManager()
         forex_mgr.set_client(client)
+        forex_indicators = ForexIndicators(forex_mgr)
         forex_signals = ForexSignals(forex_mgr)
 
         if ws_url_override:
@@ -611,12 +605,10 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             client.set_ws_url(ws_url_override)
             logger.info(f"🔗 URL WebSocket personalizado: {ws_url_override}")
 
-        # Injectar callback de renovação OTP
         user_email = user.get('email', '')
         user_acct = user.get('active_account', 'demo')
         client._otp_refresh_callback = lambda: get_otp_ws_url(user_email, user_acct)[0]
 
-        # Callback de actualização de saldo via REST
         def refresh_balance():
             _, bal, cur = get_otp_ws_url(user_email, user_acct)
             return bal, cur
@@ -656,7 +648,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 _save_martingale_state(user_id, bot)
                 strategy.notify_result(action, is_win)
                 
-                # Se o strategy activou STOP GLOBAL, resetar também o martingale
                 if strategy.is_global_stop:
                     bot.reset_martingale()
                     _save_martingale_state(user_id, bot)
@@ -668,7 +659,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             bot.on_tick(tick)
             if strategy:
                 strategy.on_tick(tick)
-            # Alimentar o módulo Forex (NOVO)
             forex_mgr.on_tick(tick)
 
         client.on_tick_callback = tick_callback
@@ -725,12 +715,12 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             'strategy': strategy,
             'candles': [],
             'forex_data': forex_mgr,
-            'forex_signals': forex_signals
+            'forex_signals': forex_signals,
+            'forex_indicators': forex_indicators
         }
 
         def on_candles(candles, req_id=None):
             new_sess['candles'] = candles
-            # Encaminhar também para o módulo Forex (NOVO - com req_id)
             forex_mgr.on_candles({'candles': candles}, req_id=req_id)
 
         client.on_candles_callback = on_candles
@@ -766,13 +756,12 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 bot.start(client)
                 bot.daily_stats['start_balance'] = bot.balance
 
-                # Subscrever ticks de Forex se o utilizador for Pro (NOVO)
                 if user.get('plan') == 'pro':
                     forex_mgr.subscribe_all()
-                    # Pedir velas históricas para alimentar SMA200 (NOVO)
-                    from forex_data import FOREX_SYMBOLS
                     for symbol in FOREX_SYMBOLS:
-                        forex_mgr.request_candles(symbol, granularity=60, count=250)
+                        forex_mgr.request_candles(symbol, granularity=60, count=250)   # M1
+                        forex_mgr.request_candles(symbol, granularity=300, count=200)  # M5
+                        forex_mgr.request_candles(symbol, granularity=900, count=100)  # M15
 
             else:
                 auth_err = getattr(client, 'auth_error', None)
@@ -810,7 +799,6 @@ app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'norep
 if EMAIL_ENABLED:
     mail.init_app(app)
 
-# Rate limiting por utilizador (em vez de IP)
 def get_user_or_ip():
     if 'user_id' in session:
         return f"user:{session['user_id']}"
@@ -832,7 +820,6 @@ def limit_if_available(limit_string):
         return f
     return decorator
 
-# ==================== MIDDLEWARE ====================
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -853,7 +840,6 @@ def require_admin(f):
     return decorated
 
 def require_pro(f):
-    """Middleware que restringe o acesso a utilizadores com plano Pro."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'user_id' not in session:
@@ -1043,11 +1029,7 @@ def reset_password_confirm():
         conn.close()
     return jsonify({'status': 'ok', 'message': 'Senha alterada com sucesso.'})
 
-# ==================== CONEXÃO / TRADING ====================
-
-# --- Função auxiliar para obter OTP com retry ---
 def _get_otp_with_retry(email, account_type, max_attempts=2):
-    """Tenta obter OTP até max_attempts vezes, com 1s entre tentativas."""
     for attempt in range(max_attempts):
         ws_url, balance, currency = get_otp_ws_url(email, account_type)
         if ws_url:
@@ -1074,7 +1056,6 @@ def api_connect():
         if not token:
             return jsonify({'error': 'Token não configurado'}), 400
 
-        # Retry automático de OTP
         ws_url, balance, currency = _get_otp_with_retry(email, user.get('active_account', 'demo'))
         if not ws_url:
             return jsonify({'error': 'Sessão expirada. Clique em Reconectar.'}), 400
@@ -1102,7 +1083,6 @@ def auto_connect():
     if sess and sess['client'].connected and sess['client'].authorized:
         return jsonify({'status': 'already_connected', 'balance': sess['client'].balance})
 
-    # Retry automático de OTP
     ws_url, balance, currency = _get_otp_with_retry(email, user.get('active_account', 'demo'))
     if not ws_url:
         return jsonify({
@@ -1186,10 +1166,8 @@ def status():
     bot_status['last_valid_ping_ms'] = getattr(
         client, '_last_valid_ping_ms', 0
     ) if client else 0
-    # Expor last_tick_seconds_ago e last_tick_epoch
     bot_status['last_tick_seconds_ago'] = client.get_last_tick_seconds_ago() if client else 999
     bot_status['last_tick_epoch'] = getattr(client, '_last_tick_epoch', None) if client else None
-    # Expor auth_error e token_expired
     bot_status['auth_error'] = getattr(client, 'auth_error', None) if client else None
     bot_status['token_expired'] = (
         isinstance(getattr(client, 'auth_error', None), dict) and
@@ -1203,7 +1181,6 @@ def status():
 
     _save_daily_stats_to_db(session.get('user_email'), bot)
 
-    # Incluir estado do módulo Forex
     forex_status = sess.get('forex_data').get_status() if sess.get('forex_data') else {}
 
     return jsonify({
@@ -1225,7 +1202,7 @@ def status():
         'strategy': strategy.get_status() if strategy else {},
         'symbols': config.AVAILABLE_SYMBOLS,
         'loginid': client.loginid if client else None,
-        'forex': forex_status  # NOVO
+        'forex': forex_status
     })
 
 @app.route('/api/daily-stats/sync', methods=['POST'])
@@ -1382,11 +1359,9 @@ def oauth_callback():
         return redirect('/?error=user_not_found')
     email = email_row[0]
 
-    # 1. Guardar token PRIMEIRO
     UserStore.add_token(email, account_type, access_token)
     UserStore.set_active_account(email, account_type)
 
-    # 2. Depois obter OTP e saldo (já usa o token novo)
     ws_url, balance, currency = get_otp_ws_url(email, account_type)
     if not ws_url:
         return redirect('/?error=otp_failed')
@@ -1420,8 +1395,7 @@ def oauth_callback():
 </html>"""
     return make_response(html)
 
-# ==================== TRADING ====================
-
+# ==================== TRADING SINTÉTICOS ====================
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
@@ -1440,7 +1414,6 @@ def trade_digit():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
-        # Verificar contratos ativos e trades pendentes
         client = sess['client']
         if client.pending_trade is not None:
             return jsonify({'error': 'Trade pendente, aguarde'}), 400
@@ -1514,7 +1487,6 @@ def trade_differ():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
-        # Verificar contratos ativos e trades pendentes
         client = sess['client']
         if client.pending_trade is not None:
             return jsonify({'error': 'Trade pendente, aguarde'}), 400
@@ -1585,7 +1557,6 @@ def trade_matches():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
-        # Verificar contratos ativos e trades pendentes
         client = sess['client']
         if client.pending_trade is not None:
             return jsonify({'error': 'Trade pendente, aguarde'}), 400
@@ -1656,7 +1627,6 @@ def trade_zscore():
         if strategy._trade_locked:
             return jsonify({'error': 'Trade em curso — aguarde'}), 400
 
-        # Verificar contratos ativos e trades pendentes
         client = sess['client']
         if client.pending_trade is not None:
             return jsonify({'error': 'Trade pendente, aguarde'}), 400
@@ -1887,7 +1857,6 @@ def credit_referral_commission(user_email, amount):
         conn.close()
 
 # ==================== NOVAS ROTAS FOREX (PLANO PRO) ====================
-
 @app.route('/api/forex/signals')
 @require_pro
 def forex_signals():
@@ -1917,15 +1886,51 @@ def forex_candles(symbol):
     granularity = request.args.get('granularity', 60, type=int)
     count = request.args.get('count', 50, type=int)
 
-    # Pedir velas (serão recebidas assincronamente)
     sess['forex_data'].request_candles(symbol, granularity=granularity, count=count)
-
-    # Tentar devolver as velas já em cache
     candles = sess['forex_data'].get_recent_candles(symbol, count=count)
     return jsonify({'candles': candles, 'symbol': symbol})
 
-# ==================== ROTAS ADMIN (mantidas) ====================
+@app.route('/api/forex/trade', methods=['POST'])
+@require_pro
+@limit_if_available("10 per minute")
+def forex_trade():
+    d = request.json
+    symbol = d.get('symbol', '').strip()
+    direction = d.get('direction', '').strip().upper()
+    amount = float(d.get('amount', 0))
+    duration = int(d.get('duration', 5))
 
+    if direction not in ('BUY', 'SELL'):
+        return jsonify({'error': 'Direção inválida. Use BUY ou SELL.'}), 400
+    if amount < 0.35 or amount > 100:
+        return jsonify({'error': 'Valor entre 0.35 e 100'}), 400
+    if duration < 1 or duration > 10:
+        return jsonify({'error': 'Duração entre 1 e 10 ticks'}), 400
+
+    sess = get_session(session['user_id'])
+    if not sess or not sess['client'].authorized:
+        return jsonify({'error': 'Não conectado à Deriv'}), 400
+
+    client = sess['client']
+
+    if client.pending_trade is not None:
+        return jsonify({'error': 'Já existe um trade pendente'}), 400
+
+    from forex_data import FOREX_SYMBOLS
+    if symbol not in FOREX_SYMBOLS:
+        return jsonify({'error': f'Símbolo inválido. Use: {list(FOREX_SYMBOLS.keys())}'}), 400
+
+    if client.balance and client.balance < amount:
+        return jsonify({'error': 'Saldo insuficiente'}), 400
+
+    ok = client.place_forex_trade(symbol, direction, amount, duration)
+    if not ok:
+        return jsonify({'error': 'Falha ao enviar ordem'}), 500
+
+    logger.info(f"Trade Forex: {direction} {symbol} ${amount}")
+    return jsonify({'status': 'ok', 'message': f'{direction} {symbol} ${amount:.2f} enviado!'})
+
+# ==================== ROTAS ADMIN ====================
 @app.route('/api/admin/users')
 @require_admin
 def admin_users():
@@ -2010,7 +2015,6 @@ def set_markup():
     logger.info(f"Comissão de referral alterada para {pct}%")
     return jsonify({'status': 'ok', 'referral_commission_percentage': pct})
 
-# NOVO: Admin pode alterar o plano de um utilizador
 @app.route('/api/admin/set-plan', methods=['POST'])
 @require_admin
 def set_plan():
@@ -2028,8 +2032,7 @@ def set_plan():
     logger.info(f"Plano de {email} alterado para {plan}")
     return jsonify({'status': 'ok', 'message': f'Plano de {email} alterado para {plan}.'})
 
-# ==================== ROTAS AFILIADO / PAGAMENTO (mantidas) ====================
-
+# ==================== ROTAS AFILIADO / PAGAMENTO ====================
 @app.route('/api/affiliate/stats')
 @require_auth
 def affiliate_stats():
