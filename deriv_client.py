@@ -712,6 +712,66 @@ class DerivWebSocketClient:
                 return False
 
     # ============================================================
+    # NOVA FUNÇÃO: trade para pares Forex
+    # ============================================================
+    def place_forex_trade(self, symbol, direction, amount, duration=5):
+        """
+        Envia uma ordem de compra/venda para um par Forex.
+        direction: 'BUY' -> CALL (sobe), 'SELL' -> PUT (desce)
+        symbol:   ex. 'frxEURUSD'
+        amount:   valor da aposta (USD)
+        duration: duração do contrato em ticks (default 5)
+        """
+        if self.trading_bot and not self.trading_bot.check_risk_limits():
+            logger.warning("🚫 Trade Forex bloqueado pelo stop‑loss diário")
+            return False
+
+        with self._trade_lock:
+            ok, err = self._pre_trade_check()
+            if not ok:
+                logger.warning(f"🚫 Trade Forex bloqueado: {err}")
+                return False
+
+            self._last_trade_time = time.time()
+
+            contract_type = "CALL" if direction.upper() == "BUY" else "PUT"
+
+            req_id = self._next_req()
+            with self._pending_lock:
+                self.pending_trade = {
+                    'amount': amount,
+                    'contract_type': contract_type,
+                    'is_digit': False,
+                    'is_forex': True,          # identificador para callbacks
+                    'symbol': symbol,
+                    'timestamp': time.time(),
+                    'status': 'waiting_proposal',
+                    'req_id': req_id
+                }
+            self.pending_trade_time = time.time()
+
+            logger.info(f"📤 Enviando proposta Forex: {contract_type} {symbol} amount={amount}")
+            try:
+                payload = {
+                    "proposal": 1,
+                    "amount": amount,
+                    "basis": "stake",
+                    "contract_type": contract_type,
+                    "currency": self.currency,
+                    "duration": duration,
+                    "duration_unit": "t",
+                    "symbol": symbol,
+                    "req_id": req_id
+                }
+                self.ws.send(json.dumps(self._build_proposal(payload)))
+                return True
+            except Exception as e:
+                logger.error(f"❌ Erro ao enviar trade Forex: {e}")
+                with self._pending_lock:
+                    self.pending_trade = None
+                return False
+
+    # ============================================================
     # PROCESSAMENTO DE PROPOSTA / BUY / POC
     # ============================================================
     def _on_proposal(self, data):
@@ -764,6 +824,8 @@ class DerivWebSocketClient:
                 is_differ = self.pending_trade.get('is_differ', False)
                 is_matches = self.pending_trade.get('is_matches', False)
                 digit_barrier = self.pending_trade.get('digit_barrier')
+                is_forex = self.pending_trade.get('is_forex', False)
+                forex_symbol = self.pending_trade.get('symbol', self.current_symbol)
 
                 latency_ms = round((time.time() - trade_timestamp) * 1000)
                 logger.info(f"✅ Contrato comprado: cid={cid}, bp={bp}, action={action}, latency={latency_ms}ms")
@@ -789,11 +851,12 @@ class DerivWebSocketClient:
 
                 if self.trading_bot:
                     self.trading_bot.register_trade({
-                        'contract_id': cid, 'symbol': self.current_symbol,
+                        'contract_id': cid, 'symbol': forex_symbol if is_forex else self.current_symbol,
                         'action': action, 'amount': amt, 'price': bp,
                         'result': 'pending', 'is_digit': is_digit,
                         'is_differ': is_differ, 'is_matches': is_matches,
-                        'digit_barrier': digit_barrier
+                        'digit_barrier': digit_barrier,
+                        'is_forex': is_forex
                     })
                 with self._active_trades_lock:
                     self.active_trades[cid] = {
@@ -801,7 +864,8 @@ class DerivWebSocketClient:
                         'timestamp': time.time(), 'action': action,
                         'is_digit': is_digit, 'is_differ': is_differ,
                         'is_matches': is_matches, 'digit_barrier': digit_barrier,
-                        'symbol': self.current_symbol
+                        'symbol': forex_symbol if is_forex else self.current_symbol,
+                        'is_forex': is_forex
                     }
                 try:
                     self._subscribe_contract(cid)
@@ -949,6 +1013,7 @@ class DerivWebSocketClient:
                 'exit_spot': exit_spot,
                 'entry_tick_time': entry_tick_time,
                 'exit_tick_time': exit_tick_time,
+                'is_forex': trade_info.get('is_forex', False),
             })
         with self._active_trades_lock:
             if cid in self.active_trades:
