@@ -1,10 +1,15 @@
+# forex_scorer.py
 import logging
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 class ForexScorer:
-    def __init__(self, weights: Dict[str, int] = None):
+    """
+    Calcula uma pontuação de 0 a 100 para um sinal de Forex,
+    baseada em vários indicadores e filtros.
+    """
+    def __init__(self, weights: Optional[Dict[str, int]] = None):
         self.weights = weights or {
             'trend': 20,
             'rsi': 15,
@@ -21,6 +26,7 @@ class ForexScorer:
     def score(self, ind: dict) -> Tuple[int, str, dict]:
         direction = 'HOLD'
         breakdown = {k: 0 for k in self.weights}
+        total = 0
 
         latest = ind.get('latest_price')
         sma200 = ind.get('sma_200')
@@ -36,18 +42,15 @@ class ForexScorer:
         if latest is None or sma200 is None:
             return 0, 'HOLD', breakdown
 
-        # --- 1. Tendência (EMA50 vs SMA200) ---
-        if ema50 is not None and sma200 is not None:
+        # --- 1. Tendência ---
+        if ema50 is not None:
             if ema50 > sma200:
                 breakdown['trend'] = self.weights['trend']
                 direction = 'BUY'
             elif ema50 < sma200:
                 breakdown['trend'] = self.weights['trend']
                 direction = 'SELL'
-            else:
-                breakdown['trend'] = 0
         else:
-            # fallback: preço vs SMA200
             if latest > sma200:
                 breakdown['trend'] = self.weights['trend'] // 2
                 direction = 'BUY'
@@ -81,7 +84,7 @@ class ForexScorer:
                 adx_factor = min(1.0, (adx - self.adx_minimum) / 20)
                 breakdown['adx'] = int(self.weights['adx'] * adx_factor)
             else:
-                breakdown['adx'] = 0  # lateral
+                breakdown['adx'] = 0
 
         # --- 5. ATR / Volatilidade ---
         if atr is not None and latest > 0:
