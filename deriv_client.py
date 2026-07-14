@@ -90,7 +90,6 @@ class DerivWebSocketClient:
         self._last_buy_contract_id = None
         self._null_sell_price_contracts = set()
 
-        # NOVO: mapeamento de IDs de subscrição por símbolo
         self._tick_subscription_ids = {}
 
     def set_digit_analyzer(self, a): 
@@ -460,12 +459,8 @@ class DerivWebSocketClient:
                     self._close_connection()
                     break
 
-    # ============================================================
-    # CORRIGIDO: cancelar subscrição antiga ao trocar de símbolo
-    # ============================================================
     def change_symbol(self, symbol):
         old_symbol = self.current_symbol
-        # Cancelar subscrição do símbolo anterior
         if old_symbol and old_symbol != symbol and old_symbol in self._tick_subscription_ids:
             try:
                 sub_id = self._tick_subscription_ids.pop(old_symbol, None)
@@ -475,7 +470,6 @@ class DerivWebSocketClient:
                     logger.info(f"🔕 Subscrição de {old_symbol} cancelada (id={sub_id})")
             except Exception as e:
                 logger.error(f"Erro ao cancelar subscrição de {old_symbol}: {e}")
-        # Remove do set de qualquer forma
         self.subscribed_symbols.discard(old_symbol)
 
         self.current_symbol = symbol
@@ -521,20 +515,24 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro subs. ticks: {e}")
 
-    # ============================================================
-    # CORRIGIDO: filtrar ticks por símbolo + capturar subscription id
-    # ============================================================
     def _on_tick(self, data):
         tick = data.get('tick', {})
         if not tick:
             return
-        # Capturar o ID da subscrição
         sub_id = data.get('subscription', {}).get('id')
         symbol = tick.get('symbol', self.current_symbol)
         if sub_id and symbol not in self._tick_subscription_ids:
             self._tick_subscription_ids[symbol] = sub_id
 
-        # Ignorar ticks de símbolos que não sejam o atual
+        # SEMPRE enviar tick para o callback (ForexDataManager precisa disto)
+        if self.on_tick_callback:
+            self.on_tick_callback({
+                'symbol':    symbol,
+                'price':     float(tick.get('quote', 0)),
+                'timestamp': tick.get('epoch', time.time())
+            })
+
+        # Estado de streaming e watchdog só para o símbolo atual
         if symbol != self.current_symbol:
             return
 
@@ -544,12 +542,6 @@ class DerivWebSocketClient:
             logger.info("📡 Estado STREAMING ativado!")
         self._last_tick_time = time.time()
         self._last_tick_epoch = tick.get('epoch', time.time())
-        if self.on_tick_callback:
-            self.on_tick_callback({
-                'symbol':    symbol,
-                'price':     float(tick.get('quote', 0)),
-                'timestamp': self._last_tick_epoch
-            })
 
     def _next_req(self):
         with self._req_lock:
@@ -585,9 +577,6 @@ class DerivWebSocketClient:
             base_payload['underlying_symbol'] = symbol
         return base_payload
 
-    # ============================================================
-    # MÉTODOS DE TRADE
-    # ============================================================
     def place_trade(self, contract_type, amount, is_digit=False):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
@@ -741,10 +730,7 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
-    # ============================================================
-    # CORRIGIDO: duração em minutos para Forex
-    # ============================================================
-    def place_forex_trade(self, symbol, direction, amount, duration=1):
+    def place_forex_trade(self, symbol, direction, amount, duration=5):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade Forex bloqueado pelo stop‑loss diário")
             return False
@@ -773,7 +759,7 @@ class DerivWebSocketClient:
                 }
             self.pending_trade_time = time.time()
 
-            logger.info(f"📤 Enviando proposta Forex: {contract_type} {symbol} amount={amount} duration={duration}m")
+            logger.info(f"📤 Enviando proposta Forex: {contract_type} {symbol} amount={amount} duration={duration}t")
             try:
                 payload = {
                     "proposal": 1,
@@ -782,7 +768,7 @@ class DerivWebSocketClient:
                     "contract_type": contract_type,
                     "currency": self.currency,
                     "duration": duration,
-                    "duration_unit": "m",       # CORRIGIDO: minutos em vez de ticks
+                    "duration_unit": "t",
                     "symbol": symbol,
                     "req_id": req_id
                 }
@@ -794,9 +780,6 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
-    # ============================================================
-    # PROCESSAMENTO DE PROPOSTA / BUY / POC
-    # ============================================================
     def _on_proposal(self, data):
         with self._pending_lock:
             if self.pending_trade is None:
@@ -806,8 +789,10 @@ class DerivWebSocketClient:
                 logger.debug(f"📨 req_id diferente: {data.get('req_id')} != {self.pending_trade.get('req_id')}")
                 return
             if data.get('error'):
-                logger.error(f"❌ Erro na proposta: {data['error']}")
-                self.pending_trade = None
+                err = data['error']
+                logger.error(f"❌ Erro na proposta: {err}")
+                self.pending_trade['error'] = err
+                self.pending_trade['status'] = 'proposal_error'
                 return
             p = data.get('proposal', {})
             pid, ask = p.get('id'), p.get('ask_price')
@@ -819,6 +804,7 @@ class DerivWebSocketClient:
                 logger.warning("BUY já enviado")
                 return
             self.pending_trade['proposal_id'] = pid
+            self.pending_trade['status'] = 'buying'
             logger.info(f"📥 Proposta recebida: id={pid}, ask_price={ask}")
             try:
                 self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
@@ -1076,9 +1062,6 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao pedir velas: {e}")
 
-    # ============================================================
-    # CORRIGIDO: passar req_id ao callback
-    # ============================================================
     def _on_candles(self, data):
         candles = data.get('candles', [])
         if candles:
@@ -1098,6 +1081,19 @@ class DerivWebSocketClient:
             if age > max_age:
                 return None
             return self._candles_cache['data']
+
+    def get_pending_trade_status(self):
+        with self._pending_lock:
+            if self.pending_trade is None:
+                return None
+            return {
+                'status': self.pending_trade.get('status', 'unknown'),
+                'error': self.pending_trade.get('error'),
+                'contract_type': self.pending_trade.get('contract_type'),
+                'amount': self.pending_trade.get('amount'),
+                'symbol': self.pending_trade.get('symbol', self.current_symbol),
+                'timestamp': self.pending_trade.get('timestamp')
+            }
 
     def request_deposit(self, amount, currency, method):
         return {'status': 'pending', 'message': f'Depósito ${amount} solicitado.'}
