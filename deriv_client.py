@@ -93,6 +93,7 @@ class DerivWebSocketClient:
         # NOVO: mapeamento de IDs de subscrição por símbolo
         self._tick_subscription_ids = {}
 
+    # ------------------------------------------------------------
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
 
@@ -465,7 +466,6 @@ class DerivWebSocketClient:
     # ============================================================
     def change_symbol(self, symbol):
         old_symbol = self.current_symbol
-        # Cancelar subscrição do símbolo anterior
         if old_symbol and old_symbol != symbol and old_symbol in self._tick_subscription_ids:
             try:
                 sub_id = self._tick_subscription_ids.pop(old_symbol, None)
@@ -475,7 +475,6 @@ class DerivWebSocketClient:
                     logger.info(f"🔕 Subscrição de {old_symbol} cancelada (id={sub_id})")
             except Exception as e:
                 logger.error(f"Erro ao cancelar subscrição de {old_symbol}: {e}")
-        # Remove do set de qualquer forma
         self.subscribed_symbols.discard(old_symbol)
 
         self.current_symbol = symbol
@@ -528,7 +527,6 @@ class DerivWebSocketClient:
         tick = data.get('tick', {})
         if not tick:
             return
-        # Capturar o ID da subscrição
         sub_id = data.get('subscription', {}).get('id')
         symbol = tick.get('symbol', self.current_symbol)
         if sub_id and symbol not in self._tick_subscription_ids:
@@ -585,6 +583,9 @@ class DerivWebSocketClient:
             base_payload['underlying_symbol'] = symbol
         return base_payload
 
+    # ============================================================
+    # MÉTODOS DE TRADE
+    # ============================================================
     def place_trade(self, contract_type, amount, is_digit=False):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
@@ -788,6 +789,9 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
+    # ============================================================
+    # PROCESSAMENTO DE PROPOSTA / BUY / POC
+    # ============================================================
     def _on_proposal(self, data):
         with self._pending_lock:
             if self.pending_trade is None:
