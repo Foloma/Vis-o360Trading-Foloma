@@ -667,7 +667,8 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
 
-is_production = os.environ.get('FLASK_ENV', 'production') == 'production'
+# CORRIGIDO: usar variáveis de ambiente explícitas em vez de FLASK_ENV deprecado
+is_production = os.environ.get('RENDER', 'false').lower() == 'true' or os.environ.get('FLASK_DEBUG', '0') == '0'
 app.config['SESSION_COOKIE_SECURE'] = is_production
 app.config['SESSION_COOKIE_SAMESITE'] = 'None' if is_production else 'Lax'
 
@@ -1540,7 +1541,7 @@ def forex_trade():
     symbol = d.get('symbol', '').strip()
     direction = d.get('direction', '').strip().upper()
     amount = float(d.get('amount', 0))
-    duration = int(d.get('duration', 5))
+    duration = int(d.get('duration', 1))
     if direction not in ('BUY', 'SELL'):
         return jsonify({'error': 'Direção inválida. Use BUY ou SELL.'}), 400
     if amount < 0.35 or amount > 100:
