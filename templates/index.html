@@ -482,7 +482,7 @@ let _lastValidPing = 0;
 let _prevDifferAvail = false;
 let _prevParityAvail = false;
 
-// Estado Forex (NOVO)
+// Estado Forex
 let _userPlan = 'free';
 let _forexPairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'EUR/GBP', 'AUD/USD', 'USD/CAD'];
 let _forexCurPair = 'EUR/USD';
@@ -490,6 +490,27 @@ let _forexChart = null;
 let _forexCandleSeries = null;
 let _forexGranularity = 60;
 let _forexSectionVisible = false;
+
+// ══════════════ THROTTLE DO DÍGITO (10 SEGUNDOS) ══════════════
+let _ultimoDigito = null;
+let _ultimoParidade = null;
+let _timerDigito = null;
+
+function iniciarThrottleDigito() {
+  if (_timerDigito) clearInterval(_timerDigito);
+  _timerDigito = setInterval(() => {
+    const bd = document.getElementById('bigD');
+    const bp = document.getElementById('bigP');
+    if (bd && _ultimoDigito !== null) {
+      bd.textContent = _ultimoDigito;
+      bd.className = 'big-d ' + (_ultimoDigito % 2 !== 0 ? 'odd' : 'even');
+    }
+    if (bp && _ultimoParidade !== null) {
+      bp.textContent = _ultimoParidade;
+      bp.className = 'big-p ' + (_ultimoParidade === 'ÍMPAR' ? 'odd' : 'even');
+    }
+  }, 10000);
+}
 
 // Mapeamento de símbolos do frontend para os códigos da Deriv
 const FOREX_SYMBOL_MAP = {
@@ -717,9 +738,6 @@ async function updateAll(){
 
     if (bot.has_pending_trade && !_tradePending && !_tradeSubmitted) {
         _tradePending = true;
-        $_( 'bigD').textContent = '⏳';
-        $_( 'bigD').className = 'big-d wait';
-        $_( 'bigP').textContent = 'AGUARDANDO RESULTADO';
     }
     if (!bot.has_pending_trade && _tradePending && !bot.last_trade_result) {
         _tradePending = false;
@@ -731,7 +749,7 @@ async function updateAll(){
         const pingEl = $_( 'conSt');
         if (pingEl && isConnected) {
             const cor = _lastValidPing < 100 ? 'var(--accent)' : _lastValidPing < 250 ? 'var(--warning)' : 'var(--danger)';
-            pingEl.innerHTML = `✅ Ping: <span style="color:${cor}">${_lastValidPing}ms</span> | Reconexões: ...`;
+            pingEl.innerHTML = `✅ Ping: <span style="color:${cor}">${_lastValidPing}ms</span>`;
         }
     }
 
@@ -754,11 +772,9 @@ async function updateAll(){
         _tradePending = false;
         clearTimeout(_tradeSubmittedTimer);
         clearTimeout(_tradePendingTimer);
-        const bd=$_('bigD'), bp=$_('bigP');
         const displayDigit = ltr.exit_digit !== undefined ? ltr.exit_digit : ltr.digit;
-        bd.textContent = displayDigit !== undefined ? displayDigit : '?';
-        bd.className = 'big-d ' + (ltr.is_win ? 'odd' : 'even');
-        bp.textContent = (ltr.is_win ? 'GANHOU' : 'PERDEU');
+        _ultimoDigito = displayDigit;
+        _ultimoParidade = (ltr.is_win ? 'GANHOU' : 'PERDEU');
         const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
         const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
         const digitInfo = ltr.exit_digit !== undefined ? ` | Dígito: ${ltr.exit_digit}` : '';
@@ -828,9 +844,6 @@ function updateDigits(digits){
   const recent=digits.recent||[], counter=digits.digit_counter||0;
 
   if(_tradePending && !_tradeSubmitted){
-    $_( 'bigD').textContent = '⏳';
-    $_( 'bigD').className = 'big-d wait';
-    $_( 'bigP').textContent = 'AGUARDANDO RESULTADO';
     return;
   }
 
@@ -839,12 +852,15 @@ function updateDigits(digits){
   if(recent.length>0 && (recent.length!==lastDigitCount || counter!==lastDigitCounter)){
     lastDigitCount=recent.length; lastDigitCounter=counter;
     const newest=recent[recent.length-1], isOdd=newest%2!==0;
-    const bd=$_('bigD'), bp=$_('bigP');
-    bd.textContent=newest; bd.className='big-d '+(isOdd?'odd':'even');
-    bp.textContent=isOdd?'ÍMPAR':'PAR'; bp.className='big-p '+(isOdd?'odd':'even');
+    
+    // Actualiza o histórico (imediato) mas NÃO o dígito grande
     let html=''; recent.forEach((d)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
     $_( 'histRow').innerHTML=html;
     $_( 'histScroll').scrollLeft=$_('histScroll').scrollWidth;
+    
+    // Guarda para o throttle de 10s
+    _ultimoDigito = newest;
+    _ultimoParidade = isOdd ? 'ÍMPAR' : 'PAR';
     
     const allDigits = recent;
     if(allDigits.length > 0) {
@@ -1252,6 +1268,7 @@ function doLogin(){
     initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles,3000); startPolling();
     checkUserPlan();
     initForexSyms();
+    iniciarThrottleDigito();  // INICIA O THROTTLE DOS DÍGITOS
     if(d.user?.has_deriv_token) setTimeout(autoConnect,1500);
   }).catch(()=>{ _loggingIn=false; $_( 'authErr').textContent='Erro de rede'; });
 }
@@ -1267,6 +1284,7 @@ function doRegister(){
     initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles,3000); startPolling(); toast('✅ Conta criada!','win',4000);
     checkUserPlan();
     initForexSyms();
+    iniciarThrottleDigito();  // INICIA O THROTTLE DOS DÍGITOS
   }).catch(()=>{ _registering=false; $_( 'authErr').textContent='Erro de rede'; });
 }
 function doReset(){
@@ -1317,7 +1335,7 @@ function updatePingDisplay(){
   const pingEl = $_( 'conSt');
   if (!pingEl) return;
   const cor = _lastValidPing < 100 ? 'var(--accent)' : _lastValidPing < 250 ? 'var(--warning)' : 'var(--danger)';
-  pingEl.innerHTML = `✅ Ping: <span style="color:${cor}">${_lastValidPing}ms</span> | Reconexões: ...`;
+  pingEl.innerHTML = `✅ Ping: <span style="color:${cor}">${_lastValidPing}ms</span>`;
 }
 
 // ══════════ FUNÇÕES FOREX ══════════
@@ -1377,6 +1395,7 @@ async function loadForexSignals(){
                         <span class="forex-confidence">${s.confidence}% confiança</span>
                     </div>
                     <div class="forex-reason">${s.reason}</div>
+                    <button onclick="executarTradeForex('${s.symbol}','${s.direction}')" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR</button>
                 </div>
             `;
         });
@@ -1449,6 +1468,33 @@ function chgForexPair(pair, el){
     loadForexCandles();
 }
 
+// ══════════ FUNÇÃO PARA EXECUTAR TRADE FOREX ══════════
+async function executarTradeForex(symbol, direction) {
+    const amount = prompt('Valor da aposta (USD):', '1');
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) return;
+    
+    try {
+        const r = await fetch('/api/forex/trade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: symbol,
+                direction: direction,
+                amount: parseFloat(amount),
+                duration: 5
+            })
+        });
+        const d = await r.json();
+        if (d.error) {
+            toast('❌ ' + d.error, 'loss', 5000);
+        } else {
+            toast('✅ ' + d.message, 'win', 4000);
+        }
+    } catch (e) {
+        toast('❌ Erro ao enviar ordem', 'loss');
+    }
+}
+
 // ══════════ INICIALIZAÇÃO ══════════
 setInterval(()=>{if(isConnected)loadCandles();},10000);
 setInterval(updateScoreboard,30000); updateScoreboard();
@@ -1473,6 +1519,7 @@ try {
       initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles,3000); startPolling();
       checkUserPlan();
       initForexSyms();
+      iniciarThrottleDigito();  // INICIA O THROTTLE DOS DÍGITOS
       if(d.user?.has_deriv_token) setTimeout(autoConnect,1500); updateTokenDisplay();
     }
   }).catch(()=>{});
