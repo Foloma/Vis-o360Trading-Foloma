@@ -3,7 +3,13 @@ from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+
 class ForexScorer:
+    """
+    Calcula uma pontuação de 0 a 100 para um sinal de Forex,
+    baseada em vários indicadores e filtros.
+    """
+
     def __init__(self, weights: Optional[Dict[str, int]] = None):
         self.weights = weights or {
             'trend': 20,
@@ -15,12 +21,19 @@ class ForexScorer:
             'momentum': 10,
             'market_quality': 5
         }
-        self.threshold = 60      # ← reduzido de 75 para 60
-        self.adx_minimum = 20
+        self.threshold = 30          # ← sinais aparecem mesmo com poucos dados
+        self.adx_minimum = 15        # ← menos exigente
 
     def score(self, ind: dict) -> Tuple[int, str, dict]:
+        """
+        Recebe um dicionário de indicadores e devolve:
+        - score total (0‑100)
+        - direção ('BUY', 'SELL' ou 'HOLD')
+        - dicionário com a contribuição de cada indicador
+        """
         direction = 'HOLD'
         breakdown = {k: 0 for k in self.weights}
+
         latest = ind.get('latest_price')
         sma200 = ind.get('sma_200')
         ema50 = ind.get('ema_50')
@@ -32,37 +45,47 @@ class ForexScorer:
         upper, middle, lower = ind.get('bollinger') or (None, None, None)
         momentum = ind.get('momentum_10')
 
-        if latest is None or sma200 is None:
+        if latest is None:
             return 0, 'HOLD', breakdown
 
-        # --- Tendência ---
-        if ema50 is not None:
-            if ema50 > sma200:
-                breakdown['trend'] = self.weights['trend']
-                direction = 'BUY'
-            elif ema50 < sma200:
-                breakdown['trend'] = self.weights['trend']
-                direction = 'SELL'
+        # --- 1. Tendência (SMA200 / EMA50) ---
+        if sma200 is None:
+            # fallback: usar apenas momentum
+            if momentum is not None:
+                if momentum > 0:
+                    breakdown['trend'] = 10
+                    direction = 'BUY'
+                elif momentum < 0:
+                    breakdown['trend'] = 10
+                    direction = 'SELL'
         else:
-            if latest > sma200:
-                breakdown['trend'] = self.weights['trend'] // 2
-                direction = 'BUY'
-            elif latest < sma200:
-                breakdown['trend'] = self.weights['trend'] // 2
-                direction = 'SELL'
+            if ema50 is not None:
+                if ema50 > sma200:
+                    breakdown['trend'] = self.weights['trend']
+                    direction = 'BUY'
+                elif ema50 < sma200:
+                    breakdown['trend'] = self.weights['trend']
+                    direction = 'SELL'
+            else:
+                if latest > sma200:
+                    breakdown['trend'] = self.weights['trend'] // 2
+                    direction = 'BUY'
+                elif latest < sma200:
+                    breakdown['trend'] = self.weights['trend'] // 2
+                    direction = 'SELL'
 
-        # --- RSI ---
+        # --- 2. RSI ---
         if rsi is not None:
-            if direction == 'BUY' and rsi < 30:
+            if direction == 'BUY' and rsi < 40:
                 breakdown['rsi'] = self.weights['rsi']
-            elif direction == 'SELL' and rsi > 70:
+            elif direction == 'SELL' and rsi > 60:
                 breakdown['rsi'] = self.weights['rsi']
-            elif 40 <= rsi <= 60:
+            elif 45 <= rsi <= 55:
                 breakdown['rsi'] = 0
             else:
                 breakdown['rsi'] = self.weights['rsi'] // 2
 
-        # --- MACD ---
+        # --- 3. MACD ---
         if macd_line is not None and signal_line is not None:
             if direction == 'BUY' and macd_line > signal_line:
                 breakdown['macd'] = self.weights['macd']
@@ -71,47 +94,45 @@ class ForexScorer:
             else:
                 breakdown['macd'] = 0
 
-        # --- ADX ---
+        # --- 4. ADX ---
         if adx is not None:
             if adx > self.adx_minimum:
-                adx_factor = min(1.0, (adx - self.adx_minimum) / 20)
+                adx_factor = min(1.0, (adx - self.adx_minimum) / 15)
                 breakdown['adx'] = int(self.weights['adx'] * adx_factor)
             else:
                 breakdown['adx'] = 0
 
-        # --- ATR ---
+        # --- 5. ATR / Volatilidade ---
         if atr is not None and latest > 0:
             atr_pct = (atr / latest) * 100
-            if 0.05 <= atr_pct <= 0.5:
+            if atr_pct >= 0.03:
                 breakdown['atr_volatility'] = self.weights['atr_volatility']
-            elif atr_pct > 0.5:
-                breakdown['atr_volatility'] = self.weights['atr_volatility'] // 2
             else:
                 breakdown['atr_volatility'] = 0
 
-        # --- Bollinger ---
+        # --- 6. Bollinger ---
         if upper and lower:
-            if direction == 'BUY' and latest <= lower * 1.002:
+            if direction == 'BUY' and latest <= lower * 1.005:
                 breakdown['bollinger'] = self.weights['bollinger']
-            elif direction == 'SELL' and latest >= upper * 0.998:
+            elif direction == 'SELL' and latest >= upper * 0.995:
                 breakdown['bollinger'] = self.weights['bollinger']
 
-        # --- Momentum ---
+        # --- 7. Momentum ---
         if momentum is not None:
             if direction == 'BUY' and momentum > 0:
                 breakdown['momentum'] = self.weights['momentum']
             elif direction == 'SELL' and momentum < 0:
                 breakdown['momentum'] = self.weights['momentum']
 
-        # --- Market Quality ---
-        mqi = 0
+        # --- 8. Market Quality (simplificado) ---
+        mqi = 20  # base
         if adx and adx > self.adx_minimum:
-            mqi += 40
+            mqi += 30
         if rsi and ((direction == 'BUY' and rsi < 50) or (direction == 'SELL' and rsi > 50)):
-            mqi += 30
+            mqi += 20
         if breakdown['atr_volatility'] > 0:
-            mqi += 30
-        breakdown['market_quality'] = int(self.weights['market_quality'] * (mqi / 100))
+            mqi += 10
+        breakdown['market_quality'] = int(self.weights['market_quality'] * (mqi / 60))
 
         total = sum(breakdown.values())
         total = min(total, 100)
