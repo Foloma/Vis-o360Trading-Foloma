@@ -31,7 +31,6 @@
     .menu-close { background: none; border: none; color: var(--text); font-size: 20px; cursor: pointer; }
     .menu-item { padding: 10px 0; color: var(--text); display: block; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; }
     .menu-item:hover { color: var(--accent); }
-    .menu-item.pro-locked { color: var(--muted); }
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 999; display: none; }
     .overlay.show { display: block; }
     .container { max-width: 500px; margin: auto; padding: 8px; }
@@ -111,8 +110,6 @@
     .strat-badge.ready { background: var(--accent); color: #000; }
     .strat-badge.blocked { background: var(--danger); color: #fff; }
     .strat-badge.warning { background: var(--warning); color: #000; }
-    .strat-info { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
-    .strat-info .dot { width: 6px; height: 6px; }
     .latency-warning { background: var(--warning); color: #000; font-size: 10px; padding: 3px 8px; border-radius: 6px; font-weight: 700; display: none; text-align: center; margin-top: 4px; }
     .latency-warning.visible { display: block; }
     .block-reason { font-size: 9px; color: var(--warning); text-align: center; margin-top: 2px; min-height: 14px; }
@@ -122,6 +119,7 @@
 
     .forex-signal-card { background: #020617; border-radius: 8px; padding: 10px; margin-bottom: 6px; border-left: 3px solid var(--accent); }
     .forex-signal-card.sell { border-left-color: var(--danger); }
+    .forex-signal-card.liquidation { border-left-color: var(--purple); }
     .forex-pair { font-weight: 700; font-size: 13px; }
     .forex-direction { font-size: 12px; font-weight: 700; }
     .forex-direction.buy { color: var(--accent); }
@@ -129,6 +127,12 @@
     .forex-confidence { font-size: 10px; color: var(--muted); }
     .forex-reason { font-size: 9px; color: var(--muted); margin-top: 2px; }
     .upgrade-banner { background: linear-gradient(135deg, var(--purple), var(--accent)); padding: 12px; border-radius: 8px; text-align: center; color: #000; font-weight: 700; margin-bottom: 8px; }
+
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); background: #00ffcc; }
+        100% { transform: scale(1); }
+    }
 
     @media (max-width: 400px) {
       .differ-btn, .matches-btn, .zscore-btn { padding: 10px 8px; font-size: 12px; }
@@ -150,7 +154,7 @@
   <div class="menu-header"><span style="color:var(--accent);font-weight:bold">MENU</span><button class="menu-close" onclick="toggleMenu()">✕</button></div>
   <div id="userNameDisplay" style="padding:8px 0;color:var(--accent);font-size:12px;font-weight:600"></div>
   <div class="menu-item" onclick="showSec('dashboard')">📊 Dashboard</div>
-  <div class="menu-item" id="forexMenuItem" style="display:none" onclick="showSec('forex')">💱 Forex</div>
+  <div class="menu-item" id="forexMenuItem" onclick="showSec('forex')">💱 Forex</div>
   <div class="menu-item" onclick="showSec('affiliate')">🔗 Afiliado</div>
   <div class="menu-item" onclick="showSec('history')">📋 Histórico</div>
   <div class="menu-item" onclick="showSec('payment')">💰 Depósito/Saque</div>
@@ -268,6 +272,7 @@
       </div>
       <div id="conSt" style="text-align:center;font-size:10px;color:#ffaa00"></div>
       <div id="connQuality" style="font-size:10px;text-align:center;margin-top:2px"></div>
+      <div id="latencyIndicator" style="text-align:center;margin-top:2px;"></div>
       <div class="latency-warning" id="latencyWarning">⚠️ Latência alta</div>
       <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:2px">Preço: <span id="priceEl" style="color:var(--accent)">---</span></div>
       <div id="strategyStatus" style="margin-top:6px; font-size:10px;"></div>
@@ -306,6 +311,7 @@
         <div class="big-p wait" id="bigP">AGUARDANDO</div>
         <div id="cdown" style="color:#ffaa00;font-size:12px;margin-top:4px">⏱ 10 ticks</div>
       </div>
+      <div id="cycleBlocker" style="display:none;text-align:center;color:var(--warning);font-size:11px;margin-bottom:4px;"></div>
       <div id="seqInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
       <div id="entropyInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
       <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
@@ -331,7 +337,7 @@
       <div class="freq-grid" id="freqGrid"></div>
 
       <div class="trade-row" style="margin-top:6px">
-        <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100">
+        <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" onfocus="this.dataset.userEdited='true'" onchange="this.dataset.userEdited='true'">
         <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')" style="padding:10px 14px">ÍMPAR</button>
         <button class="btn-sell" id="btnEven" onclick="tradeDigit('even')" style="padding:10px 14px">PAR</button>
       </div>
@@ -375,7 +381,7 @@
     </div>
   </div>
 
-  <!-- ==================== NOVA SECÇÃO FOREX ==================== -->
+  <!-- ==================== SECÇÃO FOREX ==================== -->
   <div id="forex-section" class="hidden">
     <div class="card">
       <div class="card-title">💱 SINAIS FOREX <span style="font-size:9px;color:var(--accent)">Day Trade</span></div>
@@ -488,38 +494,21 @@ let _forexPairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'EUR/GBP', 'AUD/USD', 'USD/C
 let _forexCurPair = 'EUR/USD';
 let _forexChart = null;
 let _forexCandleSeries = null;
+let _forexUpperBand = null, _forexMiddleBand = null, _forexLowerBand = null;
 let _forexGranularity = 60;
 let _forexSectionVisible = false;
 
-// ══════════════ THROTTLE DO DÍGITO (10 SEGUNDOS) ══════════════
+// Throttle dígito
 let _ultimoDigito = null;
 let _ultimoParidade = null;
 let _timerDigito = null;
 
-function iniciarThrottleDigito() {
-  if (_timerDigito) clearInterval(_timerDigito);
-  _timerDigito = setInterval(() => {
-    const bd = document.getElementById('bigD');
-    const bp = document.getElementById('bigP');
-    if (bd && _ultimoDigito !== null) {
-      bd.textContent = _ultimoDigito;
-      bd.className = 'big-d ' + (_ultimoDigito % 2 !== 0 ? 'odd' : 'even');
-    }
-    if (bp && _ultimoParidade !== null) {
-      bp.textContent = _ultimoParidade;
-      bp.className = 'big-p ' + (_ultimoParidade === 'ÍMPAR' ? 'odd' : 'even');
-    }
-  }, 10000);
-}
+// Sugestão de valor
+let _suggestedAmount = 0.35;
 
-// Mapeamento de símbolos do frontend para os códigos da Deriv
 const FOREX_SYMBOL_MAP = {
-    'EUR/USD': 'frxEURUSD',
-    'GBP/USD': 'frxGBPUSD',
-    'USD/JPY': 'frxUSDJPY',
-    'EUR/GBP': 'frxEURGBP',
-    'AUD/USD': 'frxAUDUSD',
-    'USD/CAD': 'frxUSDCAD'
+    'EUR/USD': 'frxEURUSD', 'GBP/USD': 'frxGBPUSD', 'USD/JPY': 'frxUSDJPY',
+    'EUR/GBP': 'frxEURGBP', 'AUD/USD': 'frxAUDUSD', 'USD/CAD': 'frxUSDCAD'
 };
 
 function $_(id) { return document.getElementById(id); }
@@ -529,35 +518,28 @@ function toast(msg,type='info',ms=3500){
   t.className='toast show '+type; t.innerHTML=msg;
   clearTimeout(t._t); t._t=setTimeout(()=>{t.className='toast';},ms);
 }
+
 function playBeep(){
     try{
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(800, ctx.currentTime);
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'sine'; osc.frequency.setValueAtTime(800, ctx.currentTime);
         gain.gain.setValueAtTime(0.3, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3);
     }catch(e){}
 }
+
 function openGuide(){ const el=$_('guideModal'); if(el){ el.style.display='flex'; document.body.classList.add('modal-open'); } }
 function closeGuide(){ const el=$_('guideModal'); if(el){ el.style.display='none'; document.body.classList.remove('modal-open'); } }
 function closeAuthModal(){ const el=$_('authModal'); if(el){ el.style.display='none'; document.body.classList.remove('modal-open'); } }
 function scrollToSection(id){ const el=$_(id); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); document.querySelectorAll('.guide-nav .tf-btn').forEach(b=>b.classList.remove('active')); if(event&&event.target) event.target.classList.add('active'); }
 
-function startPolling(){ 
-    if(_isPolling) return; 
-    _isPolling = true;
-    scheduleNextPoll(); 
-}
-function stopPolling(){ 
-    _isPolling = false;
-    if(_updateInterval){ clearTimeout(_updateInterval); _updateInterval=null; } 
-}
+function startPolling(){ if(_isPolling) return; _isPolling = true; scheduleNextPoll(); }
+function stopPolling(){ _isPolling = false; if(_updateInterval){ clearTimeout(_updateInterval); _updateInterval=null; } }
+
 function scheduleNextPoll(){
   if(!_isPolling) return;
   const d = isConnected ? 3000 : 8000;
@@ -728,6 +710,7 @@ async function updateAll(){
 
     if (_lastValidPing > 0 || bot.last_valid_ping_ms) {
         _lastValidPing = bot.last_valid_ping_ms || _lastValidPing;
+        updateLatencyIndicator(_lastValidPing);
         const quality = _lastValidPing < 80 ? '🟢 Excelente' 
                       : _lastValidPing < 150 ? '🟡 Boa' 
                       : _lastValidPing < 250 ? '🟠 Média' 
@@ -735,6 +718,8 @@ async function updateAll(){
         const qEl = $_('connQuality');
         if(qEl && isConnected) qEl.textContent = `Conexão: ${quality} (${_lastValidPing}ms)`;
     }
+
+    updateSuggestedAmount(bot.balance || 0);
 
     if (bot.has_pending_trade && !_tradePending && !_tradeSubmitted) {
         _tradePending = true;
@@ -756,6 +741,7 @@ async function updateAll(){
     if(data.digits){
       updateDigits(data.digits);
       if(data.digits.digit_frequencies) updateFreqGrid(data.digits.digit_frequencies,data.digits.least_frequent_digit,data.digits.most_frequent_digit);
+      updateCycleBlocker(data.digits.ticks_remaining);
     }
     updateHistSummary(bot);
     if(!candleChart) initCandleChart();
@@ -843,22 +829,17 @@ function updateDigits(digits){
   $_( 'cdown').textContent=`⏱ ${tr} tick${tr!==1?'s':''}`;
   const recent=digits.recent||[], counter=digits.digit_counter||0;
 
-  if(_tradePending && !_tradeSubmitted){
-    return;
-  }
-
+  if(_tradePending && !_tradeSubmitted){ return; }
   if(_showTradeResult){ return; }
 
   if(recent.length>0 && (recent.length!==lastDigitCount || counter!==lastDigitCounter)){
     lastDigitCount=recent.length; lastDigitCounter=counter;
     const newest=recent[recent.length-1], isOdd=newest%2!==0;
     
-    // Actualiza o histórico (imediato) mas NÃO o dígito grande
     let html=''; recent.forEach((d)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
     $_( 'histRow').innerHTML=html;
     $_( 'histScroll').scrollLeft=$_('histScroll').scrollWidth;
     
-    // Guarda para o throttle de 10s
     _ultimoDigito = newest;
     _ultimoParidade = isOdd ? 'ÍMPAR' : 'PAR';
     
@@ -929,12 +910,8 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot){
   updateSignalTicks('differ', strategy.differ_ticks_left);
   updateSignalTicks('matches', strategy.matches_ticks_left);
 
-  if(!_prevDifferAvail && strategy.differ_available){
-      playBeep();
-  }
-  if(!_prevParityAvail && strategy.parity_available){
-      playBeep();
-  }
+  if(!_prevDifferAvail && strategy.differ_available){ playBeep(); }
+  if(!_prevParityAvail && strategy.parity_available){ playBeep(); }
   _prevDifferAvail = strategy.differ_available;
   _prevParityAvail = strategy.parity_available;
 
@@ -978,9 +955,7 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot){
   $_( 'btnMatches').disabled = !strategy.matches_available || tradeLocked;
 
   const matchesReasonEl=$_('matchesReason');
-  if (matchesReasonEl) {
-    matchesReasonEl.textContent = strategy.matches_reason || '';
-  }
+  if (matchesReasonEl) { matchesReasonEl.textContent = strategy.matches_reason || ''; }
 
   const btnDiffer=$_('btnDiffer');
   if (btnDiffer) {
@@ -1059,10 +1034,7 @@ async function tradeDiffer(){
       _tradePending = true;
       clearTimeout(_tradePendingTimer);
       _tradePendingTimer = setTimeout(() => {
-        if (_tradePending) { 
-          _tradePending = false; 
-          toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000);
-        }
+        if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
       }, 10000);
       toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
     }
@@ -1090,10 +1062,7 @@ async function tradeMatches(){
       _tradePending = true;
       clearTimeout(_tradePendingTimer);
       _tradePendingTimer = setTimeout(() => {
-        if (_tradePending) { 
-          _tradePending = false; 
-          toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000);
-        }
+        if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
       }, 10000);
       toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
     }
@@ -1121,10 +1090,7 @@ async function tradeZscore(){
       _tradePending = true;
       clearTimeout(_tradePendingTimer);
       _tradePendingTimer = setTimeout(() => {
-        if (_tradePending) { 
-          _tradePending = false; 
-          toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000);
-        }
+        if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
       }, 10000);
       toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
     }
@@ -1153,10 +1119,7 @@ async function connectWithDeriv() {
         if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
         localStorage.removeItem('oauth_result');
         const popup = window.open(d.url, 'derivOAuth', 'width=800,height=700');
-        if (!popup) {
-            toast('⚠️ Pop‑up bloqueado. Permita janelas emergentes.', 'warning', 5000);
-            return;
-        }
+        if (!popup) { toast('⚠️ Pop‑up bloqueado. Permita janelas emergentes.', 'warning', 5000); return; }
         const checkResult = setInterval(async () => {
             const result = localStorage.getItem('oauth_result');
             const ts = parseInt(localStorage.getItem('oauth_ts') || '0');
@@ -1268,7 +1231,7 @@ function doLogin(){
     initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles,3000); startPolling();
     checkUserPlan();
     initForexSyms();
-    iniciarThrottleDigito();  // INICIA O THROTTLE DOS DÍGITOS
+    iniciarThrottleDigito();
     if(d.user?.has_deriv_token) setTimeout(autoConnect,1500);
   }).catch(()=>{ _loggingIn=false; $_( 'authErr').textContent='Erro de rede'; });
 }
@@ -1284,7 +1247,7 @@ function doRegister(){
     initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles,3000); startPolling(); toast('✅ Conta criada!','win',4000);
     checkUserPlan();
     initForexSyms();
-    iniciarThrottleDigito();  // INICIA O THROTTLE DOS DÍGITOS
+    iniciarThrottleDigito();
   }).catch(()=>{ _registering=false; $_( 'authErr').textContent='Erro de rede'; });
 }
 function doReset(){
@@ -1338,71 +1301,99 @@ function updatePingDisplay(){
   pingEl.innerHTML = `✅ Ping: <span style="color:${cor}">${_lastValidPing}ms</span>`;
 }
 
-// ══════════ FUNÇÕES FOREX ══════════
-async function checkUserPlan(){
-    try{
-        const r = await fetch('/api/auth/status');
-        const d = await r.json();
-        if(d.authenticated && d.user){
-            _userPlan = d.user.plan || 'free';
-            const forexMenuItem = $_('forexMenuItem');
-            if(forexMenuItem){
-                forexMenuItem.style.display = (_userPlan === 'pro') ? 'block' : 'none';
-            }
-        }
-    }catch(e){}
+// ══════════ NOVAS FUNÇÕES ══════════
+function iniciarThrottleDigito() {
+  if (_timerDigito) clearInterval(_timerDigito);
+  _timerDigito = setInterval(() => {
+    const bd = $_('bigD'), bp = $_('bigP');
+    if (bd && _ultimoDigito !== null) {
+      bd.textContent = _ultimoDigito;
+      bd.className = 'big-d ' + (_ultimoDigito % 2 !== 0 ? 'odd' : 'even');
+    }
+    if (bp && _ultimoParidade !== null) {
+      bp.textContent = _ultimoParidade;
+      bp.className = 'big-p ' + (_ultimoParidade === 'ÍMPAR' ? 'odd' : 'even');
+    }
+  }, 10000);
 }
 
-async function loadForexSignals(){
-    if(!_forexSectionVisible) return;
+function updateLatencyIndicator(latencyMs) {
+  const el = $_('latencyIndicator');
+  if (!el) return;
+  let color, text;
+  if (latencyMs < 100) { color = 'var(--accent)'; text = '🟢 ' + latencyMs + 'ms'; }
+  else if (latencyMs < 250) { color = 'var(--warning)'; text = '🟡 ' + latencyMs + 'ms'; }
+  else { color = 'var(--danger)'; text = '🔴 ' + latencyMs + 'ms'; }
+  el.innerHTML = `<span style="color:${color};font-size:10px">${text}</span>`;
+}
+
+function updateSuggestedAmount(balance) {
+  if (!balance || balance <= 0) return;
+  _suggestedAmount = Math.max(0.35, (balance * 0.02)).toFixed(2);
+  const amtInput = $_('amtDigit');
+  if (amtInput && !amtInput.dataset.userEdited) {
+    amtInput.value = _suggestedAmount;
+  }
+}
+
+function updateCycleBlocker(ticksRemaining) {
+  const blocker = $_('cycleBlocker');
+  const tradeRow = document.querySelector('.trade-row');
+  if (!blocker || !tradeRow) return;
+  if (ticksRemaining !== undefined && ticksRemaining < 3) {
+    blocker.style.display = 'block';
+    blocker.textContent = `⏳ Aguarde o próximo ciclo (${ticksRemaining} tick(s) restantes)`;
+    tradeRow.style.opacity = '0.5';
+    $_('btnOdd').disabled = true;
+    $_('btnEven').disabled = true;
+    $_('btnDiffer').disabled = true;
+    $_('btnMatches').disabled = true;
+  } else {
+    blocker.style.display = 'none';
+    tradeRow.style.opacity = '1';
+  }
+}
+
+async function loadForexSignals() {
+    if (!_forexSectionVisible) return;
     const container = $_('forexSignalsContainer');
-    if(!container) return;
-
-    if(_userPlan !== 'pro'){
-        container.innerHTML = `
-            <div class="upgrade-banner">
-                🔓 Desbloqueie sinais Forex com o plano Pro
-            </div>
-            <p style="text-align:center;font-size:10px;color:var(--muted)">
-                Contacte o suporte para fazer upgrade.
-            </p>
-        `;
-        return;
-    }
-
-    try{
+    if (!container) return;
+    try {
         const r = await fetch('/api/forex/signals');
         const d = await r.json();
-        if(d.error){
-            container.innerHTML = `<p style="color:var(--danger);text-align:center">${d.error}</p>`;
-            return;
-        }
-
-        if(!d.signals || d.signals.length === 0){
+        if (d.error) { container.innerHTML = `<p style="color:var(--danger);text-align:center">${d.error}</p>`; return; }
+        if (!d.signals || d.signals.length === 0) {
             container.innerHTML = '<p style="text-align:center;color:var(--muted);font-size:11px">Nenhum sinal ativo neste momento.</p>';
             return;
         }
-
         let html = '';
         d.signals.forEach(s => {
             const dirClass = s.direction === 'BUY' ? 'buy' : 'sell';
             const dirLabel = s.direction === 'BUY' ? 'COMPRA' : 'VENDA';
-            html += `
-                <div class="forex-signal-card ${dirClass === 'sell' ? 'sell' : ''}">
-                    <div style="display:flex;justify-content:space-between;align-items:center">
-                        <span class="forex-pair">${s.pair}</span>
-                        <span class="forex-direction ${dirClass}">${dirLabel}</span>
-                        <span class="forex-confidence">${s.confidence}% confiança</span>
-                    </div>
-                    <div class="forex-reason">${s.reason}</div>
-                    <button onclick="executarTradeForex('${s.symbol}','${s.direction}')" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR</button>
+            const conf = s.confidence || 0;
+            let actionButton = '';
+            if (conf >= 80) {
+                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}')" style="margin-top:6px;padding:6px 16px;background:var(--accent);color:#000;border:none;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite;cursor:pointer">⚡ ENTRAR AGORA (${conf}%)</button>`;
+            } else if (conf >= 60) {
+                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}')" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR</button>`;
+            }
+            let breakdownHTML = '';
+            if (s.breakdown) {
+                breakdownHTML = `<div style="font-size:9px;color:var(--muted);margin-top:4px">📈 Tendência: ${s.breakdown.trend||0}pts | RSI: ${s.breakdown.rsi||0}pts | MACD: ${s.breakdown.macd||0}pts</div>`;
+            }
+            html += `<div class="forex-signal-card ${dirClass==='sell'?'sell':''} ${s.type==='liquidation'?'liquidation':''}">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <span class="forex-pair">${s.pair}</span>
+                    <span class="forex-direction ${dirClass}">${dirLabel}</span>
+                    <span class="forex-confidence">${conf}% confiança</span>
                 </div>
-            `;
+                <div class="forex-reason">${s.reason}</div>
+                ${breakdownHTML}
+                ${actionButton}
+            </div>`;
         });
         container.innerHTML = html;
-    }catch(e){
-        container.innerHTML = '<p style="color:var(--danger);text-align:center">Erro ao carregar sinais</p>';
-    }
+    } catch (e) { container.innerHTML = '<p style="color:var(--danger);text-align:center">Erro ao carregar sinais</p>'; }
 }
 
 function initForexChart(){
@@ -1410,8 +1401,7 @@ function initForexChart(){
     if(!container || _forexChart) return;
     try{
         _forexChart = LightweightCharts.createChart(container, {
-            width: container.clientWidth,
-            height: 200,
+            width: container.clientWidth, height: 200,
             layout: { background: { color: '#020617' }, textColor: '#e2e8f0' },
             grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
             rightPriceScale: { borderColor: '#1e293b' },
@@ -1422,10 +1412,12 @@ function initForexChart(){
             borderUpColor: '#00f0b5', borderDownColor: '#ff4d4d',
             wickUpColor: '#00f0b5', wickDownColor: '#ff4d4d'
         });
+        _forexUpperBand = _forexChart.addLineSeries({ color: 'rgba(255,255,255,0.3)', lineWidth: 1 });
+        _forexMiddleBand = _forexChart.addLineSeries({ color: 'rgba(255,255,255,0.5)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
+        _forexLowerBand = _forexChart.addLineSeries({ color: 'rgba(255,255,255,0.3)', lineWidth: 1 });
         if(window.ResizeObserver){
             resizeObserver = new ResizeObserver(() => {
                 if(_forexChart && container) _forexChart.applyOptions({ width: container.clientWidth });
-                if(candleChart && $_('priceChart')) candleChart.applyOptions({ width: $_('priceChart').clientWidth });
             });
             resizeObserver.observe(container);
         }
@@ -1433,31 +1425,45 @@ function initForexChart(){
 }
 
 async function loadForexCandles(){
-    if(!_forexSectionVisible || !_forexChart || _userPlan !== 'pro') return;
+    if(!_forexSectionVisible || !_forexChart) return;
     const pair = FOREX_SYMBOL_MAP[_forexCurPair] || _forexCurPair;
     try{
         const r = await fetch(`/api/forex/candles/${pair}?granularity=${_forexGranularity}&count=50`);
         const d = await r.json();
         if(!d.candles || d.candles.length === 0) return;
-        const formatted = d.candles.map(c => ({
-            time: c.epoch,
-            open: c.open,
-            high: c.high,
-            low: c.low,
-            close: c.close
-        })).sort((a,b) => a.time - b.time);
+        const formatted = d.candles.map(c => ({time: c.epoch, open: c.open, high: c.high, low: c.low, close: c.close})).sort((a,b) => a.time - b.time);
         _forexCandleSeries.setData(formatted);
         _forexChart.timeScale().fitContent();
+        try{
+            const indR = await fetch(`/api/forex/indicators/${pair}`);
+            const indD = await indR.json();
+            if (indD.indicators && indD.indicators.bollinger) {
+                const [upper, middle, lower] = indD.indicators.bollinger;
+                const times = formatted.map(c => c.time);
+                if (upper) _forexUpperBand.setData(times.map(t => ({ time: t, value: upper })));
+                if (middle) _forexMiddleBand.setData(times.map(t => ({ time: t, value: middle })));
+                if (lower) _forexLowerBand.setData(times.map(t => ({ time: t, value: lower })));
+            }
+            const indDiv = $_('forexIndicators');
+            if (indD.indicators && indDiv) {
+                const i = indD.indicators;
+                indDiv.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+                    <div>RSI: ${i.rsi_14?.toFixed(1) || '—'}</div>
+                    <div>ADX: ${i.adx_14?.toFixed(1) || '—'}</div>
+                    <div>ATR: ${i.atr_14?.toFixed(5) || '—'}</div>
+                    <div>Bollinger Sup: ${i.bollinger?.[0]?.toFixed(5) || '—'}</div>
+                    <div>Bollinger Inf: ${i.bollinger?.[2]?.toFixed(5) || '—'}</div>
+                    <div>Momentum: ${i.momentum_10?.toFixed(5) || '—'}</div>
+                </div>`;
+            }
+        }catch(e){}
     }catch(e){}
 }
 
 function initForexSyms(){
-    const el = $_('forexSymSel');
-    if(!el) return;
+    const el = $_('forexSymSel'); if(!el) return;
     let h = '';
-    _forexPairs.forEach(p => {
-        h += `<button class="sym-btn ${p === _forexCurPair ? 'active' : ''}" onclick="chgForexPair('${p}', this)">${p}</button>`;
-    });
+    _forexPairs.forEach(p => { h += `<button class="sym-btn ${p===_forexCurPair?'active':''}" onclick="chgForexPair('${p}',this)">${p}</button>`; });
     el.innerHTML = h;
 }
 
@@ -1468,37 +1474,24 @@ function chgForexPair(pair, el){
     loadForexCandles();
 }
 
-// ══════════ FUNÇÃO PARA EXECUTAR TRADE FOREX ══════════
 async function executarTradeForex(symbol, direction) {
-    const amount = prompt('Valor da aposta (USD):', '1');
+    const amount = prompt('Valor da aposta (USD):', _suggestedAmount);
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) return;
-    
     try {
         const r = await fetch('/api/forex/trade', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                symbol: symbol,
-                direction: direction,
-                amount: parseFloat(amount),
-                duration: 5
-            })
+            body: JSON.stringify({ symbol, direction, amount: parseFloat(amount), duration: 5 })
         });
         const d = await r.json();
-        if (d.error) {
-            toast('❌ ' + d.error, 'loss', 5000);
-        } else {
-            toast('✅ ' + d.message, 'win', 4000);
-        }
-    } catch (e) {
-        toast('❌ Erro ao enviar ordem', 'loss');
-    }
+        if (d.error) { toast('❌ ' + d.error, 'loss', 5000); }
+        else { toast('✅ ' + d.message, 'win', 4000); }
+    } catch (e) { toast('❌ Erro ao enviar ordem', 'loss'); }
 }
 
 // ══════════ INICIALIZAÇÃO ══════════
 setInterval(()=>{if(isConnected)loadCandles();},10000);
 setInterval(updateScoreboard,30000); updateScoreboard();
-setInterval(updatePingDisplay, 10000);
 
 (function(){
   const p=new URLSearchParams(location.search);
@@ -1519,7 +1512,7 @@ try {
       initSyms(); loadAffiliate(); loadHistory(); initCandleChart(); setTimeout(loadCandles,3000); startPolling();
       checkUserPlan();
       initForexSyms();
-      iniciarThrottleDigito();  // INICIA O THROTTLE DOS DÍGITOS
+      iniciarThrottleDigito();
       if(d.user?.has_deriv_token) setTimeout(autoConnect,1500); updateTokenDisplay();
     }
   }).catch(()=>{});
@@ -1528,6 +1521,5 @@ try {
   toast('Erro de inicialização. Recarregue a página.', 'loss', 5000);
 }
 </script>
-<div id="debugPoll" style="display:none;"></div>
 </body>
 </html>
