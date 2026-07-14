@@ -113,15 +113,20 @@ class TradingBot:
         return False
 
     # ============================================================
-    # CORRIGIDO: filtro por símbolo + remoção de reatribuição
+    # CORRIGIDO: ignora ticks de Forex, processa apenas sintéticos
     # ============================================================
     def on_tick(self, tick):
-        # Ignorar ticks de outros símbolos (defesa em profundidade)
-        if tick.get('symbol') != self.current_symbol:
+        symbol = tick.get('symbol', '')
+        
+        # Ticks de Forex são processados pelo ForexDataManager, não pelo bot
+        if symbol.startswith('frx'):
+            return
+        
+        # Para sintéticos, filtrar por símbolo
+        if symbol != self.current_symbol:
             return
 
         self.current_price = tick['price']
-        # NOTA: não reatribuir self.current_symbol — já está correto
 
         if self.digit_analyzer:
             self.digit_analyzer.add_tick(self.current_price)
