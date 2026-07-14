@@ -15,7 +15,7 @@ class ForexScorer:
             'momentum': 10,
             'market_quality': 5
         }
-        self.threshold = 75
+        self.threshold = 60      # ← reduzido de 75 para 60
         self.adx_minimum = 20
 
     def score(self, ind: dict) -> Tuple[int, str, dict]:
