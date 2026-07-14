@@ -180,8 +180,38 @@
       <button class="tf-btn" onclick="scrollToSection('g6')">Suporte</button>
       <button class="tf-btn" onclick="scrollToSection('g7')">Como Funciona</button>
     </div>
-    <!-- conteúdo do guia (omitido por brevidade, mas deves manter o teu conteúdo original aqui) -->
-    <p style="text-align:center;color:var(--muted);margin-top:20px">Guia completo disponível na plataforma.</p>
+    <!-- conteúdo do guia (mantido do original) -->
+    <div id="g1" style="margin-top:16px">
+      <h3>🎲 Par/Ímpar — Como interpretar o sinal</h3>
+      <p>O sistema observa os últimos dígitos e mostra uma tendência (ex: 5 de 6 ímpares). Quando a tendência é forte, o botão da direção oposta fica disponível para entrada.</p>
+      <p><b>Importante:</b> os dígitos no ecrã servem para análise de tendência, mas o contrato real pode abrir 1 a 3 ticks depois do clique, devido ao tempo de processamento da Deriv. Por isso o resultado final pode parecer diferente do que viste no momento do clique — isso é normal e está documentado pela própria Deriv, não é uma falha da plataforma.</p>
+      <p>Usa sempre o painel <b>"🔍 Auditoria do Último Trade"</b> depois de cada operação para veres exatamente qual foi o tick de entrada, o tick de saída e a latência real.</p>
+    </div>
+    <div id="g2" style="margin-top:16px">
+      <h3>🎯 DIFFER — Como funciona</h3>
+      <p>O sistema identifica quando um dígito se repetiu recentemente e sugere apostar que ele <b>não</b> vai repetir-se novamente no próximo resultado. É a estratégia com fundamento estatístico mais sólido entre as disponíveis.</p>
+    </div>
+    <div id="g3" style="margin-top:16px">
+      <h3>🎯 MATCHES — Como funciona</h3>
+      <p>Aposta que um dígito específico (que está ausente há muitos ticks) vai aparecer. O payout é alto (~9x) mas a probabilidade de acerto é de apenas 10% por tentativa.</p>
+    </div>
+    <div id="g4" style="margin-top:16px">
+      <h3>📈 Plano de gestão de banca</h3>
+      <p>Define uma meta de lucro diário entre 5% e 10% da tua banca. Metas menores são mais sustentáveis.</p>
+    </div>
+    <div id="g5" style="margin-top:16px">
+      <h3>🧠 Controlo emocional</h3>
+      <p>A maior causa de perdas em trading não é a estratégia — é a reação emocional após uma perda ou um ganho.</p>
+    </div>
+    <div id="g6" style="margin-top:16px">
+      <h3>📲 Suporte e recursos</h3>
+      <p><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" style="color:var(--accent);font-weight:700">👉 Criar conta na Deriv</a></p>
+      <p><a href="https://chat.whatsapp.com/L8e0ituCsH68uIk3PMlQc9" target="_blank" style="color:var(--accent);font-weight:700">👉 Grupo de Suporte Foloma Visão 360</a></p>
+    </div>
+    <div id="g7" style="margin-top:16px">
+      <h3>⚖️ Como Funciona Realmente</h3>
+      <p>A Foloma Visão 360 é uma ferramenta de execução e análise — não um sistema de previsão garantida.</p>
+    </div>
   </div>
 </div>
 
@@ -337,7 +367,7 @@
       </div>
     </div>
 
-    <!-- Painel de Trade Manual SEMPRE visível -->
+    <!-- Painel de Trade Manual -->
     <div class="card" style="margin-top:12px;">
       <div class="card-title">🎯 TRADE MANUAL</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;">
@@ -354,13 +384,13 @@
           <option value="SELL">VENDA</option>
         </select>
         <input type="number" id="forexManualAmt" placeholder="Valor" value="1" step="0.01" min="0.35" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
-        <input type="number" id="forexManualDur" placeholder="Dur. ticks" value="5" min="1" max="10" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
+        <input type="number" id="forexManualDur" placeholder="Dur. minutos" value="1" min="1" max="60" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
         <button onclick="executarTradeManual()" style="padding:6px 12px;background:var(--accent);color:#000;border:none;border-radius:6px;font-weight:700;font-size:11px;cursor:pointer;">ENVIAR</button>
       </div>
     </div>
   </div>
 
-  <!-- restantes secções (afiliado, histórico, pagamento, settings, admin) mantidas iguais ao original -->
+  <!-- restantes secções -->
   <div id="affiliate-section" class="hidden">
     <div class="card"><div class="card-title">🔗 SEU LINK</div><div class="lc"><input type="text" id="refLink" readonly><button class="bmr" onclick="cpLink()">📋</button></div><div id="affiliateEarnings"></div></div>
   </div>
@@ -1253,6 +1283,18 @@ function updatePingDisplay(){
 }
 
 // ══════════ NOVAS FUNÇÕES ══════════
+function checkUserPlan(){
+    fetch('/api/auth/status').then(r=>r.json()).then(d=>{
+        if(d.authenticated && d.user){
+            _userPlan = d.user.plan || 'free';
+            const forexMenuItem = $_('forexMenuItem');
+            if(forexMenuItem){
+                forexMenuItem.style.display = 'block';  // sempre visível
+            }
+        }
+    }).catch(()=>{});
+}
+
 function iniciarThrottleDigito() {
   if (_timerDigito) clearInterval(_timerDigito);
   _timerDigito = setInterval(() => {
@@ -1326,7 +1368,7 @@ async function loadForexSignals() {
             if (conf >= 80) {
                 actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}')" style="margin-top:6px;padding:6px 16px;background:var(--accent);color:#000;border:none;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite;cursor:pointer">⚡ ENTRAR AGORA (${conf}%)</button>`;
             } else if (conf >= 60) {
-                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}')" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR</button>`;
+                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}')" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR (${conf}%)</button>`;
             }
             let breakdownHTML = '';
             if (s.breakdown) {
@@ -1425,7 +1467,7 @@ function chgForexPair(pair, el){
     loadForexCandles();
 }
 
-async function executarTradeForex(symbol, direction, amount, duration = 5) {
+async function executarTradeForex(symbol, direction, amount, duration = 1) {
     try {
         const r = await fetch('/api/forex/trade', {
             method: 'POST',
@@ -1442,7 +1484,7 @@ function executarTradeManual() {
     const pair = document.getElementById('forexManualPair').value;
     const direction = document.getElementById('forexManualDir').value;
     const amount = parseFloat(document.getElementById('forexManualAmt').value);
-    const duration = parseInt(document.getElementById('forexManualDur').value) || 5;
+    const duration = parseInt(document.getElementById('forexManualDur').value) || 1;
     if (!pair || !direction || isNaN(amount) || amount < 0.35) {
         toast('Preencha todos os campos', 'warning');
         return;
