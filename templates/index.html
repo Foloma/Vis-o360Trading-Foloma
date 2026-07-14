@@ -367,7 +367,7 @@
       </div>
     </div>
 
-    <!-- Painel de Trade Manual -->
+    <!-- Painel de Trade Manual (CORRIGIDO: duração em ticks) -->
     <div class="card" style="margin-top:12px;">
       <div class="card-title">🎯 TRADE MANUAL</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;">
@@ -384,9 +384,10 @@
           <option value="SELL">VENDA</option>
         </select>
         <input type="number" id="forexManualAmt" placeholder="Valor" value="1" step="0.01" min="0.35" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
-        <input type="number" id="forexManualDur" placeholder="Dur. minutos" value="1" min="1" max="60" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
+        <input type="number" id="forexManualDur" placeholder="Ticks (1-100)" value="5" min="1" max="100" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
         <button onclick="executarTradeManual()" style="padding:6px 12px;background:var(--accent);color:#000;border:none;border-radius:6px;font-weight:700;font-size:11px;cursor:pointer;">ENVIAR</button>
       </div>
+      <div style="font-size:9px;color:var(--muted);margin-top:4px;">1 tick ≈ 1 segundo | 5 ticks ≈ 5 segundos</div>
     </div>
   </div>
 
@@ -1467,7 +1468,7 @@ function chgForexPair(pair, el){
     loadForexCandles();
 }
 
-async function executarTradeForex(symbol, direction, amount, duration = 1) {
+async function executarTradeForex(symbol, direction, amount, duration = 5) {
     try {
         const r = await fetch('/api/forex/trade', {
             method: 'POST',
@@ -1484,9 +1485,13 @@ function executarTradeManual() {
     const pair = document.getElementById('forexManualPair').value;
     const direction = document.getElementById('forexManualDir').value;
     const amount = parseFloat(document.getElementById('forexManualAmt').value);
-    const duration = parseInt(document.getElementById('forexManualDur').value) || 1;
+    const duration = parseInt(document.getElementById('forexManualDur').value) || 5;
     if (!pair || !direction || isNaN(amount) || amount < 0.35) {
         toast('Preencha todos os campos', 'warning');
+        return;
+    }
+    if (duration < 1 || duration > 100) {
+        toast('Duração inválida (1-100 ticks)', 'warning');
         return;
     }
     const symbol = FOREX_SYMBOL_MAP[pair] || pair;
