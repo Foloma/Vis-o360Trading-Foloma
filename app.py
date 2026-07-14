@@ -667,7 +667,6 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
 
-# CORRIGIDO: usar variáveis de ambiente explícitas em vez de FLASK_ENV deprecado
 is_production = os.environ.get('RENDER', 'false').lower() == 'true' or os.environ.get('FLASK_DEBUG', '0') == '0'
 app.config['SESSION_COOKIE_SECURE'] = is_production
 app.config['SESSION_COOKIE_SAMESITE'] = 'None' if is_production else 'Lax'
@@ -763,7 +762,7 @@ def register():
         ref = d.get('referral_code', '')
         if not (name and email and len(password) >= 6):
             return jsonify({'error': 'Campos obrigatórios inválidos'}), 400
-        name = ' '.join(name.split())  # sanitização simples
+        name = ' '.join(name.split())
         user = AuthService.register(name, email, password, ref)
         if not user:
             return jsonify({'error': 'Email já registado'}), 400
@@ -1541,26 +1540,53 @@ def forex_trade():
     symbol = d.get('symbol', '').strip()
     direction = d.get('direction', '').strip().upper()
     amount = float(d.get('amount', 0))
-    duration = int(d.get('duration', 1))
+    duration = int(d.get('duration', 5))        # default 5 ticks
+
     if direction not in ('BUY', 'SELL'):
         return jsonify({'error': 'Direção inválida. Use BUY ou SELL.'}), 400
     if amount < 0.35 or amount > 100:
         return jsonify({'error': 'Valor entre 0.35 e 100'}), 400
+    if duration < 1 or duration > 100:
+        return jsonify({'error': 'Duração deve estar entre 1 e 100 ticks'}), 400
+
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado à Deriv'}), 400
+
     client = sess['client']
     if client.pending_trade is not None:
-        return jsonify({'error': 'Já existe um trade pendente'}), 400
+        # Verificar se o pendente já tem erro e pode ser limpo
+        status = client.get_pending_trade_status()
+        if status and status.get('error'):
+            client.pending_trade = None
+        else:
+            return jsonify({'error': 'Já existe um trade pendente'}), 400
+
     from forex_data import FOREX_SYMBOLS
     if symbol not in FOREX_SYMBOLS:
         return jsonify({'error': f'Símbolo inválido. Use: {list(FOREX_SYMBOLS.keys())}'}), 400
+
     if client.balance and client.balance < amount:
         return jsonify({'error': 'Saldo insuficiente'}), 400
+
     ok = client.place_forex_trade(symbol, direction, amount, duration)
     if not ok:
         return jsonify({'error': 'Falha ao enviar ordem'}), 500
-    return jsonify({'status': 'ok', 'message': f'{direction} {symbol} ${amount:.2f} enviado!'})
+
+    # Aguardar resultado da proposta (timeout 5s)
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        status = client.get_pending_trade_status()
+        if status is None:
+            # Proposta resolvida com sucesso
+            return jsonify({'status': 'ok', 'message': f'{direction} {symbol} ${amount:.2f} executado!'})
+        if status.get('error'):
+            err_msg = status['error'].get('message', 'Erro desconhecido')
+            client.pending_trade = None
+            return jsonify({'error': f'Proposta rejeitada: {err_msg}'}), 400
+        time.sleep(0.2)
+
+    return jsonify({'error': 'Proposta demorou muito. Verifique o estado na Deriv.'}), 500
 
 # ==================== ROTAS ADMIN ====================
 @app.route('/api/admin/users')
