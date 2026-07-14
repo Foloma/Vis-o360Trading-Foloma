@@ -9,8 +9,8 @@ class ForexScorer:
             'trend': 20, 'rsi': 15, 'macd': 15, 'adx': 15,
             'atr_volatility': 10, 'bollinger': 10, 'momentum': 10, 'market_quality': 5
         }
-        self.threshold = 10          # ← emergência: qualquer sinal passa
-        self.adx_minimum = 5         # ← quase sempre ultrapassado
+        self.threshold = 10          # emergência: qualquer sinal passa
+        self.adx_minimum = 5
 
     def score(self, ind: dict) -> Tuple[int, str, dict]:
         direction = 'HOLD'
@@ -38,7 +38,7 @@ class ForexScorer:
                 breakdown['trend'] = self.weights['trend']
                 direction = 'SELL'
             else:
-                breakdown['trend'] = 5   # empate, ainda dá pontos
+                breakdown['trend'] = 5
         elif sma200 is not None:
             if latest > sma200:
                 breakdown['trend'] = 10; direction = 'BUY'
@@ -50,8 +50,6 @@ class ForexScorer:
             elif momentum < 0:
                 breakdown['trend'] = 10; direction = 'SELL'
         else:
-            # nenhuma informação de tendência, mas queremos sinal na mesma
-            # assumimos compra (BUY) para debug, dando um score mínimo
             breakdown['trend'] = 5
             direction = 'BUY'
 
@@ -62,7 +60,7 @@ class ForexScorer:
             elif direction == 'SELL' and rsi > 40:
                 breakdown['rsi'] = self.weights['rsi']
             else:
-                breakdown['rsi'] = 5   # meio termo, mas dá pontos
+                breakdown['rsi'] = 5
 
         # MACD
         if macd_line is not None and signal_line is not None:
@@ -89,8 +87,7 @@ class ForexScorer:
 
         # Bollinger
         if upper and lower:
-            if direction == 'BUY' or direction == 'SELL':
-                breakdown['bollinger'] = 5   # qualquer direção, dá pontos
+            breakdown['bollinger'] = 5
 
         # Momentum
         if momentum is not None:
@@ -102,7 +99,7 @@ class ForexScorer:
                 breakdown['momentum'] = 5
 
         # Market Quality
-        breakdown['market_quality'] = 5   # mínimo
+        breakdown['market_quality'] = 5
 
         total = sum(breakdown.values())
         total = min(total, 100)
