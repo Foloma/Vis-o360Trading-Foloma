@@ -93,7 +93,6 @@ class DerivWebSocketClient:
         # NOVO: mapeamento de IDs de subscrição por símbolo
         self._tick_subscription_ids = {}
 
-    # ------------------------------------------------------------
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
 
@@ -466,6 +465,7 @@ class DerivWebSocketClient:
     # ============================================================
     def change_symbol(self, symbol):
         old_symbol = self.current_symbol
+        # Cancelar subscrição do símbolo anterior
         if old_symbol and old_symbol != symbol and old_symbol in self._tick_subscription_ids:
             try:
                 sub_id = self._tick_subscription_ids.pop(old_symbol, None)
@@ -475,6 +475,7 @@ class DerivWebSocketClient:
                     logger.info(f"🔕 Subscrição de {old_symbol} cancelada (id={sub_id})")
             except Exception as e:
                 logger.error(f"Erro ao cancelar subscrição de {old_symbol}: {e}")
+        # Remove do set de qualquer forma
         self.subscribed_symbols.discard(old_symbol)
 
         self.current_symbol = symbol
@@ -527,6 +528,7 @@ class DerivWebSocketClient:
         tick = data.get('tick', {})
         if not tick:
             return
+        # Capturar o ID da subscrição
         sub_id = data.get('subscription', {}).get('id')
         symbol = tick.get('symbol', self.current_symbol)
         if sub_id and symbol not in self._tick_subscription_ids:
@@ -739,7 +741,10 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
-    def place_forex_trade(self, symbol, direction, amount, duration=5):
+    # ============================================================
+    # CORRIGIDO: duração em minutos para Forex
+    # ============================================================
+    def place_forex_trade(self, symbol, direction, amount, duration=1):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade Forex bloqueado pelo stop‑loss diário")
             return False
@@ -768,7 +773,7 @@ class DerivWebSocketClient:
                 }
             self.pending_trade_time = time.time()
 
-            logger.info(f"📤 Enviando proposta Forex: {contract_type} {symbol} amount={amount}")
+            logger.info(f"📤 Enviando proposta Forex: {contract_type} {symbol} amount={amount} duration={duration}m")
             try:
                 payload = {
                     "proposal": 1,
@@ -777,7 +782,7 @@ class DerivWebSocketClient:
                     "contract_type": contract_type,
                     "currency": self.currency,
                     "duration": duration,
-                    "duration_unit": "t",
+                    "duration_unit": "m",       # CORRIGIDO: minutos em vez de ticks
                     "symbol": symbol,
                     "req_id": req_id
                 }
