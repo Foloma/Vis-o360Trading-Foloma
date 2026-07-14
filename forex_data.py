@@ -27,7 +27,6 @@ CANDLE_REQUEST_TIMEOUT = 10
 class ForexDataManager:
     def __init__(self):
         self._ticks = {sym: deque(maxlen=MAX_TICKS_PER_SYMBOL) for sym in FOREX_SYMBOLS}
-        # Velas agora são organizadas por par e granularidade
         self._candles = {
             sym: {
                 60: deque(maxlen=300),
@@ -75,38 +74,51 @@ class ForexDataManager:
                 'timestamp': float(timestamp)
             })
 
+    # ============================================================
+    # CORRIGIDO: extração robusta de símbolo e granularidade
+    # ============================================================
     def on_candles(self, data, req_id=None):
         candles = data.get('candles', [])
         if not candles:
             return
 
-        # Determinar símbolo e granularidade
         symbol = None
-        granularity = 60  # default
+        granularity = 60  # fallback
+
+        # 1. Tentar obter do pedido pendente (se req_id foi passado)
         if req_id is not None:
             with self._candle_lock:
                 entry = self._pending_candle_requests.pop(req_id, None)
                 if entry:
-                    symbol, granularity = entry[0], entry[1]
+                    symbol, granularity, _ = entry
 
+        # 2. Se ainda não temos símbolo, extrair do echo_req (Deriv reenvia o pedido original)
         if symbol is None:
-            first = candles[0] if candles else {}
-            raw_sym = first.get('symbol', data.get('echo_req', {}).get('ticks_history'))
+            echo = data.get('echo_req', {})
+            raw_sym = echo.get('ticks_history')
             if raw_sym:
                 symbol = self._normalize_symbol(raw_sym)
-            # tentar obter granularity do echo_req
-            echo = data.get('echo_req', {})
-            granularity = echo.get('granularity', 60)
+            granularity = echo.get('granularity', granularity)
+
+        # 3. Último recurso: usar o primeiro candle
+        if symbol is None:
+            first = candles[0] if candles else {}
+            raw_sym = first.get('symbol')
+            if raw_sym:
+                symbol = self._normalize_symbol(raw_sym)
 
         if symbol is None or symbol not in FOREX_SYMBOLS:
+            logger.debug("Velas recebidas sem símbolo associado — ignorando")
             return
 
         with self._lock:
+            # Garantir que o deque para esta granularidade existe
             if granularity not in self._candles[symbol]:
                 self._candles[symbol][granularity] = deque(maxlen=300)
 
             existing = self._candles[symbol][granularity]
-            # proteção contra duplicados
+
+            # Proteção contra duplicados
             if existing and candles:
                 last = existing[-1]
                 first_new = candles[0]
