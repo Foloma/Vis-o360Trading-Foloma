@@ -23,11 +23,13 @@ class ForexSignals:
         """
         ind = self._indicators.get_all_indicators(symbol, use_candles=True)
         if not ind.get('latest_price'):
+            logger.debug(f"Sinal {symbol}: sem preço, ignorado")
             return None
 
         total, direction, breakdown = self._scorer.score(ind)
 
-        if direction == 'HOLD':
+        if direction in ('HOLD', 'SEM_DADOS'):
+            logger.debug(f"Sinal {symbol}: {direction} (score={total})")
             return None
 
         # Construir mensagem de razão
@@ -39,6 +41,8 @@ class ForexSignals:
         if breakdown.get('macd', 0) > 0:
             reason_parts.append("MACD confirma")
         reason = f"Score {total}/100: " + ", ".join(reason_parts) if reason_parts else f"Score {total}/100"
+
+        logger.info(f"Sinal {symbol}: {direction} com {total}% confiança")
 
         return {
             'direction': direction,
@@ -73,6 +77,7 @@ class ForexSignals:
                 # Preço abaixo da banda inferior e RSI < 20 → reversão para cima
                 if dist_lower < -0.05 and rsi < 20:
                     confidence = min(90, 50 + int(abs(dist_lower) * 100))
+                    logger.info(f"Liquidation {symbol}: BUY com {confidence}% (RSI={rsi})")
                     return {
                         'direction': 'BUY',
                         'confidence': confidence,
@@ -83,6 +88,7 @@ class ForexSignals:
                 # Preço acima da banda superior e RSI > 80 → reversão para baixo
                 if dist_upper > 0.05 and rsi > 80:
                     confidence = min(90, 50 + int(dist_upper * 100))
+                    logger.info(f"Liquidation {symbol}: SELL com {confidence}% (RSI={rsi})")
                     return {
                         'direction': 'SELL',
                         'confidence': confidence,
