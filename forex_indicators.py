@@ -168,19 +168,19 @@ class ForexIndicators:
         else:
             return None
 
-        tr = [max(high[i]-low[i], abs(high[i]-close[i-1]), abs(low[i]-close[i-1]))
+        tr = [max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
               for i in range(1, len(high))]
-        atr = sum(tr) / period
+        atr_val = sum(tr) / period
 
-        plus_dm = [high[i]-high[i-1] if high[i]-high[i-1] > low[i-1]-low[i] and high[i]-high[i-1] > 0 else 0
+        plus_dm = [high[i] - high[i - 1] if high[i] - high[i - 1] > low[i - 1] - low[i] and high[i] - high[i - 1] > 0 else 0
                    for i in range(1, len(high))]
-        minus_dm = [low[i-1]-low[i] if low[i-1]-low[i] > high[i]-high[i-1] and low[i-1]-low[i] > 0 else 0
+        minus_dm = [low[i - 1] - low[i] if low[i - 1] - low[i] > high[i] - high[i - 1] and low[i - 1] - low[i] > 0 else 0
                     for i in range(1, len(high))]
 
-        atr = sum(tr) / period
-        plus_di = sum(plus_dm) / atr * 100
-        minus_di = sum(minus_dm) / atr * 100
-        dx = abs(plus_di - minus_di) / (plus_di + minus_di) * 100
+        plus_di = (sum(plus_dm) / atr_val) * 100 if atr_val > 0 else 0
+        minus_di = (sum(minus_dm) / atr_val) * 100 if atr_val > 0 else 0
+        denom = plus_di + minus_di
+        dx = abs(plus_di - minus_di) / denom * 100 if denom > 0 else 0
         return round(dx, 2)
 
     # -----------------------------------------------------------------
@@ -197,7 +197,7 @@ class ForexIndicators:
         else:
             return None
 
-        tr = [max(high[i]-low[i], abs(high[i]-close[i-1]), abs(low[i]-close[i-1]))
+        tr = [max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
               for i in range(1, len(high))]
         return round(sum(tr) / len(tr), 5)
 
@@ -209,12 +209,12 @@ class ForexIndicators:
             candles = self._data.get_recent_candles(symbol, count=period + 1)
             if len(candles) < period + 1:
                 return None
-            return candles[-1]['close'] - candles[-period-1]['close']
+            return candles[-1]['close'] - candles[-period - 1]['close']
         else:
             ticks = self._data.get_recent_ticks(symbol, count=period + 1)
             if len(ticks) < period + 1:
                 return None
-            return ticks[-1]['price'] - ticks[-period-1]['price']
+            return ticks[-1]['price'] - ticks[-period - 1]['price']
 
     # -----------------------------------------------------------------
     # Indicadores compostos (para o scorer)
