@@ -1,6 +1,6 @@
 import logging
 import threading
-from statistics import mean, pstdev
+from statistics import pstdev
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ class ForexIndicators:
 
         if len(prices) < period:
             return None
+
         return sum(prices[-period:]) / period
 
     # -----------------------------------------------------------------
@@ -43,6 +44,7 @@ class ForexIndicators:
 
         if len(prices) < period:
             return None
+
         return self._ema_from_prices(prices, period)
 
     def _ema_from_prices(self, prices, period):
@@ -145,14 +147,16 @@ class ForexIndicators:
             return None, None, None
 
         sma = sum(prices[-period:]) / period
-        std = pstdev(prices[-period:])
+        std = pstdev(prices[-period:])  # desvio padrão populacional
 
         upper = sma + (std_dev * std)
         lower = sma - (std_dev * std)
 
         return round(upper, 5), round(sma, 5), round(lower, 5)
 
-    # ============ NOVOS INDICADORES ============
+    # -----------------------------------------------------------------
+    # ADX (Average Directional Index)
+    # -----------------------------------------------------------------
     def adx(self, symbol, period=14, use_candles=True):
         if use_candles:
             candles = self._data.get_recent_candles(symbol, count=period + 1)
@@ -179,6 +183,9 @@ class ForexIndicators:
         dx = abs(plus_di - minus_di) / (plus_di + minus_di) * 100
         return round(dx, 2)
 
+    # -----------------------------------------------------------------
+    # ATR (Average True Range)
+    # -----------------------------------------------------------------
     def atr(self, symbol, period=14, use_candles=True):
         if use_candles:
             candles = self._data.get_recent_candles(symbol, count=period + 1)
@@ -194,6 +201,9 @@ class ForexIndicators:
               for i in range(1, len(high))]
         return round(sum(tr) / len(tr), 5)
 
+    # -----------------------------------------------------------------
+    # Momentum
+    # -----------------------------------------------------------------
     def momentum(self, symbol, period=10, use_candles=True):
         if use_candles:
             candles = self._data.get_recent_candles(symbol, count=period + 1)
@@ -206,17 +216,19 @@ class ForexIndicators:
                 return None
             return ticks[-1]['price'] - ticks[-period-1]['price']
 
-    # ============ MÉTODO COMPLETO PARA O SCORER ============
+    # -----------------------------------------------------------------
+    # Indicadores compostos (para o scorer)
+    # -----------------------------------------------------------------
     def get_all_indicators(self, symbol, use_candles=True):
         with self._lock:
-            macd, signal, _ = self.macd(symbol, 12, 26, 9, use_candles)
+            macd_line, signal_line, _ = self.macd(symbol, 12, 26, 9, use_candles)
             return {
                 'latest_price': self._data.get_latest_price(symbol),
                 'sma_200': self.sma(symbol, 200, use_candles),
                 'ema_50': self.ema(symbol, 50, use_candles),
                 'rsi_14': self.rsi(symbol, 14, use_candles),
-                'macd_line': macd,
-                'signal_line': signal,
+                'macd_line': macd_line,
+                'signal_line': signal_line,
                 'bollinger': self.bollinger_bands(symbol, 20, 2, use_candles),
                 'adx_14': self.adx(symbol, 14, use_candles),
                 'atr_14': self.atr(symbol, 14, use_candles),
