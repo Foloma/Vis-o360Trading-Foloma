@@ -90,6 +90,9 @@ class DerivWebSocketClient:
         self._last_buy_contract_id = None
         self._null_sell_price_contracts = set()
 
+        # NOVO: mapeamento de IDs de subscrição por símbolo
+        self._tick_subscription_ids = {}
+
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
 
@@ -263,6 +266,7 @@ class DerivWebSocketClient:
         self.state = self.ST_DISCONNECTED
         self.loginid = None
         self.auth_error = None
+        self._tick_subscription_ids.clear()
 
     def _authorize_and_wait(self, timeout=10):
         if self._is_otp_ws():
@@ -326,6 +330,7 @@ class DerivWebSocketClient:
         self.authorized = False
         self.streaming = False
         self.state = self.ST_DISCONNECTED
+        self._tick_subscription_ids.clear()
 
     def _read_loop(self):
         while not self._stop_event.is_set() and self.ws:
@@ -455,9 +460,24 @@ class DerivWebSocketClient:
                     self._close_connection()
                     break
 
+    # ============================================================
+    # CORRIGIDO: cancelar subscrição antiga ao trocar de símbolo
+    # ============================================================
     def change_symbol(self, symbol):
-        if symbol in self.subscribed_symbols:
-            self.subscribed_symbols.discard(symbol)
+        old_symbol = self.current_symbol
+        # Cancelar subscrição do símbolo anterior
+        if old_symbol and old_symbol != symbol and old_symbol in self._tick_subscription_ids:
+            try:
+                sub_id = self._tick_subscription_ids.pop(old_symbol, None)
+                if sub_id:
+                    self.ws.send(json.dumps({"forget": sub_id, "req_id": self._next_req()}))
+                    self.subscribed_symbols.discard(old_symbol)
+                    logger.info(f"🔕 Subscrição de {old_symbol} cancelada (id={sub_id})")
+            except Exception as e:
+                logger.error(f"Erro ao cancelar subscrição de {old_symbol}: {e}")
+        # Remove do set de qualquer forma
+        self.subscribed_symbols.discard(old_symbol)
+
         self.current_symbol = symbol
         if self.authorized:
             self._subscribe_ticks(symbol)
@@ -501,10 +521,23 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro subs. ticks: {e}")
 
+    # ============================================================
+    # CORRIGIDO: filtrar ticks por símbolo + capturar subscription id
+    # ============================================================
     def _on_tick(self, data):
         tick = data.get('tick', {})
         if not tick:
             return
+        # Capturar o ID da subscrição
+        sub_id = data.get('subscription', {}).get('id')
+        symbol = tick.get('symbol', self.current_symbol)
+        if sub_id and symbol not in self._tick_subscription_ids:
+            self._tick_subscription_ids[symbol] = sub_id
+
+        # Ignorar ticks de símbolos que não sejam o atual
+        if symbol != self.current_symbol:
+            return
+
         if not self.streaming:
             self.streaming = True
             self.state = self.ST_STREAMING
@@ -513,7 +546,7 @@ class DerivWebSocketClient:
         self._last_tick_epoch = tick.get('epoch', time.time())
         if self.on_tick_callback:
             self.on_tick_callback({
-                'symbol':    tick.get('symbol', self.current_symbol),
+                'symbol':    symbol,
                 'price':     float(tick.get('quote', 0)),
                 'timestamp': self._last_tick_epoch
             })
@@ -546,18 +579,12 @@ class DerivWebSocketClient:
                     return False, "Trade pendente"
         return True, None
 
-    # ============================================================
-    # MÉTODO AUXILIAR: substitui symbol por underlying_symbol no OTP
-    # ============================================================
     def _build_proposal(self, base_payload):
         if self._is_otp_ws():
             symbol = base_payload.pop('symbol', self.current_symbol)
             base_payload['underlying_symbol'] = symbol
         return base_payload
 
-    # ============================================================
-    # MÉTODOS DE TRADE
-    # ============================================================
     def place_trade(self, contract_type, amount, is_digit=False):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
@@ -711,17 +738,7 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
-    # ============================================================
-    # NOVA FUNÇÃO: trade para pares Forex
-    # ============================================================
     def place_forex_trade(self, symbol, direction, amount, duration=5):
-        """
-        Envia uma ordem de compra/venda para um par Forex.
-        direction: 'BUY' -> CALL (sobe), 'SELL' -> PUT (desce)
-        symbol:   ex. 'frxEURUSD'
-        amount:   valor da aposta (USD)
-        duration: duração do contrato em ticks (default 5)
-        """
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade Forex bloqueado pelo stop‑loss diário")
             return False
@@ -742,7 +759,7 @@ class DerivWebSocketClient:
                     'amount': amount,
                     'contract_type': contract_type,
                     'is_digit': False,
-                    'is_forex': True,          # identificador para callbacks
+                    'is_forex': True,
                     'symbol': symbol,
                     'timestamp': time.time(),
                     'status': 'waiting_proposal',
@@ -771,9 +788,6 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
-    # ============================================================
-    # PROCESSAMENTO DE PROPOSTA / BUY / POC
-    # ============================================================
     def _on_proposal(self, data):
         with self._pending_lock:
             if self.pending_trade is None:
@@ -908,9 +922,6 @@ class DerivWebSocketClient:
             except Exception as e:
                 logger.error(f"Falha ao reassinar {cid}: {e}")
 
-    # ============================================================
-    # NOVA FUNÇÃO: extrair último dígito com 2 casas decimais fixas
-    # ============================================================
     def _extract_last_digit(self, value):
         if value is None:
             return None
@@ -923,9 +934,6 @@ class DerivWebSocketClient:
         except (ValueError, TypeError):
             return None
 
-    # ============================================================
-    # _on_poc COM DADOS DE AUDITORIA E LOG TEMPORÁRIO DO PAYLOAD
-    # ============================================================
     def _on_poc(self, data):
         c = data.get('proposal_open_contract', {})
         cid = c.get('contract_id')
@@ -933,7 +941,6 @@ class DerivWebSocketClient:
             return
         logger.info(f"📦 POC recebido: contract_id={cid}, is_sold=True")
 
-        # LOG TEMPORÁRIO: payload completo para debug
         logger.info(f"🔍 POC FULL PAYLOAD: {json.dumps(c)}")
 
         bp = float(c.get('buy_price', 0) or 0)
@@ -962,7 +969,6 @@ class DerivWebSocketClient:
         entry_tick_time = c.get('entry_tick_time')
         exit_tick_time = c.get('exit_tick_time')
 
-        # Usar a nova função robusta para extrair o último dígito
         entry_digit = self._extract_last_digit(entry_spot)
         exit_digit = self._extract_last_digit(exit_spot)
 
@@ -1037,9 +1043,6 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro refresh saldo: {e}")
 
-    # ============================================================
-    # RESTO DOS MÉTODOS (inalterados)
-    # ============================================================
     def _on_api_error(self, data):
         err = data.get('error', {})
         code = err.get('code', 'N/A')
@@ -1064,6 +1067,9 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao pedir velas: {e}")
 
+    # ============================================================
+    # CORRIGIDO: passar req_id ao callback
+    # ============================================================
     def _on_candles(self, data):
         candles = data.get('candles', [])
         if candles:
