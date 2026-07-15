@@ -92,6 +92,11 @@ class DerivWebSocketClient:
 
         self._tick_subscription_ids = {}
 
+        # NOVOS: cache de contracts_for
+        self._contracts_for_cache = {}
+        self._contracts_for_lock = threading.Lock()
+        self._pending_contracts_for = {}
+
     def set_digit_analyzer(self, a): 
         self._digit_analyzer = a
 
@@ -358,6 +363,7 @@ class DerivWebSocketClient:
                 'error':                  self._on_api_error,
                 'candles':                self._on_candles,
                 'pong':                   self._on_pong,
+                'contracts_for':          self._on_contracts_for,
             }
             handler = handlers.get(msg_type)
             if handler:
@@ -730,7 +736,103 @@ class DerivWebSocketClient:
                     self.pending_trade = None
                 return False
 
-    def place_forex_trade(self, symbol, direction, amount, duration=5):
+    # ============================================================
+    # NOVO: contratos disponíveis (cache de 1h)
+    # ============================================================
+    def _duration_to_seconds(self, s):
+        if not s:
+            return None
+        unit = s[-1]
+        if unit == 't':
+            return None
+        try:
+            val = int(s[:-1])
+        except ValueError:
+            return None
+        mult = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+        return val * mult.get(unit, 1) if unit in mult else None
+
+    def request_contracts_for(self, symbol, timeout=5):
+        with self._contracts_for_lock:
+            cached = self._contracts_for_cache.get(symbol)
+            if cached and (time.time() - cached['timestamp']) < 3600:
+                return cached['durations']
+
+        if not self.ws or not self.authorized:
+            return None
+
+        req_id = self._next_req()
+        event = threading.Event()
+        holder = {'result': None}
+        with self._req_lock:
+            self._pending_contracts_for[req_id] = (event, holder)
+
+        try:
+            self.ws.send(json.dumps({
+                "contracts_for": symbol,
+                "currency": self.currency or "USD",
+                "req_id": req_id
+            }))
+        except Exception as e:
+            logger.error(f"Erro ao pedir contracts_for {symbol}: {e}")
+            with self._req_lock:
+                self._pending_contracts_for.pop(req_id, None)
+            return None
+
+        got = event.wait(timeout=timeout)
+        with self._req_lock:
+            self._pending_contracts_for.pop(req_id, None)
+
+        if not got:
+            logger.warning(f"⏱️ Timeout contracts_for para {symbol}")
+            return None
+
+        return holder['result']
+
+    def _on_contracts_for(self, data):
+        req_id = data.get('req_id')
+        with self._req_lock:
+            entry = self._pending_contracts_for.get(req_id)
+        if not entry:
+            return
+        event, holder = entry
+
+        if data.get('error'):
+            logger.error(f"Erro contracts_for: {data['error']}")
+            holder['result'] = None
+            event.set()
+            return
+
+        cf = data.get('contracts_for', {})
+        durations = {}
+        for c in cf.get('available', []):
+            ctype = c.get('contract_type')
+            if ctype not in ('CALL', 'PUT'):
+                continue
+            min_dur = c.get('min_contract_duration')
+            max_dur = c.get('max_contract_duration')
+            units = {u for u in (min_dur[-1] if min_dur else None, max_dur[-1] if max_dur else None) if u}
+            durations[ctype] = {
+                'min': min_dur,
+                'max': max_dur,
+                'allowed_units': units
+            }
+
+        symbol = data.get('echo_req', {}).get('contracts_for')
+        if symbol:
+            with self._contracts_for_lock:
+                self._contracts_for_cache[symbol] = {
+                    'durations': durations,
+                    'timestamp': time.time()
+                }
+
+        holder['result'] = durations
+        event.set()
+
+    # ============================================================
+    # CORRIGIDO: place_forex_trade usa contracts_for
+    # ============================================================
+    def place_forex_trade(self, symbol, direction, amount, duration=1):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade Forex bloqueado pelo stop‑loss diário")
             return False
@@ -741,9 +843,30 @@ class DerivWebSocketClient:
                 logger.warning(f"🚫 Trade Forex bloqueado: {err}")
                 return False
 
-            self._last_trade_time = time.time()
-
+            # Obter durações válidas da Deriv
+            durations = self.request_contracts_for(symbol)
             contract_type = "CALL" if direction.upper() == "BUY" else "PUT"
+            duration_unit = "m"  # fallback
+
+            if durations:
+                limits = durations.get(contract_type)
+                if limits:
+                    allowed = limits.get('allowed_units') or set()
+                    if 't' in allowed and 'm' not in allowed:
+                        duration_unit = 't'
+
+                    req_seconds = duration * 60 if duration_unit == 'm' else None
+                    min_s = self._duration_to_seconds(limits.get('min'))
+                    max_s = self._duration_to_seconds(limits.get('max'))
+
+                    if req_seconds is not None and min_s and req_seconds < min_s:
+                        return False, f"Duração mínima para {symbol}: {limits.get('min')}"
+                    if req_seconds is not None and max_s and req_seconds > max_s:
+                        return False, f"Duração máxima para {symbol}: {limits.get('max')}"
+            else:
+                logger.warning(f"⚠️ Duração não validada para {symbol} (contracts_for indisponível)")
+
+            self._last_trade_time = time.time()
 
             req_id = self._next_req()
             with self._pending_lock:
@@ -759,7 +882,7 @@ class DerivWebSocketClient:
                 }
             self.pending_trade_time = time.time()
 
-            logger.info(f"📤 Enviando proposta Forex: {contract_type} {symbol} amount={amount} duration={duration}t")
+            logger.info(f"📤 Enviando proposta Forex: {contract_type} {symbol} amount={amount} duration={duration}{duration_unit}")
             try:
                 payload = {
                     "proposal": 1,
@@ -768,17 +891,17 @@ class DerivWebSocketClient:
                     "contract_type": contract_type,
                     "currency": self.currency,
                     "duration": duration,
-                    "duration_unit": "t",
+                    "duration_unit": duration_unit,
                     "symbol": symbol,
                     "req_id": req_id
                 }
                 self.ws.send(json.dumps(self._build_proposal(payload)))
-                return True
+                return True, None
             except Exception as e:
                 logger.error(f"❌ Erro ao enviar trade Forex: {e}")
                 with self._pending_lock:
                     self.pending_trade = None
-                return False
+                return False, str(e)
 
     def _on_proposal(self, data):
         with self._pending_lock:
