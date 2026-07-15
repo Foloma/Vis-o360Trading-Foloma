@@ -1533,8 +1533,23 @@ def forex_candles(symbol):
     return jsonify({'candles': candles, 'symbol': symbol})
 
 # ============================================================
-# NOVA ROTA: consultar durações disponíveis para um símbolo
+# CORRIGIDA: rota de contratos com conversão de unidades
 # ============================================================
+UNIT_SECONDS = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+
+def _duration_str_to_seconds(dur_str):
+    if not dur_str:
+        return None
+    unit = dur_str[-1]
+    if unit == 't':
+        return None  # ticks não são comparáveis a tempo
+    try:
+        val = int(dur_str[:-1])
+    except ValueError:
+        return None
+    mult = UNIT_SECONDS.get(unit)
+    return val * mult if mult else None
+
 @app.route('/api/forex/contracts_for/<symbol>')
 @require_auth
 def forex_contracts_for(symbol):
@@ -1547,22 +1562,30 @@ def forex_contracts_for(symbol):
     if durations is None:
         return jsonify({'error': 'Não foi possível obter as durações para este símbolo'}), 503
 
-    # Formatar para o frontend: lista de durações permitidas
     result = {}
     for ctype, limits in durations.items():
-        if limits.get('min') and limits.get('max'):
-            unit_min = limits['min'][-1]
-            unit_max = limits['max'][-1]
-            val_min = int(limits['min'][:-1])
-            val_max = int(limits['max'][:-1])
-            if unit_min == unit_max:
-                values = list(range(val_min, val_max + 1))
-                result[ctype] = {
-                    'unit': unit_min,
-                    'min': limits['min'],
-                    'max': limits['max'],
-                    'allowed_values': values
-                }
+        min_s = _duration_str_to_seconds(limits.get('min'))
+        max_s = _duration_str_to_seconds(limits.get('max'))
+        if min_s is None or max_s is None:
+            continue  # contrato só aceita ticks, ou dados incompletos — não aplicável a Forex manual
+
+        min_m = max(1, -(-min_s // 60))   # arredonda para cima, mínimo 1 minuto
+        max_m = max_s // 60
+        if max_m < min_m:
+            continue
+
+        values = list(range(min_m, min(max_m, 60) + 1))
+        for extra in (90, 120, 240, 480, 1440):
+            if min_m <= extra <= max_m and extra not in values:
+                values.append(extra)
+
+        result[ctype] = {
+            'unit': 'm',
+            'min': limits['min'],
+            'max': limits['max'],
+            'allowed_values': values
+        }
+
     return jsonify({'symbol': symbol, 'durations': result})
 
 # ============================================================
