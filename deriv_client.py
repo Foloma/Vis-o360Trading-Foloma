@@ -92,7 +92,7 @@ class DerivWebSocketClient:
 
         self._tick_subscription_ids = {}
 
-        # NOVOS: cache de contracts_for
+        # cache de contracts_for
         self._contracts_for_cache = {}
         self._contracts_for_lock = threading.Lock()
         self._pending_contracts_for = {}
@@ -770,7 +770,6 @@ class DerivWebSocketClient:
         try:
             self.ws.send(json.dumps({
                 "contracts_for": symbol,
-                "currency": self.currency or "USD",
                 "req_id": req_id
             }))
         except Exception as e:
