@@ -137,8 +137,12 @@ class StrategyManager:
     # Atualização a cada tick
     # -----------------------------------------------------------------
     def on_tick(self, tick):
+        # CORREÇÃO: ignorar ticks de outros símbolos (ex: Forex)
+        symbol = tick.get('symbol', '')
+        if symbol and self.client and symbol != self.client.current_symbol:
+            return
+
         price = tick.get('price', 0)
-        symbol = tick.get('symbol')
         with self._lock:
             if symbol and self._last_symbol is not None and self._last_symbol != symbol:
                 self._price_history = []
