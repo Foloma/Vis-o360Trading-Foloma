@@ -1552,6 +1552,9 @@ function executarTradeManual() {
     executarTradeForex(symbol, direction, amount, duration);
 }
 
+// Garantir que a duração atualiza ao trocar de par no trade manual
+document.getElementById('forexManualPair')?.addEventListener('change', loadForexDurations);
+
 // ══════════ INICIALIZAÇÃO ══════════
 setInterval(()=>{if(isConnected)loadCandles();},10000);
 setInterval(updateScoreboard,30000); updateScoreboard();
