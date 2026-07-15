@@ -1368,11 +1368,12 @@ async function loadForexSignals() {
             const dirClass = s.direction === 'BUY' ? 'buy' : 'sell';
             const dirLabel = s.direction === 'BUY' ? 'COMPRA' : 'VENDA';
             const conf = s.confidence || 0;
+            let amount = _suggestedAmount || 1;
             let actionButton = '';
             if (conf >= 80) {
-                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}')" style="margin-top:6px;padding:6px 16px;background:var(--accent);color:#000;border:none;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite;cursor:pointer">⚡ ENTRAR AGORA (${conf}%)</button>`;
+                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},1)" style="margin-top:6px;padding:6px 16px;background:var(--accent);color:#000;border:none;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite;cursor:pointer">⚡ ENTRAR AGORA (${conf}%)</button>`;
             } else if (conf >= 60) {
-                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}')" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR (${conf}%)</button>`;
+                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},1)" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR (${conf}%)</button>`;
             }
             let breakdownHTML = '';
             if (s.breakdown) {
@@ -1472,7 +1473,21 @@ function chgForexPair(pair, el){
     loadForexDurations();  // Atualizar durações
 }
 
-async function executarTradeForex(symbol, direction, amount, duration = 5) {
+// CORRIGIDO: validação de amount e uso do valor sugerido / manual
+async function executarTradeForex(symbol, direction, amount, duration = 1) {
+    // Se amount não foi passado ou é inválido, tentar obter do campo manual
+    if (amount === undefined || isNaN(parseFloat(amount))) {
+        const manualAmt = document.getElementById('forexManualAmt');
+        if (manualAmt && manualAmt.value) {
+            amount = parseFloat(manualAmt.value);
+        } else {
+            amount = _suggestedAmount || 1;
+        }
+    }
+    if (isNaN(parseFloat(amount)) || parseFloat(amount) < 0.35) {
+        toast('Valor da aposta inválido', 'warning');
+        return;
+    }
     try {
         const r = await fetch('/api/forex/trade', {
             method: 'POST',
@@ -1508,14 +1523,12 @@ async function loadForexDurations() {
             return;
         }
 
-        // Gerar opções com base nos limites
         const unit = callLimits.unit === 'm' ? 'min' : (callLimits.unit === 't' ? 'ticks' : 's');
         let html = '';
         callLimits.allowed_values.forEach(v => {
             html += `<option value="${v}">${v} ${unit}</option>`;
         });
         durSelect.innerHTML = html || '<option value="">Sem opções válidas</option>';
-        // Selecionar 1 se disponível
         if (callLimits.allowed_values.includes(1)) durSelect.value = '1';
     } catch (e) {
         durSelect.innerHTML = '<option value="">Erro ao carregar</option>';
