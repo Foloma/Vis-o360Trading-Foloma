@@ -1532,6 +1532,42 @@ def forex_candles(symbol):
     candles = sess['forex_data'].get_recent_candles(symbol, count=count, granularity=granularity)
     return jsonify({'candles': candles, 'symbol': symbol})
 
+# ============================================================
+# NOVA ROTA: consultar durações disponíveis para um símbolo
+# ============================================================
+@app.route('/api/forex/contracts_for/<symbol>')
+@require_auth
+def forex_contracts_for(symbol):
+    sess = get_session(session['user_id'])
+    if not sess or not sess['client'].authorized:
+        return jsonify({'error': 'Não conectado à Deriv'}), 400
+
+    client = sess['client']
+    durations = client.request_contracts_for(symbol)
+    if durations is None:
+        return jsonify({'error': 'Não foi possível obter as durações para este símbolo'}), 503
+
+    # Formatar para o frontend: lista de durações permitidas
+    result = {}
+    for ctype, limits in durations.items():
+        if limits.get('min') and limits.get('max'):
+            unit_min = limits['min'][-1]
+            unit_max = limits['max'][-1]
+            val_min = int(limits['min'][:-1])
+            val_max = int(limits['max'][:-1])
+            if unit_min == unit_max:
+                values = list(range(val_min, val_max + 1))
+                result[ctype] = {
+                    'unit': unit_min,
+                    'min': limits['min'],
+                    'max': limits['max'],
+                    'allowed_values': values
+                }
+    return jsonify({'symbol': symbol, 'durations': result})
+
+# ============================================================
+# CORRIGIDA: rota de trade Forex com validação e retorno real
+# ============================================================
 @app.route('/api/forex/trade', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1540,14 +1576,12 @@ def forex_trade():
     symbol = d.get('symbol', '').strip()
     direction = d.get('direction', '').strip().upper()
     amount = float(d.get('amount', 0))
-    duration = int(d.get('duration', 5))        # default 5 ticks
+    duration = int(d.get('duration', 1))        # default 1 (minuto ou tick, conforme o par)
 
     if direction not in ('BUY', 'SELL'):
         return jsonify({'error': 'Direção inválida. Use BUY ou SELL.'}), 400
     if amount < 0.35 or amount > 100:
         return jsonify({'error': 'Valor entre 0.35 e 100'}), 400
-    if duration < 1 or duration > 100:
-        return jsonify({'error': 'Duração deve estar entre 1 e 100 ticks'}), 400
 
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
@@ -1555,7 +1589,6 @@ def forex_trade():
 
     client = sess['client']
     if client.pending_trade is not None:
-        # Verificar se o pendente já tem erro e pode ser limpo
         status = client.get_pending_trade_status()
         if status and status.get('error'):
             client.pending_trade = None
@@ -1569,16 +1602,15 @@ def forex_trade():
     if client.balance and client.balance < amount:
         return jsonify({'error': 'Saldo insuficiente'}), 400
 
-    ok = client.place_forex_trade(symbol, direction, amount, duration)
+    ok, msg = client.place_forex_trade(symbol, direction, amount, duration)
     if not ok:
-        return jsonify({'error': 'Falha ao enviar ordem'}), 500
+        return jsonify({'error': msg or 'Falha ao enviar ordem'}), 400
 
     # Aguardar resultado da proposta (timeout 5s)
     deadline = time.time() + 5
     while time.time() < deadline:
         status = client.get_pending_trade_status()
         if status is None:
-            # Proposta resolvida com sucesso
             return jsonify({'status': 'ok', 'message': f'{direction} {symbol} ${amount:.2f} executado!'})
         if status.get('error'):
             err_msg = status['error'].get('message', 'Erro desconhecido')
