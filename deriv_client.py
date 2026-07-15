@@ -788,8 +788,12 @@ class DerivWebSocketClient:
 
         return holder['result']
 
+    # ============================================================
+    # CORRIGIDO: _on_contracts_for aceita variantes CALL/PUT
+    # ============================================================
     def _on_contracts_for(self, data):
         req_id = data.get('req_id')
+        logger.info(f"🔍 RAW contracts_for: {json.dumps(data.get('contracts_for', {}))[:2000]}")
         with self._req_lock:
             entry = self._pending_contracts_for.get(req_id)
         if not entry:
@@ -804,18 +808,23 @@ class DerivWebSocketClient:
 
         cf = data.get('contracts_for', {})
         durations = {}
+        seen_types = set()
+        RISE_FALL_TYPES = {
+            'CALL': 'CALL', 'PUT': 'PUT',
+            'CALLE': 'CALL', 'PUTE': 'PUT',   # variantes de estilo europeu
+        }
         for c in cf.get('available', []):
-            ctype = c.get('contract_type')
-            if ctype not in ('CALL', 'PUT'):
+            raw_ctype = c.get('contract_type')
+            seen_types.add(raw_ctype)
+            mapped = RISE_FALL_TYPES.get(raw_ctype)
+            if not mapped:
                 continue
-            min_dur = c.get('min_contract_duration')
-            max_dur = c.get('max_contract_duration')
+            min_dur, max_dur = c.get('min_contract_duration'), c.get('max_contract_duration')
             units = {u for u in (min_dur[-1] if min_dur else None, max_dur[-1] if max_dur else None) if u}
-            durations[ctype] = {
-                'min': min_dur,
-                'max': max_dur,
-                'allowed_units': units
-            }
+            durations[mapped] = {'min': min_dur, 'max': max_dur, 'allowed_units': units}
+
+        if not durations:
+            logger.warning(f"⚠️ contracts_for sem CALL/PUT reconhecidos. Tipos vistos: {seen_types}")
 
         symbol = data.get('echo_req', {}).get('contracts_for')
         if symbol:
