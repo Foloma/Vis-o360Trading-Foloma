@@ -1566,7 +1566,7 @@ def forex_contracts_for(symbol):
     return jsonify({'symbol': symbol, 'durations': result})
 
 # ============================================================
-# CORRIGIDA: rota de trade Forex com validação e retorno real
+# CORRIGIDA: rota de trade Forex com validação robusta de amount/duration
 # ============================================================
 @app.route('/api/forex/trade', methods=['POST'])
 @require_auth
@@ -1575,8 +1575,20 @@ def forex_trade():
     d = request.json
     symbol = d.get('symbol', '').strip()
     direction = d.get('direction', '').strip().upper()
-    amount = float(d.get('amount', 0))
-    duration = int(d.get('duration', 1))        # default 1 (minuto ou tick, conforme o par)
+
+    amount_raw = d.get('amount')
+    if amount_raw is None:
+        return jsonify({'error': 'Valor da aposta em falta'}), 400
+    try:
+        amount = float(amount_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Valor da aposta inválido'}), 400
+
+    duration_raw = d.get('duration', 1)
+    try:
+        duration = int(duration_raw)
+    except (TypeError, ValueError):
+        duration = 1
 
     if direction not in ('BUY', 'SELL'):
         return jsonify({'error': 'Direção inválida. Use BUY ou SELL.'}), 400
