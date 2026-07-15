@@ -367,11 +367,11 @@
       </div>
     </div>
 
-    <!-- Painel de Trade Manual (CORRIGIDO: duração em ticks) -->
+    <!-- Painel de Trade Manual (CORRIGIDO: select de duração dinâmico) -->
     <div class="card" style="margin-top:12px;">
       <div class="card-title">🎯 TRADE MANUAL</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;">
-        <select id="forexManualPair" style="flex:1;min-width:100px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
+        <select id="forexManualPair" style="flex:1;min-width:100px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;" onchange="carregarDuracoesForex(this.value)">
           <option value="EUR/USD">EUR/USD</option>
           <option value="GBP/USD">GBP/USD</option>
           <option value="USD/JPY">USD/JPY</option>
@@ -384,10 +384,12 @@
           <option value="SELL">VENDA</option>
         </select>
         <input type="number" id="forexManualAmt" placeholder="Valor" value="1" step="0.01" min="0.35" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
-        <input type="number" id="forexManualDur" placeholder="Ticks (1-100)" value="5" min="1" max="100" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
+        <select id="forexManualDur" style="flex:1;min-width:100px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
+          <option value="">-- Duração --</option>
+        </select>
         <button onclick="executarTradeManual()" style="padding:6px 12px;background:var(--accent);color:#000;border:none;border-radius:6px;font-weight:700;font-size:11px;cursor:pointer;">ENVIAR</button>
       </div>
-      <div style="font-size:9px;color:var(--muted);margin-top:4px;">1 tick ≈ 1 segundo | 5 ticks ≈ 5 segundos</div>
+      <div style="font-size:9px;color:var(--muted);margin-top:4px;">Seleccione um par para ver as durações disponíveis</div>
     </div>
   </div>
 
@@ -1269,7 +1271,8 @@ function showSec(s){
     _forexSectionVisible = true;
     initForexChart(); 
     loadForexSignals(); 
-    loadForexCandles(); 
+    loadForexCandles();
+    carregarDuracoesForex(_forexCurPair);  // Carregar durações ao abrir
   } else {
     _forexSectionVisible = false;
   }
@@ -1466,6 +1469,7 @@ function chgForexPair(pair, el){
     document.querySelectorAll('#forexSymSel .sym-btn').forEach(b => b.classList.remove('active'));
     el.classList.add('active');
     loadForexCandles();
+    carregarDuracoesForex(pair);  // Atualizar durações
 }
 
 async function executarTradeForex(symbol, direction, amount, duration = 5) {
@@ -1481,17 +1485,46 @@ async function executarTradeForex(symbol, direction, amount, duration = 5) {
     } catch (e) { toast('❌ Erro ao enviar ordem', 'loss'); }
 }
 
+async function carregarDuracoesForex(pair) {
+    const symbol = FOREX_SYMBOL_MAP[pair] || pair;
+    const sel = $_('forexManualDur');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">A carregar...</option>';
+    try {
+        const r = await fetch(`/api/forex/contracts_for/${symbol}`);
+        const d = await r.json();
+        if (d.error) {
+            sel.innerHTML = '<option value="">Erro ao carregar</option>';
+            return;
+        }
+        const callDurations = d.durations?.CALL;
+        if (!callDurations) {
+            sel.innerHTML = '<option value="">Sem dados</option>';
+            return;
+        }
+        const unit = callDurations.unit === 'm' ? 'min' : 'ticks';
+        let html = '<option value="">Duração</option>';
+        callDurations.allowed_values.forEach(v => {
+            html += `<option value="${v}">${v} ${unit}</option>`;
+        });
+        sel.innerHTML = html;
+        if (callDurations.allowed_values.includes(1)) sel.value = '1';
+    } catch (e) {
+        sel.innerHTML = '<option value="">Erro</option>';
+    }
+}
+
 function executarTradeManual() {
     const pair = document.getElementById('forexManualPair').value;
     const direction = document.getElementById('forexManualDir').value;
     const amount = parseFloat(document.getElementById('forexManualAmt').value);
-    const duration = parseInt(document.getElementById('forexManualDur').value) || 5;
+    const duration = parseInt(document.getElementById('forexManualDur').value);
     if (!pair || !direction || isNaN(amount) || amount < 0.35) {
         toast('Preencha todos os campos', 'warning');
         return;
     }
-    if (duration < 1 || duration > 100) {
-        toast('Duração inválida (1-100 ticks)', 'warning');
+    if (isNaN(duration) || duration < 1) {
+        toast('Seleccione uma duração válida', 'warning');
         return;
     }
     const symbol = FOREX_SYMBOL_MAP[pair] || pair;
