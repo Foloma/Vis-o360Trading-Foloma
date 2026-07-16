@@ -3,6 +3,7 @@ import time
 from forex_indicators import ForexIndicators
 from forex_ensemble import ForexEnsemble
 from forex_risk import ForexRiskEngine
+from forex_scorer import ForexScorer  # Certifica-te que este módulo existe
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +19,11 @@ class ForexSignals:
         self._indicators = ForexIndicators(data_manager)
         self._ensemble = ForexEnsemble(consensus_threshold=0.6)
         self._risk = ForexRiskEngine(min_consensus_pct=60, min_adx=20, max_atr_pct=0.5)
+        self._scorer = ForexScorer()  # Novo: necessário para get_signal()
         self._data = data_manager
 
     # -----------------------------------------------------------------
-    # Sinal de scoring (simples, usado pela API principal)
+    # Sinal de scoring (usado pela API principal)
     # -----------------------------------------------------------------
     def get_signal(self, symbol):
         """
@@ -30,12 +32,22 @@ class ForexSignals:
         """
         ind = self._indicators.get_all_indicators(symbol, use_candles=True)
         logger.info(f"🔍 DEBUG {symbol}: sma_200={ind.get('sma_200')}, ema_50={ind.get('ema_50')}, "
-                    f"rsi_14={ind.get('rsi_14')}, adx_14={ind.get('adx_14')}, latest={ind.get('latest_price')}")
+                    f"rsi_14={ind.get('rsi_14')}, adx_14={ind.get('adx_14')}, latest={ind.get('latest_price')}, "
+                    f"macd={ind.get('macd_line')}, signal={ind.get('signal_line')}, "
+                    f"bollinger={ind.get('bollinger')}, momentum={ind.get('momentum_10')}")
         if not ind.get('latest_price'):
             logger.debug(f"Sinal {symbol}: sem preço, ignorado")
             return None
 
-        # --- Lógica de scoring placeholder (devolve None para não afetar o fluxo atual) ---
+        # --- Scorer ---
+        total, direction, breakdown = self._scorer.score(ind)
+        logger.info(f"🔍 DEBUG {symbol} SCORE: total={total}, direction={direction}, breakdown={breakdown}")
+
+        if direction in ('HOLD', 'SEM_DADOS'):
+            logger.debug(f"Sinal {symbol}: {direction} (score={total})")
+            return None
+
+        # Por enquanto, devolve None para não interferir com o fluxo existente
         return None
 
     # -----------------------------------------------------------------
@@ -98,7 +110,7 @@ class ForexSignals:
         }
 
     # -----------------------------------------------------------------
-    # Liquidação (inalterado, mas agora com granularidade padrão M15)
+    # Liquidação
     # -----------------------------------------------------------------
     def get_liquidation_signal(self, symbol, granularity=900):
         ind = self._indicators.get_all_indicators(symbol, use_candles=True, granularity=granularity)
@@ -170,14 +182,14 @@ class ForexSignals:
             logger.error(f"Erro ao registar sinal no log: {e}")
 
     # -----------------------------------------------------------------
-    # Todos os sinais (agora chama get_signal() em vez de get_signal_multi_timeframe)
+    # Todos os sinais
     # -----------------------------------------------------------------
     def get_all_signals(self):
         from forex_data import FOREX_SYMBOLS
 
         signals = []
         for symbol in FOREX_SYMBOLS:
-            # Sinal principal (usa o novo get_signal, que regista o debug)
+            # Sinal principal (agora com debug + scoring)
             s = self.get_signal(symbol)
             if s:
                 pair_name = FOREX_SYMBOLS[symbol]
