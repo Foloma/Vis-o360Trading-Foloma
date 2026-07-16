@@ -18,7 +18,8 @@ class ForexRiskEngine:
     def __init__(self, min_consensus_pct=60, min_adx=20, max_atr_pct=0.5):
         self.min_consensus_pct = min_consensus_pct
         self.min_adx = min_adx
-        self.max_atr_pct = max_atr_pct  # volatilidade máxima aceitável (%)
+        self.max_atr_pct = max_atr_pct          # volatilidade máxima aceitável (ATR) – mantida em 0.5%
+        self.min_bandwidth_pct = 0.15           # NOVO: largura mínima de Bollinger (reduzida de 0.5% para 0.15%)
 
     def can_execute(self, ind, consensus_pct):
         """
@@ -33,7 +34,7 @@ class ForexRiskEngine:
         if adx is None or adx < self.min_adx:
             return False, f"Mercado sem direção clara (ADX={adx})"
 
-        # 3. Volatilidade excessiva (ATR)
+        # 3. Volatilidade excessiva (ATR) – limiar mantido em 0.5%
         atr = ind.get('atr_14')
         price = ind.get('latest_price')
         if atr and price:
@@ -41,13 +42,13 @@ class ForexRiskEngine:
             if atr_pct > self.max_atr_pct:
                 return False, f"Volatilidade excessiva ({atr_pct:.2f}%)"
 
-        # 4. Mercado lateral (Bollinger muito estreito)
+        # 4. Mercado lateral (Bollinger muito estreito) – limiar reduzido de 0.5% para 0.15%
         bollinger = ind.get('bollinger')
         if bollinger:
             upper, middle, lower = bollinger
-            if upper and lower:
-                bandwidth = (upper - lower) / middle * 100 if middle else 0
-                if bandwidth < 0.5:
-                    return False, f"Mercado lateral (Bollinger bandwidth={bandwidth:.2f}%)"
+            if upper and middle and lower:
+                bandwidth = (upper - lower) / middle * 100
+                if bandwidth < self.min_bandwidth_pct:
+                    return False, f"Mercado lateral (Bollinger bandwidth={bandwidth:.2f}% < {self.min_bandwidth_pct}%)"
 
         return True, "OK"
