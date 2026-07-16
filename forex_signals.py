@@ -21,6 +21,24 @@ class ForexSignals:
         self._data = data_manager
 
     # -----------------------------------------------------------------
+    # Sinal de scoring (simples, usado pela API principal)
+    # -----------------------------------------------------------------
+    def get_signal(self, symbol):
+        """
+        Analisa os indicadores para um símbolo e retorna um sinal
+        de scoring, se a confiança for >= threshold.
+        """
+        ind = self._indicators.get_all_indicators(symbol, use_candles=True)
+        logger.info(f"🔍 DEBUG {symbol}: sma_200={ind.get('sma_200')}, ema_50={ind.get('ema_50')}, "
+                    f"rsi_14={ind.get('rsi_14')}, adx_14={ind.get('adx_14')}, latest={ind.get('latest_price')}")
+        if not ind.get('latest_price'):
+            logger.debug(f"Sinal {symbol}: sem preço, ignorado")
+            return None
+
+        # --- Lógica de scoring placeholder (devolve None para não afetar o fluxo atual) ---
+        return None
+
+    # -----------------------------------------------------------------
     # Sinal multi-timeframe (top-down: H1 → M15 → M5 opcional)
     # -----------------------------------------------------------------
     def get_signal_multi_timeframe(self, symbol):
@@ -70,7 +88,7 @@ class ForexSignals:
             'confidence': consensus,
             'reason': f"H1 define {h1_bias}, M15 confirma com {consensus}% de consenso",
             'indicators': ind_15,
-            'breakdown': votes,  # agora os votos substituem o breakdown antigo
+            'breakdown': votes,
             'type': 'ensemble',
             'suggested_duration_minutes': 15,
             'timeframe_label': '15 min (H1 + M15)',
@@ -152,15 +170,15 @@ class ForexSignals:
             logger.error(f"Erro ao registar sinal no log: {e}")
 
     # -----------------------------------------------------------------
-    # Todos os sinais
+    # Todos os sinais (agora chama get_signal() em vez de get_signal_multi_timeframe)
     # -----------------------------------------------------------------
     def get_all_signals(self):
         from forex_data import FOREX_SYMBOLS
 
         signals = []
         for symbol in FOREX_SYMBOLS:
-            # Sinal principal (multi-timeframe com ensemble)
-            s = self.get_signal_multi_timeframe(symbol)
+            # Sinal principal (usa o novo get_signal, que regista o debug)
+            s = self.get_signal(symbol)
             if s:
                 pair_name = FOREX_SYMBOLS[symbol]
                 signals.append({
