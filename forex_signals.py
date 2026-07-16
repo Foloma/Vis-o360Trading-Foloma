@@ -19,11 +19,11 @@ class ForexSignals:
         self._indicators = ForexIndicators(data_manager)
         self._ensemble = ForexEnsemble(consensus_threshold=0.6)
         self._risk = ForexRiskEngine(min_consensus_pct=60, min_adx=20, max_atr_pct=0.5)
-        self._scorer = ForexScorer()  # Novo: necessário para get_signal()
+        self._scorer = ForexScorer()
         self._data = data_manager
 
     # -----------------------------------------------------------------
-    # Sinal de scoring (usado pela API principal)
+    # Sinal de scoring (completo, com log detalhado)
     # -----------------------------------------------------------------
     def get_signal(self, symbol):
         """
@@ -39,7 +39,6 @@ class ForexSignals:
             logger.debug(f"Sinal {symbol}: sem preço, ignorado")
             return None
 
-        # --- Scorer ---
         total, direction, breakdown = self._scorer.score(ind)
         logger.info(f"🔍 DEBUG {symbol} SCORE: total={total}, direction={direction}, breakdown={breakdown}")
 
@@ -47,18 +46,34 @@ class ForexSignals:
             logger.debug(f"Sinal {symbol}: {direction} (score={total})")
             return None
 
-        # Por enquanto, devolve None para não interferir com o fluxo existente
-        return None
+        reason_parts = []
+        if breakdown.get('trend', 0) > 0:
+            reason_parts.append(f"Tendência forte ({direction})")
+        if breakdown.get('rsi', 0) > 0:
+            reason_parts.append("RSI alinhado")
+        if breakdown.get('macd', 0) > 0:
+            reason_parts.append("MACD confirma")
+        reason = f"Score {total}/100: " + ", ".join(reason_parts) if reason_parts else f"Score {total}/100"
+
+        self._log_signal(symbol, direction, total, breakdown, ind)
+
+        return {
+            'direction': direction,
+            'confidence': total,
+            'reason': reason,
+            'indicators': ind,
+            'breakdown': breakdown,
+            'type': 'scoring'
+        }
 
     # -----------------------------------------------------------------
-    # Sinal multi-timeframe (top-down: H1 → M15 → M5 opcional)
+    # Sinal multi-timeframe (top-down: H1 → M15)
     # -----------------------------------------------------------------
     def get_signal_multi_timeframe(self, symbol):
         """
         Hierarquia:
         1. H1 define tendência de fundo (EMA20 vs preço).
         2. M15 procura entrada com o ensemble completo, só na direção do H1.
-        3. M5 é opcional (não implementado nesta fase).
         """
 
         # --- H1: contexto de tendência ---
@@ -182,15 +197,15 @@ class ForexSignals:
             logger.error(f"Erro ao registar sinal no log: {e}")
 
     # -----------------------------------------------------------------
-    # Todos os sinais
+    # Todos os sinais (usa multi-timeframe como principal)
     # -----------------------------------------------------------------
     def get_all_signals(self):
         from forex_data import FOREX_SYMBOLS
 
         signals = []
         for symbol in FOREX_SYMBOLS:
-            # Sinal principal (agora com debug + scoring)
-            s = self.get_signal(symbol)
+            # Caminho principal, mostrado ao utilizador: Ensemble + Risk Engine + H1
+            s = self.get_signal_multi_timeframe(symbol)
             if s:
                 pair_name = FOREX_SYMBOLS[symbol]
                 signals.append({
@@ -204,9 +219,10 @@ class ForexSignals:
                     'type': s.get('type', 'ensemble'),
                     'suggested_duration_minutes': s.get('suggested_duration_minutes', 15),
                     'timeframe_label': s.get('timeframe_label', '15 min'),
-                    'm30_confidence': s.get('m30_confidence'),
-                    'h1_confidence': s.get('h1_confidence')
                 })
+
+            # Scorer antigo: só para log de comparação, não aparece ao utilizador
+            _ = self.get_signal(symbol)
 
             # Sinal de liquidação
             liq = self.get_liquidation_signal(symbol)
@@ -222,7 +238,5 @@ class ForexSignals:
                     'type': liq['type'],
                     'suggested_duration_minutes': liq.get('suggested_duration_minutes', 15),
                     'timeframe_label': liq.get('timeframe_label', '15 min (liquidação)'),
-                    'm30_confidence': None,
-                    'h1_confidence': None
                 })
         return signals
