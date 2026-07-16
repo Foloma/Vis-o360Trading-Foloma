@@ -23,7 +23,7 @@ class ForexSignals:
         self._data = data_manager
 
     # -----------------------------------------------------------------
-    # Sinal de scoring (completo, com log detalhado)
+    # Sinal de scoring (scorer legacy — apenas para registo paralelo)
     # -----------------------------------------------------------------
     def get_signal(self, symbol):
         """
@@ -55,7 +55,7 @@ class ForexSignals:
             reason_parts.append("MACD confirma")
         reason = f"Score {total}/100: " + ", ".join(reason_parts) if reason_parts else f"Score {total}/100"
 
-        self._log_signal(symbol, direction, total, breakdown, ind)
+        self._log_signal(symbol, direction, total, breakdown, ind, source='scorer_legacy')
 
         return {
             'direction': direction,
@@ -67,7 +67,7 @@ class ForexSignals:
         }
 
     # -----------------------------------------------------------------
-    # Sinal multi-timeframe (top-down: H1 → M15)
+    # Sinal multi-timeframe (top-down: H1 → M15) — PRINCIPAL
     # -----------------------------------------------------------------
     def get_signal_multi_timeframe(self, symbol):
         """
@@ -82,13 +82,13 @@ class ForexSignals:
         if ema_h1 is None or price is None:
             return None
 
-        # Margem de 0.05% para evitar whipsaw
         if price > ema_h1 * 1.0005:
             h1_bias = 'BUY'
         elif price < ema_h1 * 0.9995:
             h1_bias = 'SELL'
         else:
-            return None  # sem tendência clara
+            logger.info(f"🔍 DEBUG {symbol} MTF: H1 sem tendência clara (price={price}, ema_h1={ema_h1})")
+            return None
 
         # --- M15: ensemble completo ---
         ind_15 = self._indicators.get_all_indicators(symbol, granularity=900)
@@ -96,19 +96,21 @@ class ForexSignals:
             return None
 
         direction, consensus, votes = self._ensemble.decide(ind_15)
+        logger.info(f"🔍 DEBUG {symbol} MTF: h1_bias={h1_bias}, m15_direction={direction}, consensus={consensus}%")
 
-        # Só executar se M15 concordar com H1
         if direction != h1_bias:
+            logger.info(f"🔍 DEBUG {symbol} MTF: M15 ({direction}) discorda de H1 ({h1_bias}) — sem sinal")
             return None
 
         # --- Risk Engine ---
         can_exec, reason = self._risk.can_execute(ind_15, consensus)
+        logger.info(f"🔍 DEBUG {symbol} RISK: can_exec={can_exec}, reason={reason}")
         if not can_exec:
             logger.info(f"Sinal {symbol} vetado pelo Risk Engine: {reason}")
             return None
 
-        # Registar no log de performance
-        self._log_signal(symbol, direction, consensus, votes, ind_15)
+        # Registar no log de performance (agora com source='ensemble')
+        self._log_signal(symbol, direction, consensus, votes, ind_15, source='ensemble')
 
         return {
             'direction': direction,
@@ -144,7 +146,7 @@ class ForexSignals:
 
                 if dist_lower < -0.05 and rsi < 20:
                     confidence = min(90, 50 + int(abs(dist_lower) * 100))
-                    self._log_signal(symbol, 'BUY', confidence, {}, ind)
+                    self._log_signal(symbol, 'BUY', confidence, {}, ind, source='liquidation')
                     return {
                         'direction': 'BUY',
                         'confidence': confidence,
@@ -156,7 +158,7 @@ class ForexSignals:
 
                 if dist_upper > 0.05 and rsi > 80:
                     confidence = min(90, 50 + int(dist_upper * 100))
-                    self._log_signal(symbol, 'SELL', confidence, {}, ind)
+                    self._log_signal(symbol, 'SELL', confidence, {}, ind, source='liquidation')
                     return {
                         'direction': 'SELL',
                         'confidence': confidence,
@@ -170,7 +172,7 @@ class ForexSignals:
     # -----------------------------------------------------------------
     # Registo de sinal para tracking de performance
     # -----------------------------------------------------------------
-    def _log_signal(self, symbol, direction, confidence, votes, indicators):
+    def _log_signal(self, symbol, direction, confidence, votes, indicators, source='ensemble'):
         try:
             import sqlite3, json, os
             db_path = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
@@ -182,8 +184,8 @@ class ForexSignals:
                 (
                     symbol,
                     direction,
-                    'ensemble',
-                    'ensemble',
+                    source,          # signal_type
+                    source,          # strategy_used
                     confidence,
                     json.dumps(votes),
                     15,
