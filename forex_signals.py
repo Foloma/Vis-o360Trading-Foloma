@@ -68,51 +68,56 @@ class ForexSignals:
 
     # -----------------------------------------------------------------
     # Sinal multi-timeframe (top-down: H1 → M15) — PRINCIPAL
+    # Agora devolve (sinal_dict, motivo_bloqueio) ou (None, motivo)
     # -----------------------------------------------------------------
     def get_signal_multi_timeframe(self, symbol):
         """
         Hierarquia:
         1. H1 define tendência de fundo (EMA20 vs preço).
         2. M15 procura entrada com o ensemble completo, só na direção do H1.
+        Retorna (sinal, motivo_bloqueio) onde sinal é o dicionário do sinal ou None.
         """
 
         # --- H1: contexto de tendência ---
         ema_h1 = self._indicators.ema(symbol, period=20, granularity=3600)
         price = self._data.get_latest_price(symbol)
         if ema_h1 is None or price is None:
-            return None
+            return None, "H1 sem dados (EMA ou preço None)"
 
         if price > ema_h1 * 1.0005:
             h1_bias = 'BUY'
         elif price < ema_h1 * 0.9995:
             h1_bias = 'SELL'
         else:
-            logger.info(f"🔍 DEBUG {symbol} MTF: H1 sem tendência clara (price={price}, ema_h1={ema_h1})")
-            return None
+            motivo = f"H1 sem tendência clara (price={price:.5f}, ema_h1={ema_h1:.5f})"
+            logger.info(f"🔍 DEBUG {symbol} MTF: {motivo}")
+            return None, motivo
 
         # --- M15: ensemble completo ---
         ind_15 = self._indicators.get_all_indicators(symbol, granularity=900)
         if not ind_15.get('latest_price'):
-            return None
+            return None, "M15 sem preço"
 
         direction, consensus, votes = self._ensemble.decide(ind_15)
         logger.info(f"🔍 DEBUG {symbol} MTF: h1_bias={h1_bias}, m15_direction={direction}, consensus={consensus}%")
 
         if direction != h1_bias:
-            logger.info(f"🔍 DEBUG {symbol} MTF: M15 ({direction}) discorda de H1 ({h1_bias}) — sem sinal")
-            return None
+            motivo = f"M15 ({direction}) discorda de H1 ({h1_bias})"
+            logger.info(f"🔍 DEBUG {symbol} MTF: {motivo} — sem sinal")
+            return None, motivo
 
         # --- Risk Engine ---
         can_exec, reason = self._risk.can_execute(ind_15, consensus)
         logger.info(f"🔍 DEBUG {symbol} RISK: can_exec={can_exec}, reason={reason}")
         if not can_exec:
+            motivo = f"Risk Engine: {reason}"
             logger.info(f"Sinal {symbol} vetado pelo Risk Engine: {reason}")
-            return None
+            return None, motivo
 
-        # Registar no log de performance (agora com source='ensemble')
+        # Sinal aprovado
         self._log_signal(symbol, direction, consensus, votes, ind_15, source='ensemble')
 
-        return {
+        sinal = {
             'direction': direction,
             'confidence': consensus,
             'reason': f"H1 define {h1_bias}, M15 confirma com {consensus}% de consenso",
@@ -125,6 +130,7 @@ class ForexSignals:
             'm30_confidence': None,
             'h1_confidence': None
         }
+        return sinal, None
 
     # -----------------------------------------------------------------
     # Liquidação
@@ -229,8 +235,8 @@ class ForexSignals:
 
         signals = []
         for symbol in FOREX_SYMBOLS:
-            # Caminho principal, mostrado ao utilizador: Ensemble + Risk Engine + H1
-            s = self.get_signal_multi_timeframe(symbol)
+            # Caminho principal, agora devolve (sinal, motivo)
+            s, motivo_bloqueio = self.get_signal_multi_timeframe(symbol)
             if s:
                 pair_name = FOREX_SYMBOLS[symbol]
                 signals.append({
@@ -249,13 +255,13 @@ class ForexSignals:
             # Scorer antigo: log de comparação + deteção de sinais bloqueados pela hierarquia
             scorer_result = self.get_signal(symbol)
             if scorer_result and not s:
-                # O scorer deu sinal (BUY/SELL), mas a hierarquia H1→M15 não — registar para comparação futura
+                # O scorer deu sinal (BUY/SELL), mas a hierarquia H1→M15 não — registar com o motivo real
                 ind_for_log = scorer_result['indicators']
                 self._log_blocked_by_mtf(
                     symbol,
                     scorer_result['direction'],
                     scorer_result['confidence'],
-                    'MTF não confirmou (ver logs MTF/RISK deste momento)',
+                    motivo_bloqueio if motivo_bloqueio else 'MTF não confirmou (sem motivo detalhado)',
                     ind_for_log
                 )
 
