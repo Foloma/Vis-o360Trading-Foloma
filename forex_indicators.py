@@ -9,6 +9,7 @@ class ForexIndicators:
     """
     Calcula indicadores técnicos para pares de Forex.
     Usa os dados do ForexDataManager (ticks e velas).
+    Granularidade padrão: 900 (M15), alinhada com contratos reais.
     """
 
     def __init__(self, data_manager):
@@ -18,9 +19,9 @@ class ForexIndicators:
     # -----------------------------------------------------------------
     # Média Móvel Simples (SMA)
     # -----------------------------------------------------------------
-    def sma(self, symbol, period=200, use_candles=True):
+    def sma(self, symbol, period=200, use_candles=True, granularity=900):
         if use_candles:
-            data = self._data.get_recent_candles(symbol, count=period)
+            data = self._data.get_recent_candles(symbol, count=period, granularity=granularity)
             prices = [c['close'] for c in data]
         else:
             data = self._data.get_recent_ticks(symbol, count=period)
@@ -34,9 +35,9 @@ class ForexIndicators:
     # -----------------------------------------------------------------
     # Média Móvel Exponencial (EMA)
     # -----------------------------------------------------------------
-    def ema(self, symbol, period=200, use_candles=True):
+    def ema(self, symbol, period=200, use_candles=True, granularity=900):
         if use_candles:
-            data = self._data.get_recent_candles(symbol, count=period * 2)
+            data = self._data.get_recent_candles(symbol, count=period * 2, granularity=granularity)
             prices = [c['close'] for c in data]
         else:
             data = self._data.get_recent_ticks(symbol, count=period * 2)
@@ -60,9 +61,9 @@ class ForexIndicators:
     # -----------------------------------------------------------------
     # RSI (Relative Strength Index)
     # -----------------------------------------------------------------
-    def rsi(self, symbol, period=14, use_candles=True):
+    def rsi(self, symbol, period=14, use_candles=True, granularity=900):
         if use_candles:
-            data = self._data.get_recent_candles(symbol, count=period + 1)
+            data = self._data.get_recent_candles(symbol, count=period + 1, granularity=granularity)
             prices = [c['close'] for c in data]
         else:
             data = self._data.get_recent_ticks(symbol, count=period + 1)
@@ -88,9 +89,9 @@ class ForexIndicators:
     # -----------------------------------------------------------------
     # MACD (Moving Average Convergence Divergence)
     # -----------------------------------------------------------------
-    def macd(self, symbol, fast=12, slow=26, signal=9, use_candles=True):
+    def macd(self, symbol, fast=12, slow=26, signal=9, use_candles=True, granularity=900):
         if use_candles:
-            data = self._data.get_recent_candles(symbol, count=slow + signal + 50)
+            data = self._data.get_recent_candles(symbol, count=slow + signal + 50, granularity=granularity)
             prices = [c['close'] for c in data]
         else:
             data = self._data.get_recent_ticks(symbol, count=slow + signal + 200)
@@ -135,9 +136,9 @@ class ForexIndicators:
     # -----------------------------------------------------------------
     # Bandas de Bollinger
     # -----------------------------------------------------------------
-    def bollinger_bands(self, symbol, period=20, std_dev=2, use_candles=True):
+    def bollinger_bands(self, symbol, period=20, std_dev=2, use_candles=True, granularity=900):
         if use_candles:
-            data = self._data.get_recent_candles(symbol, count=period)
+            data = self._data.get_recent_candles(symbol, count=period, granularity=granularity)
             prices = [c['close'] for c in data]
         else:
             data = self._data.get_recent_ticks(symbol, count=period)
@@ -147,7 +148,7 @@ class ForexIndicators:
             return None, None, None
 
         sma = sum(prices[-period:]) / period
-        std = pstdev(prices[-period:])  # desvio padrão populacional
+        std = pstdev(prices[-period:])
 
         upper = sma + (std_dev * std)
         lower = sma - (std_dev * std)
@@ -157,9 +158,9 @@ class ForexIndicators:
     # -----------------------------------------------------------------
     # ADX (Average Directional Index)
     # -----------------------------------------------------------------
-    def adx(self, symbol, period=14, use_candles=True):
+    def adx(self, symbol, period=14, use_candles=True, granularity=900):
         if use_candles:
-            candles = self._data.get_recent_candles(symbol, count=period + 1)
+            candles = self._data.get_recent_candles(symbol, count=period + 1, granularity=granularity)
             if len(candles) < period + 1:
                 return None
             high = [c['high'] for c in candles]
@@ -186,9 +187,9 @@ class ForexIndicators:
     # -----------------------------------------------------------------
     # ATR (Average True Range)
     # -----------------------------------------------------------------
-    def atr(self, symbol, period=14, use_candles=True):
+    def atr(self, symbol, period=14, use_candles=True, granularity=900):
         if use_candles:
-            candles = self._data.get_recent_candles(symbol, count=period + 1)
+            candles = self._data.get_recent_candles(symbol, count=period + 1, granularity=granularity)
             if len(candles) < period + 1:
                 return None
             high = [c['high'] for c in candles]
@@ -204,9 +205,9 @@ class ForexIndicators:
     # -----------------------------------------------------------------
     # Momentum
     # -----------------------------------------------------------------
-    def momentum(self, symbol, period=10, use_candles=True):
+    def momentum(self, symbol, period=10, use_candles=True, granularity=900):
         if use_candles:
-            candles = self._data.get_recent_candles(symbol, count=period + 1)
+            candles = self._data.get_recent_candles(symbol, count=period + 1, granularity=granularity)
             if len(candles) < period + 1:
                 return None
             return candles[-1]['close'] - candles[-period - 1]['close']
@@ -219,18 +220,18 @@ class ForexIndicators:
     # -----------------------------------------------------------------
     # Indicadores compostos (para o scorer)
     # -----------------------------------------------------------------
-    def get_all_indicators(self, symbol, use_candles=True):
+    def get_all_indicators(self, symbol, use_candles=True, granularity=900):
         with self._lock:
-            macd_line, signal_line, _ = self.macd(symbol, 12, 26, 9, use_candles)
+            macd_line, signal_line, _ = self.macd(symbol, 12, 26, 9, use_candles, granularity)
             return {
                 'latest_price': self._data.get_latest_price(symbol),
-                'sma_200': self.sma(symbol, 200, use_candles),
-                'ema_50': self.ema(symbol, 50, use_candles),
-                'rsi_14': self.rsi(symbol, 14, use_candles),
+                'sma_200': self.sma(symbol, 200, use_candles, granularity),
+                'ema_50': self.ema(symbol, 50, use_candles, granularity),
+                'rsi_14': self.rsi(symbol, 14, use_candles, granularity),
                 'macd_line': macd_line,
                 'signal_line': signal_line,
-                'bollinger': self.bollinger_bands(symbol, 20, 2, use_candles),
-                'adx_14': self.adx(symbol, 14, use_candles),
-                'atr_14': self.atr(symbol, 14, use_candles),
-                'momentum_10': self.momentum(symbol, 10, use_candles),
+                'bollinger': self.bollinger_bands(symbol, 20, 2, use_candles, granularity),
+                'adx_14': self.adx(symbol, 14, use_candles, granularity),
+                'atr_14': self.atr(symbol, 14, use_candles, granularity),
+                'momentum_10': self.momentum(symbol, 10, use_candles, granularity),
             }
