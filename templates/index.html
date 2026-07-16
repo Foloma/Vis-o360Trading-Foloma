@@ -342,7 +342,7 @@
   <!-- ==================== SECÇÃO FOREX ==================== -->
   <div id="forex-section" class="hidden">
     <div class="card">
-      <div class="card-title">💱 SINAIS FOREX <span style="font-size:9px;color:var(--accent)">Day Trade</span></div>
+      <div class="card-title">💱 SINAIS FOREX <span style="font-size:9px;color:var(--accent)">Ensemble</span></div>
       <div id="forexSignalsContainer">
         <p style="text-align:center;color:var(--muted);font-size:11px">A carregar sinais...</p>
       </div>
@@ -1326,7 +1326,7 @@ function updateLatencyIndicator(latencyMs) {
 
 function updateSuggestedAmount(balance) {
   if (!balance || balance <= 0) return;
-  _suggestedAmount = Math.max(0.35, (balance * 0.02)).toFixed(2);
+  _suggestedAmount = Math.min(100, Math.max(0.35, balance * 0.02)).toFixed(2);
   const amtInput = $_('amtDigit');
   if (amtInput && !amtInput.dataset.userEdited) {
     amtInput.value = _suggestedAmount;
@@ -1368,22 +1368,36 @@ async function loadForexSignals() {
             const dirClass = s.direction === 'BUY' ? 'buy' : 'sell';
             const dirLabel = s.direction === 'BUY' ? 'COMPRA' : 'VENDA';
             const conf = s.confidence || 0;
+            const duration = s.suggested_duration_minutes || 15;
             let amount = _suggestedAmount || 1;
             let actionButton = '';
             if (conf >= 80) {
-                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},1)" style="margin-top:6px;padding:6px 16px;background:var(--accent);color:#000;border:none;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite;cursor:pointer">⚡ ENTRAR AGORA (${conf}%)</button>`;
+                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},${duration})" style="margin-top:6px;padding:6px 16px;background:var(--accent);color:#000;border:none;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite;cursor:pointer">⚡ ENTRAR AGORA (${conf}%)</button>`;
             } else if (conf >= 60) {
-                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},1)" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR (${conf}%)</button>`;
+                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},${duration})" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR (${conf}%)</button>`;
             }
+
+            // Breakdown expandido (votos do ensemble)
             let breakdownHTML = '';
             if (s.breakdown) {
-                breakdownHTML = `<div style="font-size:9px;color:var(--muted);margin-top:4px">📈 Tendência: ${s.breakdown.trend||0}pts | RSI: ${s.breakdown.rsi||0}pts | MACD: ${s.breakdown.macd||0}pts</div>`;
+                const votes = s.breakdown;
+                const parts = [];
+                for (const [key, value] of Object.entries(votes)) {
+                    parts.push(`${key}: ${value}`);
+                }
+                breakdownHTML = `<div style="font-size:9px;color:var(--muted);margin-top:4px">📊 ${parts.join(' | ')}</div>`;
             }
+
+            // Duração sugerida
+            if (s.timeframe_label) {
+                breakdownHTML += `<div style="font-size:9px;color:var(--accent);margin-top:2px">⏱ Duração sugerida: ${s.timeframe_label}</div>`;
+            }
+
             html += `<div class="forex-signal-card ${dirClass==='sell'?'sell':''} ${s.type==='liquidation'?'liquidation':''}">
                 <div style="display:flex;justify-content:space-between;align-items:center">
                     <span class="forex-pair">${s.pair}</span>
                     <span class="forex-direction ${dirClass}">${dirLabel}</span>
-                    <span class="forex-confidence">${conf}% confiança</span>
+                    <span class="forex-confidence">${conf}% consenso</span>
                 </div>
                 <div class="forex-reason">${s.reason}</div>
                 ${breakdownHTML}
@@ -1475,7 +1489,6 @@ function chgForexPair(pair, el){
 
 // CORRIGIDO: validação de amount e uso do valor sugerido / manual
 async function executarTradeForex(symbol, direction, amount, duration = 1) {
-    // Se amount não foi passado ou é inválido, tentar obter do campo manual
     if (amount === undefined || isNaN(parseFloat(amount))) {
         const manualAmt = document.getElementById('forexManualAmt');
         if (manualAmt && manualAmt.value) {
