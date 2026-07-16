@@ -199,7 +199,30 @@ class ForexSignals:
             logger.error(f"Erro ao registar sinal no log: {e}")
 
     # -----------------------------------------------------------------
-    # Todos os sinais (usa multi-timeframe como principal)
+    # Registo de sinal bloqueado pelo MTF (comparação futura)
+    # -----------------------------------------------------------------
+    def _log_blocked_by_mtf(self, symbol, scorer_direction, scorer_total, mtf_reason, ind):
+        """Regista sinais que o scorer antigo teria dado, mas a hierarquia H1→M15 bloqueou.
+        Serve para avaliar depois, com dados reais, se o filtro novo é acertado ou excessivo."""
+        try:
+            import sqlite3, json, os
+            db_path = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
+            conn = sqlite3.connect(db_path, timeout=10)
+            conn.execute(
+                "INSERT INTO forex_signal_log (symbol, direction, signal_type, strategy_used, "
+                "confidence, breakdown_json, suggested_duration_minutes, price_at_signal, timestamp) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (symbol, scorer_direction, 'blocked_by_mtf', 'blocked_by_mtf',
+                 scorer_total, json.dumps({'motivo_bloqueio': mtf_reason}), 15,
+                 ind.get('latest_price'), time.time())
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Erro ao registar sinal bloqueado: {e}")
+
+    # -----------------------------------------------------------------
+    # Todos os sinais (usa multi-timeframe como principal, scorer como paralelo)
     # -----------------------------------------------------------------
     def get_all_signals(self):
         from forex_data import FOREX_SYMBOLS
@@ -223,8 +246,18 @@ class ForexSignals:
                     'timeframe_label': s.get('timeframe_label', '15 min'),
                 })
 
-            # Scorer antigo: só para log de comparação, não aparece ao utilizador
-            _ = self.get_signal(symbol)
+            # Scorer antigo: log de comparação + deteção de sinais bloqueados pela hierarquia
+            scorer_result = self.get_signal(symbol)
+            if scorer_result and not s:
+                # O scorer deu sinal (BUY/SELL), mas a hierarquia H1→M15 não — registar para comparação futura
+                ind_for_log = scorer_result['indicators']
+                self._log_blocked_by_mtf(
+                    symbol,
+                    scorer_result['direction'],
+                    scorer_result['confidence'],
+                    'MTF não confirmou (ver logs MTF/RISK deste momento)',
+                    ind_for_log
+                )
 
             # Sinal de liquidação
             liq = self.get_liquidation_signal(symbol)
