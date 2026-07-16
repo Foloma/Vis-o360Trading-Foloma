@@ -1,66 +1,89 @@
 import logging
+import time
 from forex_indicators import ForexIndicators
-from forex_scorer import ForexScorer
+from forex_ensemble import ForexEnsemble
+from forex_risk import ForexRiskEngine
 
 logger = logging.getLogger(__name__)
 
 
 class ForexSignals:
     """
-    Gera sinais de trading (compra/venda) para pares de Forex
-    com base no scoring do ForexScorer e também deteta
-    Liquidation Reversal Signals (Bollinger + RSI).
+    Gera sinais de trading (compra/venda) para pares de Forex.
+    Usa o Ensemble para votação e o RiskEngine para validação final.
+    Inclui sugestão de duração baseada em hierarquia top-down.
     """
 
     def __init__(self, data_manager):
         self._indicators = ForexIndicators(data_manager)
-        self._scorer = ForexScorer()
+        self._ensemble = ForexEnsemble(consensus_threshold=0.6)
+        self._risk = ForexRiskEngine(min_consensus_pct=60, min_adx=20, max_atr_pct=0.5)
+        self._data = data_manager
 
-    def get_signal(self, symbol):
+    # -----------------------------------------------------------------
+    # Sinal multi-timeframe (top-down: H1 → M15 → M5 opcional)
+    # -----------------------------------------------------------------
+    def get_signal_multi_timeframe(self, symbol):
         """
-        Analisa os indicadores para um símbolo e retorna um sinal
-        de scoring, se a confiança for >= threshold.
+        Hierarquia:
+        1. H1 define tendência de fundo (EMA20 vs preço).
+        2. M15 procura entrada com o ensemble completo, só na direção do H1.
+        3. M5 é opcional (não implementado nesta fase).
         """
-        ind = self._indicators.get_all_indicators(symbol, use_candles=True)
-        if not ind.get('latest_price'):
-            logger.debug(f"Sinal {symbol}: sem preço, ignorado")
+
+        # --- H1: contexto de tendência ---
+        ema_h1 = self._indicators.ema(symbol, period=20, granularity=3600)
+        price = self._data.get_latest_price(symbol)
+        if ema_h1 is None or price is None:
             return None
 
-        total, direction, breakdown = self._scorer.score(ind)
+        # Margem de 0.05% para evitar whipsaw
+        if price > ema_h1 * 1.0005:
+            h1_bias = 'BUY'
+        elif price < ema_h1 * 0.9995:
+            h1_bias = 'SELL'
+        else:
+            return None  # sem tendência clara
 
-        if direction in ('HOLD', 'SEM_DADOS'):
-            logger.debug(f"Sinal {symbol}: {direction} (score={total})")
+        # --- M15: ensemble completo ---
+        ind_15 = self._indicators.get_all_indicators(symbol, granularity=900)
+        if not ind_15.get('latest_price'):
             return None
 
-        # Construir mensagem de razão
-        reason_parts = []
-        if breakdown.get('trend', 0) > 0:
-            reason_parts.append(f"Tendência forte ({direction})")
-        if breakdown.get('rsi', 0) > 0:
-            reason_parts.append("RSI alinhado")
-        if breakdown.get('macd', 0) > 0:
-            reason_parts.append("MACD confirma")
-        reason = f"Score {total}/100: " + ", ".join(reason_parts) if reason_parts else f"Score {total}/100"
+        direction, consensus, votes = self._ensemble.decide(ind_15)
 
-        logger.info(f"Sinal {symbol}: {direction} com {total}% confiança")
+        # Só executar se M15 concordar com H1
+        if direction != h1_bias:
+            return None
+
+        # --- Risk Engine ---
+        can_exec, reason = self._risk.can_execute(ind_15, consensus)
+        if not can_exec:
+            logger.info(f"Sinal {symbol} vetado pelo Risk Engine: {reason}")
+            return None
+
+        # Registar no log de performance
+        self._log_signal(symbol, direction, consensus, votes, ind_15)
 
         return {
             'direction': direction,
-            'confidence': total,
-            'reason': reason,
-            'indicators': ind,
-            'breakdown': breakdown,
-            'type': 'scoring'
+            'confidence': consensus,
+            'reason': f"H1 define {h1_bias}, M15 confirma com {consensus}% de consenso",
+            'indicators': ind_15,
+            'breakdown': votes,  # agora os votos substituem o breakdown antigo
+            'type': 'ensemble',
+            'suggested_duration_minutes': 15,
+            'timeframe_label': '15 min (H1 + M15)',
+            'h1_bias': h1_bias,
+            'm30_confidence': None,
+            'h1_confidence': None
         }
 
-    def get_liquidation_signal(self, symbol):
-        """
-        Detecta possíveis reversões de liquidação:
-        - Preço fechou fora das Bandas de Bollinger (2 desvios)
-        - RSI está em extremo (<20 ou >80)
-        Retorna direção esperada da reversão e confiança.
-        """
-        ind = self._indicators.get_all_indicators(symbol, use_candles=True)
+    # -----------------------------------------------------------------
+    # Liquidação (inalterado, mas agora com granularidade padrão M15)
+    # -----------------------------------------------------------------
+    def get_liquidation_signal(self, symbol, granularity=900):
+        ind = self._indicators.get_all_indicators(symbol, use_candles=True, granularity=granularity)
         if not ind['latest_price'] or not ind['bollinger']:
             return None
 
@@ -71,43 +94,73 @@ class ForexSignals:
         if upper and lower and rsi:
             band_width = upper - lower
             if band_width > 0:
-                dist_lower = (price - lower) / band_width  # negativo se abaixo
-                dist_upper = (price - upper) / band_width  # positivo se acima
+                dist_lower = (price - lower) / band_width
+                dist_upper = (price - upper) / band_width
 
-                # Preço abaixo da banda inferior e RSI < 20 → reversão para cima
                 if dist_lower < -0.05 and rsi < 20:
                     confidence = min(90, 50 + int(abs(dist_lower) * 100))
-                    logger.info(f"Liquidation {symbol}: BUY com {confidence}% (RSI={rsi})")
+                    self._log_signal(symbol, 'BUY', confidence, {}, ind)
                     return {
                         'direction': 'BUY',
                         'confidence': confidence,
                         'reason': f'Liquidation Reversal: preço {abs(dist_lower)*100:.1f}% abaixo da banda inferior, RSI={rsi}',
-                        'type': 'liquidation'
+                        'type': 'liquidation',
+                        'suggested_duration_minutes': 15,
+                        'timeframe_label': '15 min (liquidação)'
                     }
 
-                # Preço acima da banda superior e RSI > 80 → reversão para baixo
                 if dist_upper > 0.05 and rsi > 80:
                     confidence = min(90, 50 + int(dist_upper * 100))
-                    logger.info(f"Liquidation {symbol}: SELL com {confidence}% (RSI={rsi})")
+                    self._log_signal(symbol, 'SELL', confidence, {}, ind)
                     return {
                         'direction': 'SELL',
                         'confidence': confidence,
                         'reason': f'Liquidation Reversal: preço {dist_upper*100:.1f}% acima da banda superior, RSI={rsi}',
-                        'type': 'liquidation'
+                        'type': 'liquidation',
+                        'suggested_duration_minutes': 15,
+                        'timeframe_label': '15 min (liquidação)'
                     }
         return None
 
+    # -----------------------------------------------------------------
+    # Registo de sinal para tracking de performance
+    # -----------------------------------------------------------------
+    def _log_signal(self, symbol, direction, confidence, votes, indicators):
+        try:
+            import sqlite3, json, os
+            db_path = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
+            conn = sqlite3.connect(db_path, timeout=10)
+            conn.execute(
+                "INSERT INTO forex_signal_log (symbol, direction, signal_type, strategy_used, "
+                "confidence, breakdown_json, suggested_duration_minutes, price_at_signal, timestamp) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    symbol,
+                    direction,
+                    'ensemble',
+                    'ensemble',
+                    confidence,
+                    json.dumps(votes),
+                    15,
+                    indicators.get('latest_price'),
+                    time.time()
+                )
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Erro ao registar sinal no log: {e}")
+
+    # -----------------------------------------------------------------
+    # Todos os sinais
+    # -----------------------------------------------------------------
     def get_all_signals(self):
-        """
-        Retorna uma lista de todos os sinais (scoring + liquidação)
-        para todos os pares Forex disponíveis.
-        """
         from forex_data import FOREX_SYMBOLS
 
         signals = []
         for symbol in FOREX_SYMBOLS:
-            # Sinal normal (scoring)
-            s = self.get_signal(symbol)
+            # Sinal principal (multi-timeframe com ensemble)
+            s = self.get_signal_multi_timeframe(symbol)
             if s:
                 pair_name = FOREX_SYMBOLS[symbol]
                 signals.append({
@@ -118,10 +171,14 @@ class ForexSignals:
                     'reason': s['reason'],
                     'indicators': s['indicators'],
                     'breakdown': s.get('breakdown'),
-                    'type': s.get('type', 'scoring')
+                    'type': s.get('type', 'ensemble'),
+                    'suggested_duration_minutes': s.get('suggested_duration_minutes', 15),
+                    'timeframe_label': s.get('timeframe_label', '15 min'),
+                    'm30_confidence': s.get('m30_confidence'),
+                    'h1_confidence': s.get('h1_confidence')
                 })
 
-            # Sinal de liquidação (se existir)
+            # Sinal de liquidação
             liq = self.get_liquidation_signal(symbol)
             if liq:
                 pair_name = FOREX_SYMBOLS[symbol]
@@ -131,7 +188,11 @@ class ForexSignals:
                     'direction': liq['direction'],
                     'confidence': liq['confidence'],
                     'reason': liq['reason'],
-                    'indicators': None,  # não inclui indicadores completos para liquidação
-                    'type': liq['type']
+                    'indicators': None,
+                    'type': liq['type'],
+                    'suggested_duration_minutes': liq.get('suggested_duration_minutes', 15),
+                    'timeframe_label': liq.get('timeframe_label', '15 min (liquidação)'),
+                    'm30_confidence': None,
+                    'h1_confidence': None
                 })
         return signals
