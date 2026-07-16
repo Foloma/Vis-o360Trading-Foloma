@@ -112,6 +112,27 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS oauth_states (
         state_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, account_type TEXT DEFAULT 'demo',
         created_at REAL NOT NULL, used INTEGER DEFAULT 0, code_verifier TEXT)''')
+
+    # NOVA TABELA: registo de sinais Forex com métricas de performance
+    c.execute('''CREATE TABLE IF NOT EXISTS forex_signal_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT,
+        direction TEXT,
+        signal_type TEXT,
+        strategy_used TEXT,
+        confidence INTEGER,
+        breakdown_json TEXT,
+        suggested_duration_minutes INTEGER,
+        price_at_signal REAL,
+        timestamp REAL,
+        evaluated INTEGER DEFAULT 0,
+        outcome TEXT,
+        price_after REAL,
+        evaluated_at REAL,
+        was_executed INTEGER DEFAULT 0,
+        actual_profit REAL
+    )''')
+
     try:
         c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
     except sqlite3.OperationalError:
@@ -134,6 +155,46 @@ init_db()
 
 OAUTH_STATE_TTL = 900
 
+# ==================== NOVA FUNÇÃO: avaliação automática de sinais Forex ====================
+def evaluate_pending_forex_signals():
+    """Avalia sinais Forex que já passaram do tempo (15 min) e regista o outcome."""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+        cutoff = time.time() - 900  # 15 minutos
+        rows = conn.execute(
+            "SELECT id, symbol, direction, price_at_signal FROM forex_signal_log "
+            "WHERE evaluated=0 AND timestamp < ?", (cutoff,)
+        ).fetchall()
+        if not rows:
+            conn.close()
+            return
+
+        # Obter o ForexDataManager da primeira sessão disponível (só para obter preço atual)
+        forex_mgr = None
+        with sessions_lock:
+            for uid, sess in sessions.items():
+                fm = sess.get('forex_data')
+                if fm:
+                    forex_mgr = fm
+                    break
+
+        for sid, symbol, direction, price_then in rows:
+            price_now = None
+            if forex_mgr:
+                price_now = forex_mgr.get_latest_price(symbol)
+            if price_now is None:
+                continue
+            moved_up = price_now > price_then
+            outcome = 'win' if (direction == 'BUY') == moved_up else 'loss'
+            conn.execute(
+                "UPDATE forex_signal_log SET evaluated=1, outcome=?, price_after=?, evaluated_at=? WHERE id=?",
+                (outcome, price_now, time.time(), sid)
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao avaliar sinais Forex pendentes: {e}")
+
 def _cleanup_loop():
     while True:
         time.sleep(3600)
@@ -155,6 +216,8 @@ def _cleanup_loop():
                         to_remove.append(uid)
                 for uid in to_remove:
                     sessions.pop(uid, None)
+            # Avaliar sinais Forex pendentes
+            evaluate_pending_forex_signals()
         except Exception as e:
             logger.error(f"Erro na limpeza periódica: {e}")
 
@@ -649,7 +712,9 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 for symbol in FOREX_SYMBOLS:
                     forex_mgr.request_candles(symbol, granularity=60, count=250)   # M1
                     forex_mgr.request_candles(symbol, granularity=300, count=200)  # M5
-                    forex_mgr.request_candles(symbol, granularity=900, count=100)  # M15
+                    forex_mgr.request_candles(symbol, granularity=900, count=250)  # M15 — CORRIGIDO para 250
+                    forex_mgr.request_candles(symbol, granularity=1800, count=100)  # M30
+                    forex_mgr.request_candles(symbol, granularity=3600, count=30)   # H1 — reduzido, só precisa de EMA20
             else:
                 auth_err = getattr(client, 'auth_error', None)
                 if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
@@ -1542,7 +1607,7 @@ def _duration_str_to_seconds(dur_str):
         return None
     unit = dur_str[-1]
     if unit == 't':
-        return None  # ticks não são comparáveis a tempo
+        return None
     try:
         val = int(dur_str[:-1])
     except ValueError:
@@ -1567,9 +1632,9 @@ def forex_contracts_for(symbol):
         min_s = _duration_str_to_seconds(limits.get('min'))
         max_s = _duration_str_to_seconds(limits.get('max'))
         if min_s is None or max_s is None:
-            continue  # contrato só aceita ticks, ou dados incompletos — não aplicável a Forex manual
+            continue
 
-        min_m = max(1, -(-min_s // 60))   # arredonda para cima, mínimo 1 minuto
+        min_m = max(1, -(-min_s // 60))
         max_m = max_s // 60
         if max_m < min_m:
             continue
@@ -1589,7 +1654,7 @@ def forex_contracts_for(symbol):
     return jsonify({'symbol': symbol, 'durations': result})
 
 # ============================================================
-# CORRIGIDA: rota de trade Forex com validação robusta de amount/duration
+# CORRIGIDA: rota de trade Forex com validação robusta
 # ============================================================
 @app.route('/api/forex/trade', methods=['POST'])
 @require_auth
@@ -1641,7 +1706,6 @@ def forex_trade():
     if not ok:
         return jsonify({'error': msg or 'Falha ao enviar ordem'}), 400
 
-    # Aguardar resultado da proposta (timeout 5s)
     deadline = time.time() + 5
     while time.time() < deadline:
         status = client.get_pending_trade_status()
@@ -1654,6 +1718,29 @@ def forex_trade():
         time.sleep(0.2)
 
     return jsonify({'error': 'Proposta demorou muito. Verifique o estado na Deriv.'}), 500
+
+# ============================================================
+# NOVO ENDPOINT: assertividade histórica dos sinais Forex
+# ============================================================
+@app.route('/api/forex/assertividade')
+@require_auth
+def forex_assertividade():
+    symbol = request.args.get('symbol')
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    q = "SELECT outcome FROM forex_signal_log WHERE evaluated=1"
+    params = []
+    if symbol:
+        q += " AND symbol=?"
+        params.append(symbol)
+    q += " ORDER BY id DESC LIMIT 50"
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+
+    if len(rows) < 15:
+        return jsonify({'assertividade': None, 'amostra': len(rows), 'message': 'Amostra insuficiente (mínimo 15)'})
+
+    wins = sum(1 for r in rows if r[0] == 'win')
+    return jsonify({'assertividade': round(wins / len(rows) * 100, 1), 'amostra': len(rows)})
 
 # ==================== ROTAS ADMIN ====================
 @app.route('/api/admin/users')
