@@ -69,6 +69,7 @@ class ForexSignals:
     # -----------------------------------------------------------------
     # Sinal multi-timeframe (top-down: H1 → M15) — PRINCIPAL
     # Agora devolve (sinal_dict, motivo_bloqueio) ou (None, motivo)
+    # Margem de whipsaw reduzida de 0.05% para 0.02% (ajuste experimental)
     # -----------------------------------------------------------------
     def get_signal_multi_timeframe(self, symbol):
         """
@@ -84,9 +85,10 @@ class ForexSignals:
         if ema_h1 is None or price is None:
             return None, "H1 sem dados (EMA ou preço None)"
 
-        if price > ema_h1 * 1.0005:
+        # Margem de whipsaw reduzida para 0.02% (era 0.05%)
+        if price > ema_h1 * 1.0002:
             h1_bias = 'BUY'
-        elif price < ema_h1 * 0.9995:
+        elif price < ema_h1 * 0.9998:
             h1_bias = 'SELL'
         else:
             motivo = f"H1 sem tendência clara (price={price:.5f}, ema_h1={ema_h1:.5f})"
