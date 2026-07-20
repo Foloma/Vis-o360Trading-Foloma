@@ -176,12 +176,20 @@ class ForexDataManager:
             return candles[-count:] if count else candles
 
     def get_latest_price(self, symbol):
-        """Retorna o preço mais recente de um par."""
+        """Retorna o preço mais recente de um par, com fallback para o último fecho das velas."""
         symbol = self._normalize_symbol(symbol)
         with self._lock:
+            # 1. Tentar tick mais recente
             ticks = self._ticks.get(symbol, [])
             if ticks:
                 return ticks[-1]['price']
+
+            # 2. Fallback: último fecho das velas M1 → M5 → M15
+            for granularity in [60, 300, 900]:
+                candles = self._candles.get(symbol, {}).get(granularity, [])
+                if candles:
+                    return candles[-1]['close']
+
             return None
 
     def request_candles(self, symbol, granularity=60, count=50):
