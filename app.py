@@ -223,6 +223,26 @@ def _cleanup_loop():
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
+# ==================== NOVA THREAD: refresco periódico de candles M15/M30/H1 ====================
+def _refresh_forex_candles_loop():
+    while True:
+        time.sleep(600)  # a cada 10 minutos
+        try:
+            with sessions_lock:
+                sessions_snapshot = list(sessions.items())
+            for uid, sess in sessions_snapshot:
+                forex_mgr = sess.get('forex_data')
+                client = sess.get('client')
+                if forex_mgr and client and client.authorized:
+                    for symbol in FOREX_SYMBOLS:
+                        forex_mgr.request_candles(symbol, granularity=900, count=250)
+                        forex_mgr.request_candles(symbol, granularity=1800, count=100)
+                        forex_mgr.request_candles(symbol, granularity=3600, count=30)
+        except Exception as e:
+            logger.error(f"Erro no refresco periódico de candles Forex: {e}")
+
+threading.Thread(target=_refresh_forex_candles_loop, daemon=True).start()
+
 def load_markup_from_db():
     try:
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
