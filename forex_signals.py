@@ -68,8 +68,6 @@ class ForexSignals:
 
     # -----------------------------------------------------------------
     # Sinal multi-timeframe (top-down: H1 → M15) — PRINCIPAL
-    # Agora devolve (sinal_dict, motivo_bloqueio) ou (None, motivo)
-    # Margem de whipsaw reduzida de 0.05% para 0.02% (ajuste experimental)
     # -----------------------------------------------------------------
     def get_signal_multi_timeframe(self, symbol):
         """
@@ -97,6 +95,18 @@ class ForexSignals:
 
         # --- M15: ensemble completo ---
         ind_15 = self._indicators.get_all_indicators(symbol, granularity=900)
+
+        # --- DIAGNÓSTICO TEMPORÁRIO: verificar se a última vela M15 já fechou ---
+        candles_check = self._data.get_recent_candles(symbol, count=1, granularity=900)
+        if candles_check:
+            last_epoch = candles_check[-1].get('epoch', 0)
+            now = time.time()
+            seconds_into_candle = now - last_epoch
+            logger.info(f"🔍 REPAINT-CHECK {symbol}: última vela epoch={last_epoch}, "
+                        f"agora={now:.0f}, segundos dentro do período={seconds_into_candle:.0f}s "
+                        f"(vela M15 fecha aos 900s)")
+        # --- FIM DIAGNÓSTICO ---
+
         if not ind_15.get('latest_price'):
             return None, "M15 sem preço"
 
