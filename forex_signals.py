@@ -127,14 +127,22 @@ class ForexSignals:
             return None, motivo
 
         # Sinal aprovado
-        self._log_signal(symbol, direction, consensus, votes, ind_15, source='ensemble')
+        seconds_into_candle = None
+        if candles_check:
+            seconds_into_candle = round(time.time() - candles_check[-1].get('epoch', 0))
+        logger.info(f"🔍 REPAINT-AT-SIGNAL {symbol}: sinal aprovado com vela a {seconds_into_candle}s de maturidade (de 900s)")
+
+        votes_with_meta = dict(votes)
+        votes_with_meta['_candle_maturity_seconds'] = seconds_into_candle
+
+        self._log_signal(symbol, direction, consensus, votes_with_meta, ind_15, source='ensemble')
 
         sinal = {
             'direction': direction,
             'confidence': consensus,
             'reason': f"H1 define {h1_bias}, M15 confirma com {consensus}% de consenso",
             'indicators': ind_15,
-            'breakdown': votes,
+            'breakdown': votes_with_meta,
             'type': 'ensemble',
             'suggested_duration_minutes': 15,
             'timeframe_label': '15 min (H1 + M15)',
@@ -267,7 +275,6 @@ class ForexSignals:
             # Scorer antigo: log de comparação + deteção de sinais bloqueados pela hierarquia
             scorer_result = self.get_signal(symbol)
             if scorer_result and not s:
-                # O scorer deu sinal (BUY/SELL), mas a hierarquia H1→M15 não — registar com o motivo real
                 ind_for_log = scorer_result['indicators']
                 self._log_blocked_by_mtf(
                     symbol,
