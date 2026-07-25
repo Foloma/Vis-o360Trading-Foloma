@@ -29,7 +29,8 @@ class Config:
     CONTRACT_DURATION = 10
     CONTRACT_DURATION_UNIT = 't'
 
-    DIGIT_CONTRACT_DURATION = 5
+    # FIX F8: duração do contrato de dígitos passou de 5 para 2 ticks
+    DIGIT_CONTRACT_DURATION = 2
     DIGIT_CONTRACT_DURATION_UNIT = 't'
 
     REFERRAL_COMMISSION_PERCENTAGE = 0.5  # Renomeado (era MARKUP_PERCENTAGE)
