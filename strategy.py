@@ -11,7 +11,7 @@ class StrategyManager:
     Implementa os módulos da Foloma Visão 360 com sincronização por snapshots.
     - Sinais gerados automaticamente (differ/parity no início do ciclo; matches/zscore sempre).
     - Preview sem efeitos colaterais.
-    - Cache de sinais expira após 5 ticks.
+    - Cache de sinais expira após 10 ticks (F2).
     - Entrada apenas no clique (evaluate_*), que consome o estado.
     - Trade Lock com timeout de 20 segundos.
     - Paridade exige 5 ou 6 ocorrências do mesmo tipo nos últimos 6 dígitos.
@@ -21,11 +21,8 @@ class StrategyManager:
     - Snapshots com metadados (mode, expires_in_ticks).
     - DIFFER apenas no modo REPEAT (consecutivo). RARITY removido.
     - Histórico de preços reiniciado ao mudar de símbolo (evita falsos spikes).
-    - FIX F3: Paridade usa cooldown de 15 ticks em vez de uma entrada por ciclo.
-    - FIX F4: Validade de sinal aumentada para 8 ticks.
-    - FIX F5: Filtro de spike relaxado para 0.4%.
-    - FIX F6: Cooldown MATCHES reduzido para 45s.
-    - FIX F7: Geração de sinais: parity antes de differ.
+    - F3: DIFFER limpa sequência usada no início de novo ciclo (tr >= 95).
+    - F5: Filtro de spike relaxado para 0.4%.
     """
 
     def __init__(self, client, analyzer):
@@ -43,7 +40,7 @@ class StrategyManager:
         self._cooldown_until = 0
         self._differ_sequence_used = set()
 
-        # FIX F3: substitui flags de paridade por tick do último uso
+        # Paridade com cooldown de ticks
         self._parity_last_used_tick = 0
         self._parity_martingale_used = False
         self._last_parity_streak_type = None
@@ -62,16 +59,15 @@ class StrategyManager:
             'zscore': None
         }
 
-        # FIX F4: validade de sinal passou de 5 para 8 ticks
-        self.SIGNAL_VALIDITY_TICKS = 8
+        # F2: validade de sinal aumentada para 10 ticks
+        self.SIGNAL_VALIDITY_TICKS = 10
         self._trade_locked = False
         self._trade_locked_at = 0
         self.TRADE_LOCK_TIMEOUT = 20
 
-        # FIX F1: MATCHES threshold 45 (era 20)
         self.MATCHES_ABSENCE_THRESHOLD = 45
 
-        # FIX F5: spike de 0.2% -> 0.4%
+        # F5: spike de 0.2% -> 0.4%
         self.MARKET_SPIKE_THRESHOLD = 0.004
 
     # -----------------------------------------------------------------
@@ -148,7 +144,6 @@ class StrategyManager:
     # Atualização a cada tick
     # -----------------------------------------------------------------
     def on_tick(self, tick):
-        # CORREÇÃO: ignorar ticks de outros símbolos (ex: Forex)
         symbol = tick.get('symbol', '')
         if symbol and self.client and symbol != self.client.current_symbol:
             return
@@ -189,7 +184,6 @@ class StrategyManager:
             tr = self.analyzer.get_ticks_remaining()
             inicio_ciclo = tr >= tpd - 1
 
-            # FIX F7: parity primeiro
             if inicio_ciclo:
                 for strategy in ('parity', 'differ'):
                     if self._active_signals.get(strategy) and self._is_signal_still_valid(self._active_signals[strategy]):
@@ -293,8 +287,6 @@ class StrategyManager:
         odd_count = sum(last_six)
         even_count = 6 - odd_count
 
-        # FIX F3: sinais gerados sempre que a condição estiver presente,
-        # a restrição por tick é feita na execução
         if odd_count >= 5:
             return {'recommendation': 'even',
                     'digits': recent[-6:],
@@ -393,7 +385,7 @@ class StrategyManager:
             if self._trade_locked:
                 return None, "Trade em curso"
 
-            # FIX F2: limpa sequência usada se ainda houver muitos ticks no ciclo
+            # F3: limpar sequência usada no início do ciclo
             tr = self.analyzer.get_ticks_remaining()
             if tr >= 95:
                 self._differ_sequence_used.clear()
@@ -410,15 +402,12 @@ class StrategyManager:
                 self._differ_sequence_used.add(rec)
                 self._last_differ_digit = rec
 
-                # FIX F9: log do dígito actual na tela
                 logger.info(f"🎯 TELA | digit={self.analyzer.get_current_digit()} | count={self.analyzer.get_tick_count()} | aposta={rec}")
                 logger.info(f"✅ DIFFER executado: snapshot {signal['id']}")
                 return rec, signal['reason']
             return self._generate_differ_signal()
 
     def _generate_differ_signal(self):
-        """DIFFER apenas no modo REPEAT."""
-        # FIX F2: se ainda estamos no inicio do ciclo, limpar bloqueios antigos
         tr = self.analyzer.get_ticks_remaining()
         if tr >= 95:
             self._differ_sequence_used.clear()
@@ -451,7 +440,6 @@ class StrategyManager:
             if self._trade_locked:
                 return None, "Trade em curso"
 
-            # FIX F3: cooldown de 15 ticks em vez de restrição por ciclo
             current_tick = self.analyzer.get_tick_count()
             if current_tick - self._parity_last_used_tick < 15:
                 return None, f"Paridade cooldown {15 - (current_tick - self._parity_last_used_tick)} ticks"
@@ -468,7 +456,6 @@ class StrategyManager:
                 self._parity_last_used_tick = current_tick
                 self._last_parity_streak_type = 'odd' if rec == 'even' else 'even'
 
-                # FIX F9: log do dígito actual na tela
                 logger.info(f"🎯 TELA | digit={self.analyzer.get_current_digit()} | count={self.analyzer.get_tick_count()} | aposta={rec}")
                 logger.info(f"✅ PAR/ÍMPAR executado: snapshot {signal['id']}")
                 return rec, signal['reason']
@@ -482,7 +469,6 @@ class StrategyManager:
         odd_count = sum(last_six)
         even_count = 6 - odd_count
 
-        # FIX F3: já não usamos flags de paridade; a restrição é o cooldown de ticks
         if odd_count >= 5:
             if self._parity_martingale_used and not self._can_martingale():
                 return None, "Martingale bloqueado"
@@ -607,7 +593,7 @@ class StrategyManager:
     def reset_sequence_state(self):
         with self._lock:
             self._differ_sequence_used.clear()
-            self._parity_last_used_tick = 0   # FIX F3
+            self._parity_last_used_tick = 0
             self._parity_martingale_used = False
             self._last_parity_streak_type = None
             self._matches_sequence_used = False
@@ -646,7 +632,6 @@ class StrategyManager:
                     else:
                         self._apply_cooldown(5)
                 elif action_upper.startswith('MATCH') or action_upper.startswith('Z_MATCH'):
-                    # FIX F6: cooldown MATCHES reduzido de 150s para 45s
                     self._matches_cooldown_until = time.time() + 45
                     self._apply_cooldown(10)
                 else:
