@@ -93,6 +93,9 @@ class ForexDataManager:
                 'timestamp': float(timestamp)
             })
 
+    # ========================================================================
+    # CORRIGIDO: deduplicação de velas refeita para nunca travar a atualização
+    # ========================================================================
     def on_candles(self, data, req_id=None):
         """
         Callback chamado quando uma resposta de ticks_history (candles) chega.
@@ -137,25 +140,27 @@ class ForexDataManager:
                 self._candles[symbol][granularity] = deque(maxlen=300)
 
             existing = self._candles[symbol][granularity]
+            last_epoch = existing[-1]['epoch'] if existing else 0
 
-            # Proteção contra duplicados (evitar inserir as mesmas velas novamente)
-            if existing and candles:
-                last_existing = existing[-1]
-                first_new = candles[0]
-                if (last_existing.get('epoch') == first_new.get('epoch') and
-                    last_existing.get('close') == float(first_new.get('close', 0))):
-                    return
-
+            # Processar cada vela individualmente, ignorando apenas as já existentes
             for candle in candles:
+                epoch = candle.get('epoch')
+                if epoch is None:
+                    continue
+                if epoch <= last_epoch:
+                    # Esta vela (ou uma mais antiga) já está no cache
+                    continue
                 existing.append({
-                    'epoch': candle.get('epoch'),
+                    'epoch': epoch,
                     'open': float(candle['open']),
                     'high': float(candle['high']),
                     'low': float(candle['low']),
                     'close': float(candle['close'])
                 })
+                last_epoch = epoch   # atualizar o último epoch conhecido
 
-            logger.info(f"📈 Velas Forex recebidas: {symbol} (granularity={granularity}, {len(candles)} velas)")
+            if existing:
+                logger.info(f"📈 Velas Forex recebidas: {symbol} (granularity={granularity}, {len(candles)} velas)")
 
     def get_recent_ticks(self, symbol, count=100):
         """Retorna os últimos `count` ticks para o símbolo pedido."""
