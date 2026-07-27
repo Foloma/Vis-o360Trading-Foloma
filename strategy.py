@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 import uuid
 import threading
@@ -11,7 +12,7 @@ class StrategyManager:
     Implementa os módulos da Foloma Visão 360 com sincronização por snapshots.
     - Sinais gerados automaticamente (differ/parity no início do ciclo; matches/zscore sempre).
     - Preview sem efeitos colaterais.
-    - Cache de sinais expira após 10 ticks (F2).
+    - Cache de sinais expira após SIGNAL_VALIDITY_TICKS ticks (configurável, default 10).
     - Entrada apenas no clique (evaluate_*), que consome o estado.
     - Trade Lock com timeout de 20 segundos.
     - Paridade exige 5 ou 6 ocorrências do mesmo tipo nos últimos 6 dígitos.
@@ -21,8 +22,10 @@ class StrategyManager:
     - Snapshots com metadados (mode, expires_in_ticks).
     - DIFFER apenas no modo REPEAT (consecutivo). RARITY removido.
     - Histórico de preços reiniciado ao mudar de símbolo (evita falsos spikes).
-    - F3: DIFFER limpa sequência usada no início de novo ciclo (tr >= 95).
-    - F5: Filtro de spike relaxado para 0.4%.
+    - Bug 1 corrigido: apenas clear por ciclo (tr >= 95), removido clear por diferença.
+    - Bug 2 corrigido: cooldown após loss DIFFER = 12s (era 5s).
+    - Bug 3 implementado: pausa DIFFER 5 min após 2 losses consecutivos.
+    - Correção adicional: pausa DIFFER não é cancelada por wins na paridade.
     """
 
     def __init__(self, client, analyzer):
@@ -39,6 +42,10 @@ class StrategyManager:
         self._global_stop_until = 0
         self._cooldown_until = 0
         self._differ_sequence_used = set()
+
+        # Bug 3: contador dedicado de losses consecutivos no DIFFER
+        self._consecutive_losses_differ = 0
+        self._differ_cooldown_until = 0
 
         # Paridade com cooldown de ticks
         self._parity_last_used_tick = 0
@@ -59,16 +66,16 @@ class StrategyManager:
             'zscore': None
         }
 
-        # F2: validade de sinal aumentada para 10 ticks
-        self.SIGNAL_VALIDITY_TICKS = 10
+        # F2 condicionada: validade do sinal configurável por variável de ambiente
+        self.SIGNAL_VALIDITY_TICKS = int(os.getenv('SIGNAL_VALIDITY', 10))
         self._trade_locked = False
         self._trade_locked_at = 0
         self.TRADE_LOCK_TIMEOUT = 20
 
         self.MATCHES_ABSENCE_THRESHOLD = 45
 
-        # F5: spike de 0.2% -> 0.4%
-        self.MARKET_SPIKE_THRESHOLD = 0.004
+        # F5 mantida em 0.002 até backtest comprovatório
+        self.MARKET_SPIKE_THRESHOLD = 0.002
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -266,6 +273,10 @@ class StrategyManager:
     # -----------------------------------------------------------------
     def _preview_differ_signal(self):
         """DIFFER apenas no modo REPEAT — dígito repetido consecutivamente (XX)."""
+        # Bug 3: verificar pausa de 5 minutos após 2 losses consecutivos
+        if time.time() < self._differ_cooldown_until:
+            return None
+
         recent = self.analyzer.get_recent_digits(20)
         if len(recent) >= 2:
             last_two = recent[-2:]
@@ -385,7 +396,12 @@ class StrategyManager:
             if self._trade_locked:
                 return None, "Trade em curso"
 
-            # F3: limpar sequência usada no início do ciclo
+            # Bug 3: verificar pausa de 5 minutos
+            if time.time() < self._differ_cooldown_until:
+                remaining = self._differ_cooldown_until - time.time()
+                return None, f"Pausa DIFFER {remaining:.0f}s restantes"
+
+            # Bug 1: apenas clear por ciclo (tr >= 95)
             tr = self.analyzer.get_ticks_remaining()
             if tr >= 95:
                 self._differ_sequence_used.clear()
@@ -408,6 +424,11 @@ class StrategyManager:
             return self._generate_differ_signal()
 
     def _generate_differ_signal(self):
+        # Bug 3: verificar pausa de 5 minutos
+        if time.time() < self._differ_cooldown_until:
+            return None, "Pausa DIFFER ativa"
+
+        # Bug 1: apenas clear por ciclo
         tr = self.analyzer.get_ticks_remaining()
         if tr >= 95:
             self._differ_sequence_used.clear()
@@ -427,8 +448,7 @@ class StrategyManager:
                                                     mode='repeat')
                         logger.info(f"✅ DIFFER SINAL GERADO (REPEAT): {signal['id']}")
                         return digit, signal['reason']
-        if len(recent) >= 3 and recent[-3] != recent[-2]:
-            self._differ_sequence_used.clear()
+        # Bug 1 corrigido: removida a linha que fazia clear por diferença
         return None, "Nenhum padrão DIFFER"
 
     def evaluate_parity(self):
@@ -603,7 +623,7 @@ class StrategyManager:
             self._trade_locked = False
 
     # ================================================================
-    # notify_result — unlock_trade FORA do lock
+    # notify_result — com correções de bugs 2 e 3 + proteção da pausa
     # ================================================================
     def notify_result(self, action, is_win):
         with self._lock:
@@ -620,11 +640,20 @@ class StrategyManager:
                     self._global_stop_until = time.time() + 180
                     logger.warning("🛑 STOP GLOBAL: 3 perdas consecutivas — pausa 3 min")
                     self._consecutive_losses = 0
+                    self._consecutive_losses_differ = 0
+                    self._differ_cooldown_until = 0
                     self.reset_sequence_state()
                     return
 
                 if action_upper.startswith('DIFFER') or action_upper.startswith('Z_DIFFER'):
-                    self._apply_cooldown(5)
+                    # Bug 2: cooldown de 12s (era 5s)
+                    self._apply_cooldown(12)
+                    # Bug 3: contador de losses consecutivos no DIFFER
+                    self._consecutive_losses_differ += 1
+                    if self._consecutive_losses_differ >= 2:
+                        self._differ_cooldown_until = time.time() + 300
+                        self._consecutive_losses_differ = 0
+                        logger.warning("⏸️ Pausa DIFFER por 5 minutos — usar apenas PARIDADE")
                 elif action_upper in ('CALL', 'PUT', 'DIGITODD', 'DIGITEVEN'):
                     if not self._parity_martingale_used and self._last_parity_streak_type:
                         self._apply_cooldown(1)
@@ -639,8 +668,21 @@ class StrategyManager:
                     self._apply_cooldown(5)
             else:
                 self._consecutive_losses = 0
-                self.reset_sequence_state()
+                # Reset seletivo que NÃO limpa a pausa do DIFFER
+                self._differ_sequence_used.clear()
+                self._parity_last_used_tick = 0
+                self._parity_martingale_used = False
+                self._last_parity_streak_type = None
+                self._matches_sequence_used = False
+                self._zscore_sequence_used = False
+                for key in self._active_signals:
+                    self._active_signals[key] = None
+                self._trade_locked = False
+
+                # Apenas um win no DIFFER cancela a pausa
                 if action_upper.startswith('DIFFER') or action_upper.startswith('Z_DIFFER'):
+                    self._consecutive_losses_differ = 0
+                    self._differ_cooldown_until = 0
                     self._apply_cooldown(1)
                 elif action_upper in ('CALL', 'PUT', 'DIGITODD', 'DIGITEVEN'):
                     self._apply_cooldown(2)
