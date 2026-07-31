@@ -35,7 +35,7 @@ class DerivWebSocketClient:
         self.pending_trade = None
         self.pending_trade_time = 0
 
-        # lock único para proposta + trade
+        # FIX F11: lock único para proposta + trade
         self._proposal_lock = threading.RLock()
 
         self._req_lock = threading.Lock()
@@ -65,7 +65,7 @@ class DerivWebSocketClient:
         self._had_gap = False
         self._first_connect = True
 
-        # cache de velas por símbolo
+        # FIX F10: cache de velas por símbolo
         self._candles_cache = {}
         self._candles_cache_lock = threading.Lock()
 
@@ -126,6 +126,9 @@ class DerivWebSocketClient:
     def _is_otp_ws(self):
         return self._ws_url and 'otp=' in self._ws_url
 
+    # -----------------------------------------------------------------
+    # FIX F13: get_last_tick_seconds_ago evita 999 nos primeiros 15s
+    # -----------------------------------------------------------------
     def get_last_tick_seconds_ago(self):
         if self._last_tick_time is None:
             if self._auth_time and (time.time() - self._auth_time) < 15:
@@ -239,6 +242,9 @@ class DerivWebSocketClient:
             self._poller_thread.join(timeout=2)
         self._poller_thread = None
 
+    # -----------------------------------------------------------------
+    # FIX F14: poller intervalo 15s e timeout 45s
+    # -----------------------------------------------------------------
     def _poller_loop(self):
         while not self._poller_stop.wait(timeout=15):
             if self._stop_event.is_set() or not self.authorized:
@@ -556,6 +562,9 @@ class DerivWebSocketClient:
             self._req_counter += 1
             return self._req_counter
 
+    # -----------------------------------------------------------------
+    # FIX F15: _pre_trade_check tolerância de reconexão 3s
+    # -----------------------------------------------------------------
     def _pre_trade_check(self):
         if time.time() - self._last_reconnect_time < 3:
             return False, "Reconexão recente"
@@ -586,7 +595,7 @@ class DerivWebSocketClient:
         return base_payload
 
     # -----------------------------------------------------------------
-    # Métodos de trade DIGIT (place_trade, place_differ_trade, etc.)
+    # Métodos de trade DIGIT
     # -----------------------------------------------------------------
     def place_trade(self, contract_type, amount, is_digit=False):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
@@ -755,7 +764,7 @@ class DerivWebSocketClient:
                 return False
 
     # ============================================================
-    # CORRIGIDO: place_forex_trade (tupla em todos os retornos)
+    # CORRIGIDO: place_forex_trade
     # ============================================================
     def place_forex_trade(self, symbol, direction, amount, duration=1):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
@@ -1085,6 +1094,9 @@ class DerivWebSocketClient:
         elif code == 'RateLimit':
             logger.warning("⏱️ Rate limit")
 
+    # -----------------------------------------------------------------
+    # FIX F12: request_candles verifica ws antes de enviar
+    # -----------------------------------------------------------------
     def request_candles(self, symbol=None, granularity=60, count=50):
         symbol = symbol or self.current_symbol
         if not self.ws or not self.connected:
@@ -1099,6 +1111,9 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao pedir velas: {e}")
 
+    # -----------------------------------------------------------------
+    # FIX F10: cache de velas por símbolo
+    # -----------------------------------------------------------------
     def _on_candles(self, data):
         candles = data.get('candles', [])
         if not candles:
