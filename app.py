@@ -113,7 +113,6 @@ def init_db():
         state_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, account_type TEXT DEFAULT 'demo',
         created_at REAL NOT NULL, used INTEGER DEFAULT 0, code_verifier TEXT)''')
 
-    # NOVA TABELA: registo de sinais Forex com métricas de performance
     c.execute('''CREATE TABLE IF NOT EXISTS forex_signal_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         symbol TEXT,
@@ -157,10 +156,9 @@ OAUTH_STATE_TTL = 900
 
 # ==================== NOVA FUNÇÃO: avaliação automática de sinais Forex ====================
 def evaluate_pending_forex_signals():
-    """Avalia sinais Forex que já passaram do tempo (15 min) e regista o outcome."""
     try:
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-        cutoff = time.time() - 900  # 15 minutos
+        cutoff = time.time() - 900
         rows = conn.execute(
             "SELECT id, symbol, direction, price_at_signal FROM forex_signal_log "
             "WHERE evaluated=0 AND timestamp < ?", (cutoff,)
@@ -169,7 +167,6 @@ def evaluate_pending_forex_signals():
             conn.close()
             return
 
-        # Obter o ForexDataManager da primeira sessão disponível (só para obter preço atual)
         forex_mgr = None
         with sessions_lock:
             for uid, sess in sessions.items():
@@ -216,17 +213,15 @@ def _cleanup_loop():
                         to_remove.append(uid)
                 for uid in to_remove:
                     sessions.pop(uid, None)
-            # Avaliar sinais Forex pendentes
             evaluate_pending_forex_signals()
         except Exception as e:
             logger.error(f"Erro na limpeza periódica: {e}")
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
-# ==================== NOVA THREAD: refresco periódico de candles M15/M30/H1 ====================
 def _refresh_forex_candles_loop():
     while True:
-        time.sleep(600)  # a cada 10 minutos
+        time.sleep(600)
         try:
             with sessions_lock:
                 sessions_snapshot = list(sessions.items())
@@ -642,7 +637,24 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         def tick_callback(tick):
             bot.on_tick(tick)
             if strategy:
-                strategy.on_tick(tick)
+                strategy.on_tick(tick)      # já não chama _check_pending_bets internamente
+                # Verificar apostas agendadas (consumo único)
+                pending_parity, pending_differ = strategy.get_pending_bets()
+                if pending_parity:
+                    # só tenta executar se _check_pending_bets consumir agora
+                    if strategy._check_pending_bets():
+                        direction = pending_parity['direction']
+                        amt = 0.35
+                        if direction == 'odd':
+                            client.place_trade('CALL', amt, is_digit=True)
+                        else:
+                            client.place_trade('PUT', amt, is_digit=True)
+                if pending_differ:
+                    if strategy._check_pending_bets():
+                        digit = pending_differ['digit']
+                        amt = 0.35
+                        client.place_differ_trade(digit, amt)
+
             forex_mgr.on_tick(tick)
 
         client.on_tick_callback = tick_callback
@@ -730,11 +742,11 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 bot.daily_stats['start_balance'] = bot.balance
                 forex_mgr.subscribe_all()
                 for symbol in FOREX_SYMBOLS:
-                    forex_mgr.request_candles(symbol, granularity=60, count=250)   # M1
-                    forex_mgr.request_candles(symbol, granularity=300, count=200)  # M5
-                    forex_mgr.request_candles(symbol, granularity=900, count=250)  # M15 — CORRIGIDO para 250
-                    forex_mgr.request_candles(symbol, granularity=1800, count=100)  # M30
-                    forex_mgr.request_candles(symbol, granularity=3600, count=30)   # H1 — reduzido, só precisa de EMA20
+                    forex_mgr.request_candles(symbol, granularity=60, count=250)
+                    forex_mgr.request_candles(symbol, granularity=300, count=200)
+                    forex_mgr.request_candles(symbol, granularity=900, count=250)
+                    forex_mgr.request_candles(symbol, granularity=1800, count=100)
+                    forex_mgr.request_candles(symbol, granularity=3600, count=30)
             else:
                 auth_err = getattr(client, 'auth_error', None)
                 if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
@@ -1273,7 +1285,7 @@ def _validate_amount(amount):
         return None, 'Valor entre 0.35 e 100'
     return amt, None
 
-# ==================== TRADING SINTÉTICOS ====================
+# ==================== TRADING SINTÉTICOS (agendamento para PAR/ÍMPAR e DIFFER) ====================
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
@@ -1285,31 +1297,31 @@ def trade_digit():
     if bot.stop_loss_active:
         return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
     strategy = sess.get('strategy')
-    if not strategy or strategy._trade_locked:
-        return jsonify({'error': 'Trade em curso — aguarde'}), 400
+    if not strategy:
+        return jsonify({'error': 'Estratégia indisponível'}), 400
     client = sess['client']
     if client.pending_trade is not None:
         return jsonify({'error': 'Trade pendente, aguarde'}), 400
     if client.active_trades:
         return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
-    action, reason = strategy.evaluate_parity()
-    if not action:
-        return jsonify({'error': f'⛔ {reason}'}), 400
-    amt, err = _validate_amount(request.json.get('amount', 0.35))
-    if err:
-        return jsonify({'error': err}), 400
+
     analyzer = sess['digit_analyzer']
-    tr = analyzer.get_ticks_remaining()
-    if tr < 3:
-        return jsonify({'error': f'⏳ Fim do ciclo ({tr} ticks). Aguarde o próximo.'}), 400
-    sess['trading_bot']._last_click_tick = analyzer.get_current_digit()
-    contract = 'CALL' if action == 'odd' else 'PUT'
-    ok = sess['client'].place_trade(contract, amt, True)
-    if ok:
-        strategy.lock_trade()
-        credit_referral_commission(session['user_email'], amt)
-        return jsonify({'status': 'ok', 'message': f'✅ {"ÍMPAR" if action=="odd" else "PAR"} por ${amt:.2f}'})
-    return jsonify({'error': 'Falha no trade'}), 500
+    last_digit = analyzer.get_current_digit()
+    if last_digit is None:
+        return jsonify({'error': 'Dígito indisponível'}), 400
+
+    # Aposta no oposto do último dígito
+    is_odd = last_digit % 2 != 0
+    direction = 'odd' if not is_odd else 'even'
+
+    # Registar o dígito no momento do clique para auditoria
+    bot._last_click_tick = last_digit
+
+    ok, msg = strategy.schedule_parity_bet(direction)
+    if not ok:
+        return jsonify({'error': msg}), 400
+
+    return jsonify({'status': 'ok', 'message': f'📅 {msg}'})
 
 @app.route('/api/trade/differ', methods=['POST'])
 @require_auth
@@ -1322,30 +1334,27 @@ def trade_differ():
     if bot.stop_loss_active:
         return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
     strategy = sess.get('strategy')
-    if not strategy or strategy._trade_locked:
-        return jsonify({'error': 'Trade em curso — aguarde'}), 400
+    if not strategy:
+        return jsonify({'error': 'Estratégia indisponível'}), 400
     client = sess['client']
     if client.pending_trade is not None:
         return jsonify({'error': 'Trade pendente, aguarde'}), 400
     if client.active_trades:
         return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
-    digit, reason = strategy.evaluate_differ()
-    if digit is None:
-        return jsonify({'error': f'⛔ {reason}'}), 400
-    amt, err = _validate_amount(request.json.get('amount', 0.35))
-    if err:
-        return jsonify({'error': err}), 400
+
     analyzer = sess['digit_analyzer']
-    tr = analyzer.get_ticks_remaining()
-    if tr < 3:
-        return jsonify({'error': f'⏳ Fim do ciclo ({tr} ticks). Aguarde o próximo.'}), 400
-    sess['trading_bot']._last_click_tick = analyzer.get_current_digit()
-    ok = sess['client'].place_differ_trade(digit, amt)
-    if ok:
-        strategy.lock_trade()
-        credit_referral_commission(session['user_email'], amt)
-        return jsonify({'status': 'ok', 'message': f'🎯 DIFFER no dígito {digit} por ${amt:.2f}'})
-    return jsonify({'error': 'Falha no trade DIFFER'}), 500
+    digit = analyzer.get_current_digit()
+    if digit is None:
+        return jsonify({'error': 'Dígito indisponível'}), 400
+
+    # Registar o dígito no momento do clique para auditoria
+    bot._last_click_tick = digit
+
+    ok, msg = strategy.schedule_differ_bet(digit)
+    if not ok:
+        return jsonify({'error': msg}), 400
+
+    return jsonify({'status': 'ok', 'message': f'📅 {msg}'})
 
 @app.route('/api/trade/matches', methods=['POST'])
 @require_auth
