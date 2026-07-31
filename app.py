@@ -637,24 +637,27 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         def tick_callback(tick):
             bot.on_tick(tick)
             if strategy:
-                strategy.on_tick(tick)      # já não chama _check_pending_bets internamente
-                # Verificar apostas agendadas (consumo único)
+                strategy.on_tick(tick)
                 pending_parity, pending_differ = strategy.get_pending_bets()
                 if pending_parity:
-                    # só tenta executar se _check_pending_bets consumir agora
                     if strategy._check_pending_bets():
                         direction = pending_parity['direction']
-                        amt = 0.35
-                        if direction == 'odd':
-                            client.place_trade('CALL', amt, is_digit=True)
+                        amt = pending_parity['amount']
+                        contract = 'CALL' if direction == 'odd' else 'PUT'
+                        ok = client.place_trade(contract, amt, is_digit=True)
+                        if not ok:
+                            strategy.set_execution_error(f"Falha ao executar paridade: {contract}")
                         else:
-                            client.place_trade('PUT', amt, is_digit=True)
+                            strategy.clear_execution_error()
                 if pending_differ:
                     if strategy._check_pending_bets():
                         digit = pending_differ['digit']
-                        amt = 0.35
-                        client.place_differ_trade(digit, amt)
-
+                        amt = pending_differ['amount']
+                        ok = client.place_differ_trade(digit, amt)
+                        if not ok:
+                            strategy.set_execution_error(f"Falha ao executar DIFFER: {digit}")
+                        else:
+                            strategy.clear_execution_error()
             forex_mgr.on_tick(tick)
 
         client.on_tick_callback = tick_callback
@@ -1285,7 +1288,7 @@ def _validate_amount(amount):
         return None, 'Valor entre 0.35 e 100'
     return amt, None
 
-# ==================== TRADING SINTÉTICOS (agendamento para PAR/ÍMPAR e DIFFER) ====================
+# ==================== TRADING SINTÉTICOS (agendamento corrigido) ====================
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
@@ -1310,14 +1313,16 @@ def trade_digit():
     if last_digit is None:
         return jsonify({'error': 'Dígito indisponível'}), 400
 
-    # Aposta no oposto do último dígito
+    amt, err = _validate_amount(request.json.get('amount', 0.35))
+    if err:
+        return jsonify({'error': err}), 400
+
     is_odd = last_digit % 2 != 0
     direction = 'odd' if not is_odd else 'even'
 
-    # Registar o dígito no momento do clique para auditoria
     bot._last_click_tick = last_digit
 
-    ok, msg = strategy.schedule_parity_bet(direction)
+    ok, msg = strategy.schedule_parity_bet(direction, amt)
     if not ok:
         return jsonify({'error': msg}), 400
 
@@ -1347,10 +1352,13 @@ def trade_differ():
     if digit is None:
         return jsonify({'error': 'Dígito indisponível'}), 400
 
-    # Registar o dígito no momento do clique para auditoria
+    amt, err = _validate_amount(request.json.get('amount', 0.35))
+    if err:
+        return jsonify({'error': err}), 400
+
     bot._last_click_tick = digit
 
-    ok, msg = strategy.schedule_differ_bet(digit)
+    ok, msg = strategy.schedule_differ_bet(digit, amt)
     if not ok:
         return jsonify({'error': msg}), 400
 
@@ -1587,7 +1595,7 @@ def credit_referral_commission(user_email, amount):
     finally:
         conn.close()
 
-# ==================== ROTAS FOREX (ABERTAS A TODOS) ====================
+# ==================== ROTAS FOREX ====================
 @app.route('/api/forex/signals')
 @require_auth
 def forex_signals():
@@ -1626,9 +1634,6 @@ def forex_candles(symbol):
     candles = sess['forex_data'].get_recent_candles(symbol, count=count, granularity=granularity)
     return jsonify({'candles': candles, 'symbol': symbol})
 
-# ============================================================
-# CORRIGIDA: rota de contratos com conversão de unidades
-# ============================================================
 UNIT_SECONDS = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
 
 def _duration_str_to_seconds(dur_str):
@@ -1682,9 +1687,6 @@ def forex_contracts_for(symbol):
 
     return jsonify({'symbol': symbol, 'durations': result})
 
-# ============================================================
-# CORRIGIDA: rota de trade Forex com validação robusta
-# ============================================================
 @app.route('/api/forex/trade', methods=['POST'])
 @require_auth
 @limit_if_available("10 per minute")
@@ -1748,9 +1750,6 @@ def forex_trade():
 
     return jsonify({'error': 'Proposta demorou muito. Verifique o estado na Deriv.'}), 500
 
-# ============================================================
-# NOVO ENDPOINT: assertividade histórica dos sinais Forex
-# ============================================================
 @app.route('/api/forex/assertividade')
 @require_auth
 def forex_assertividade():
