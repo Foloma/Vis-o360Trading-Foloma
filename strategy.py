@@ -13,19 +13,13 @@ class StrategyManager:
     - Sinais gerados automaticamente (differ/parity no início do ciclo; matches/zscore sempre).
     - Preview sem efeitos colaterais.
     - Cache de sinais expira após SIGNAL_VALIDITY_TICKS ticks (configurável, default 10).
+    - Agendamento de apostas: ao clicar, a ordem é guardada e executada no último tick do sinal.
     - Entrada apenas no clique (evaluate_*), que consome o estado.
     - Trade Lock com timeout de 20 segundos.
-    - Paridade exige 5 ou 6 ocorrências do mesmo tipo nos últimos 6 dígitos.
-    - Antes de executar, revalida a condição para evitar trades com sinal desatualizado.
-    - Geração de sinais bloqueada quando há trade pendente no cliente.
-    - Gates Hard: tick desactualizado (>2.5s) e fim de ciclo (<7 ticks restantes).
-    - Snapshots com metadados (mode, expires_in_ticks).
-    - DIFFER apenas no modo REPEAT (consecutivo). RARITY removido.
-    - Histórico de preços reiniciado ao mudar de símbolo (evita falsos spikes).
-    - Bug 1 corrigido: apenas clear por ciclo (tr >= 95), removido clear por diferença.
-    - Bug 2 corrigido: cooldown após loss DIFFER = 12s (era 5s).
-    - Bug 3 implementado: pausa DIFFER 5 min após 2 losses consecutivos.
-    - Correção adicional: pausa DIFFER não é cancelada por wins na paridade.
+    - Paridade em modo alternância (oposto do último dígito).
+    - DIFFER sempre disponível, sem filtro de padrão.
+    - Gate temporal: bloqueia agendamento apenas nos últimos 2 ticks do ciclo.
+    - Correção crítica: dupla consumação do pending_bet resolvida.
     """
 
     def __init__(self, client, analyzer):
@@ -77,6 +71,13 @@ class StrategyManager:
         # F5 mantida em 0.002 até backtest comprovatório
         self.MARKET_SPIKE_THRESHOLD = 0.002
 
+        # Sistema de agendamento de apostas
+        self._pending_parity_bet = None   # {'direction': 'odd'/'even', 'target_tick': int}
+        self._pending_differ_bet = None   # {'digit': int, 'target_tick': int}
+
+        # Modo de paridade rápida (alternância) – sempre ativo
+        self.parity_alternance_mode = True
+
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
     # -----------------------------------------------------------------
@@ -94,6 +95,7 @@ class StrategyManager:
 
     @property
     def can_trade(self):
+        """Verificações de segurança que não dependem do ciclo."""
         if self.is_global_stop:
             return False, "STOP GLOBAL ATIVO"
         if self.is_cooldown:
@@ -107,7 +109,7 @@ class StrategyManager:
         if last_tick_ago > 2.5:
             return False, f"Tick desactualizado ({last_tick_ago:.1f}s atrás)"
 
-        if time.time() - getattr(self.client, '_last_reconnect_time', 0) < 10:
+        if time.time() - getattr(self.client, '_last_reconnect_time', 0) < 3:
             return False, "Reconexão recente"
 
         raw_ping = getattr(self.client, '_ping_ms', 0)
@@ -125,13 +127,16 @@ class StrategyManager:
         if effective_ping > 250:
             return False, f"Latência alta ({effective_ping}ms)"
 
-        tr = self.analyzer.get_ticks_remaining() if hasattr(self.analyzer, 'get_ticks_remaining') else 10
-        if tr < 7:
-            return False, f"Aguardar novo ciclo ({tr} ticks restantes)"
-
         stable, reason = self.is_market_stable()
         if not stable:
             return False, reason
+        return True, "OK"
+
+    def _can_schedule(self):
+        """Gate temporal: bloqueia agendamento nos últimos 2 ticks do ciclo."""
+        tr = self.analyzer.get_ticks_remaining() if hasattr(self.analyzer, 'get_ticks_remaining') else 10
+        if tr < 2:
+            return False, f"Fim do ciclo iminente ({tr} tick(s) restantes)"
         return True, "OK"
 
     def is_market_stable(self):
@@ -148,7 +153,7 @@ class StrategyManager:
         return True, "OK"
 
     # -----------------------------------------------------------------
-    # Atualização a cada tick
+    # Atualização a cada tick — REMOVIDA a chamada a _check_pending_bets
     # -----------------------------------------------------------------
     def on_tick(self, tick):
         symbol = tick.get('symbol', '')
@@ -168,6 +173,8 @@ class StrategyManager:
                     self._price_history.pop(0)
             self.refresh_signals()
             self._maybe_generate_signals()
+            # NOTA: _check_pending_bets() é agora chamado exclusivamente pelo tick_callback do app.py
+            # para evitar a dupla consumação que anulava as apostas agendadas.
 
     def refresh_signals(self):
         with self._lock:
@@ -269,45 +276,117 @@ class StrategyManager:
         return signal
 
     # -----------------------------------------------------------------
-    # Métodos de preview SEM efeitos colaterais
+    # Agendamento de apostas (PAR/ÍMPAR e DIFFER)
+    # -----------------------------------------------------------------
+    def schedule_parity_bet(self, direction):
+        """Agenda uma aposta de paridade para o último tick do ciclo."""
+        with self._lock:
+            ok, reason = self._can_schedule()
+            if not ok:
+                return False, reason
+
+            if self._trade_locked:
+                return False, "Trade em curso"
+
+            current_tick = self.analyzer.get_tick_count()
+            ticks_left = self.analyzer.get_ticks_remaining()
+            if ticks_left <= 0:
+                return False, "Sinal já expirou"
+
+            target_tick = current_tick + ticks_left
+            self._pending_parity_bet = {
+                'direction': direction,
+                'target_tick': target_tick,
+                'created_at': time.time()
+            }
+            logger.info(f"📅 Aposta de paridade agendada: {direction} no tick {target_tick} (daqui a {ticks_left} ticks)")
+            return True, f"Aposta {direction} agendada para o tick {target_tick}"
+
+    def schedule_differ_bet(self, digit):
+        """Agenda uma aposta DIFFER para o último tick do ciclo."""
+        with self._lock:
+            ok, reason = self._can_schedule()
+            if not ok:
+                return False, reason
+
+            if self._trade_locked:
+                return False, "Trade em curso"
+
+            if time.time() < self._differ_cooldown_until:
+                remaining = self._differ_cooldown_until - time.time()
+                return False, f"Pausa DIFFER {remaining:.0f}s restantes"
+
+            current_tick = self.analyzer.get_tick_count()
+            ticks_left = self.analyzer.get_ticks_remaining()
+            if ticks_left <= 0:
+                return False, "Sinal já expirou"
+
+            target_tick = current_tick + ticks_left
+            self._pending_differ_bet = {
+                'digit': digit,
+                'target_tick': target_tick,
+                'created_at': time.time()
+            }
+            logger.info(f"📅 Aposta DIFFER agendada: dígito {digit} no tick {target_tick} (daqui a {ticks_left} ticks)")
+            return True, f"DIFFER {digit} agendado para o tick {target_tick}"
+
+    def _check_pending_bets(self):
+        """
+        Verifica se há apostas agendadas cujo tick alvo foi atingido.
+        Se sim, limpa o estado e retorna True, indicando que o app.py deve executar a ordem.
+        Este método é chamado exclusivamente pelo tick_callback do app.py.
+        """
+        executed = False
+        with self._lock:
+            current_tick = self.analyzer.get_tick_count()
+            # Paridade
+            if self._pending_parity_bet:
+                if current_tick >= self._pending_parity_bet['target_tick']:
+                    logger.info(f"⏰ Executando aposta agendada de paridade: {self._pending_parity_bet['direction']}")
+                    self._pending_parity_bet = None
+                    executed = True
+
+            # DIFFER
+            if self._pending_differ_bet:
+                if current_tick >= self._pending_differ_bet['target_tick']:
+                    logger.info(f"⏰ Executando aposta agendada DIFFER: {self._pending_differ_bet['digit']}")
+                    self._pending_differ_bet = None
+                    executed = True
+
+        return executed
+
+    def get_pending_bets(self):
+        """Retorna uma cópia dos pending bets para leitura segura fora do lock."""
+        with self._lock:
+            parity = dict(self._pending_parity_bet) if self._pending_parity_bet else None
+            differ = dict(self._pending_differ_bet) if self._pending_differ_bet else None
+        return parity, differ
+
+    # -----------------------------------------------------------------
+    # Métodos de preview (mantidos para compatibilidade com o frontend)
     # -----------------------------------------------------------------
     def _preview_differ_signal(self):
-        """DIFFER apenas no modo REPEAT — dígito repetido consecutivamente (XX)."""
-        # Bug 3: verificar pausa de 5 minutos após 2 losses consecutivos
-        if time.time() < self._differ_cooldown_until:
-            return None
-
-        recent = self.analyzer.get_recent_digits(20)
-        if len(recent) >= 2:
-            last_two = recent[-2:]
-            if last_two[0] == last_two[1]:
-                digit = last_two[0]
-                last_ten = recent[-10:] if len(recent) >= 10 else recent
-                if last_ten.count(digit) >= 2 and digit not in self._differ_sequence_used:
-                    return {'recommendation': digit,
-                            'digits': last_two[-2:],
-                            'reason': f"DIFFER {digit}: repetição consecutiva",
-                            'mode': 'repeat'}
+        """DIFFER agora sempre disponível — retorna o dígito atual como recomendação."""
+        recent = self.analyzer.get_recent_digits(1)
+        if recent:
+            digit = recent[0]
+            return {'recommendation': digit,
+                    'digits': [digit],
+                    'reason': f"DIFFER {digit}: aposta manual",
+                    'mode': 'manual'}
         return None
 
     def _preview_parity_signal(self):
-        recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 6:
-            return None
-        last_six = [d % 2 != 0 for d in recent[-6:]]
-        odd_count = sum(last_six)
-        even_count = 6 - odd_count
-
-        if odd_count >= 5:
-            return {'recommendation': 'even',
-                    'digits': recent[-6:],
-                    'reason': f"Tendência ÍMPAR ({odd_count}/6) → PAR",
-                    'mode': 'parity'}
-        if even_count >= 5:
-            return {'recommendation': 'odd',
-                    'digits': recent[-6:],
-                    'reason': f"Tendência PAR ({even_count}/6) → ÍMPAR",
-                    'mode': 'parity'}
+        """Paridade em modo alternância: oposto do último dígito."""
+        recent = self.analyzer.get_recent_digits(1)
+        if recent:
+            last = recent[0]
+            is_odd = last % 2 != 0
+            rec = 'even' if is_odd else 'odd'
+            return {'recommendation': rec,
+                    'digits': [last],
+                    'reason': f"Último dígito {last} → apostar {rec}",
+                    'mode': 'alternancia'}
         return None
 
     def _preview_matches_signal(self):
@@ -343,7 +422,7 @@ class StrategyManager:
         return None
 
     # -----------------------------------------------------------------
-    # Métodos de leitura para get_status (cache + preview)
+    # Métodos de leitura para get_status
     # -----------------------------------------------------------------
     def _peek_differ(self):
         signal = self._active_signals['differ']
@@ -361,7 +440,7 @@ class StrategyManager:
         preview = self._preview_parity_signal()
         if preview:
             return True, preview['recommendation'], preview['reason']
-        return False, None, "Nenhuma tendência clara (5/6 necessários)"
+        return False, None, "Nenhum dígito disponível"
 
     def _peek_matches(self):
         if self.is_matches_cooldown:
@@ -385,127 +464,21 @@ class StrategyManager:
         return False, None, None, "Nenhum sinal Z‑Score disponível"
 
     # -----------------------------------------------------------------
-    # Métodos de entrada (evaluate_*) – com REVALIDAÇÃO
+    # Métodos de entrada (mantidos para MATCHES e ZSCORE)
     # -----------------------------------------------------------------
     def evaluate_differ(self):
-        with self._lock:
-            self._check_trade_lock_timeout()
-            ok, reason = self.can_trade
-            if not ok:
-                return None, reason
-            if self._trade_locked:
-                return None, "Trade em curso"
-
-            # Bug 3: verificar pausa de 5 minutos
-            if time.time() < self._differ_cooldown_until:
-                remaining = self._differ_cooldown_until - time.time()
-                return None, f"Pausa DIFFER {remaining:.0f}s restantes"
-
-            # Bug 1: apenas clear por ciclo (tr >= 95)
-            tr = self.analyzer.get_ticks_remaining()
-            if tr >= 95:
-                self._differ_sequence_used.clear()
-
-            signal = self._active_signals['differ']
-            if signal and self._is_signal_still_valid(signal):
-                preview = self._preview_differ_signal()
-                if not preview:
-                    self._active_signals['differ'] = None
-                    ticks_elapsed = self.analyzer.get_tick_count() - signal.get('tick_origin', 0)
-                    logger.info("⚠️ Sinal DIFFER invalidado na execução — condição desapareceu")
-                    return None, f"Sinal expirou ({ticks_elapsed} ticks passados)"
-                rec = signal['recommendation']
-                self._differ_sequence_used.add(rec)
-                self._last_differ_digit = rec
-
-                logger.info(f"🎯 TELA | digit={self.analyzer.get_current_digit()} | count={self.analyzer.get_tick_count()} | aposta={rec}")
-                logger.info(f"✅ DIFFER executado: snapshot {signal['id']}")
-                return rec, signal['reason']
-            return self._generate_differ_signal()
+        """Não é mais usado para agendamento. Mantido para compatibilidade."""
+        return None, "DIFFER agora é manual — use schedule_differ_bet"
 
     def _generate_differ_signal(self):
-        # Bug 3: verificar pausa de 5 minutos
-        if time.time() < self._differ_cooldown_until:
-            return None, "Pausa DIFFER ativa"
-
-        # Bug 1: apenas clear por ciclo
-        tr = self.analyzer.get_ticks_remaining()
-        if tr >= 95:
-            self._differ_sequence_used.clear()
-
-        recent = self.analyzer.get_recent_digits(20)
-        if len(recent) >= 2:
-            last_two = recent[-2:]
-            if last_two[0] == last_two[1]:
-                digit = last_two[0]
-                last_ten = recent[-10:] if len(recent) >= 10 else recent
-                if last_ten.count(digit) >= 2:
-                    if digit not in self._differ_sequence_used:
-                        self._differ_sequence_used.add(digit)
-                        self._last_differ_digit = digit
-                        signal = self._create_signal('differ', digit, last_two[-2:],
-                                                    f"DIFFER {digit}: repetição consecutiva",
-                                                    mode='repeat')
-                        logger.info(f"✅ DIFFER SINAL GERADO (REPEAT): {signal['id']}")
-                        return digit, signal['reason']
-        # Bug 1 corrigido: removida a linha que fazia clear por diferença
-        return None, "Nenhum padrão DIFFER"
+        return None, "DIFFER agora é manual"
 
     def evaluate_parity(self):
-        with self._lock:
-            self._check_trade_lock_timeout()
-            ok, reason = self.can_trade
-            if not ok:
-                return None, reason
-            if self._trade_locked:
-                return None, "Trade em curso"
-
-            current_tick = self.analyzer.get_tick_count()
-            if current_tick - self._parity_last_used_tick < 15:
-                return None, f"Paridade cooldown {15 - (current_tick - self._parity_last_used_tick)} ticks"
-
-            signal = self._active_signals['parity']
-            if signal and self._is_signal_still_valid(signal):
-                preview = self._preview_parity_signal()
-                if not preview:
-                    self._active_signals['parity'] = None
-                    ticks_elapsed = self.analyzer.get_tick_count() - signal.get('tick_origin', 0)
-                    logger.info("⚠️ Sinal PAR/ÍMPAR invalidado na execução — condição desapareceu")
-                    return None, f"Sinal expirou ({ticks_elapsed} ticks passados)"
-                rec = signal['recommendation']
-                self._parity_last_used_tick = current_tick
-                self._last_parity_streak_type = 'odd' if rec == 'even' else 'even'
-
-                logger.info(f"🎯 TELA | digit={self.analyzer.get_current_digit()} | count={self.analyzer.get_tick_count()} | aposta={rec}")
-                logger.info(f"✅ PAR/ÍMPAR executado: snapshot {signal['id']}")
-                return rec, signal['reason']
-            return self._generate_parity_signal()
+        """Não é mais usado para agendamento. Mantido para compatibilidade."""
+        return None, "Paridade agora é manual — use schedule_parity_bet"
 
     def _generate_parity_signal(self):
-        recent = self.analyzer.get_recent_digits(20)
-        if len(recent) < 6:
-            return None, "Aguardando dados"
-        last_six = [d % 2 != 0 for d in recent[-6:]]
-        odd_count = sum(last_six)
-        even_count = 6 - odd_count
-
-        if odd_count >= 5:
-            if self._parity_martingale_used and not self._can_martingale():
-                return None, "Martingale bloqueado"
-            signal = self._create_signal('parity', 'even', recent[-6:],
-                                        f"Tendência ÍMPAR ({odd_count}/6) → PAR",
-                                        mode='parity')
-            logger.info(f"✅ PAR/ÍMPAR SINAL GERADO: {signal['id']}")
-            return 'even', signal['reason']
-        if even_count >= 5:
-            if self._parity_martingale_used and not self._can_martingale():
-                return None, "Martingale bloqueado"
-            signal = self._create_signal('parity', 'odd', recent[-6:],
-                                        f"Tendência PAR ({even_count}/6) → ÍMPAR",
-                                        mode='parity')
-            logger.info(f"✅ PAR/ÍMPAR SINAL GERADO: {signal['id']}")
-            return 'odd', signal['reason']
-        return None, "Nenhuma tendência clara (5/6 necessários)"
+        return None, "Paridade agora é manual"
 
     def _can_martingale(self):
         raw = getattr(self.client, '_ping_ms', 0)
@@ -515,7 +488,7 @@ class StrategyManager:
         if ping >= 150:
             return False
         stable, _ = self.is_market_stable()
-        return stable and (time.time() - getattr(self.client, '_last_reconnect_time', 0) >= 10)
+        return stable and (time.time() - getattr(self.client, '_last_reconnect_time', 0) >= 3)
 
     def evaluate_matches(self):
         with self._lock:
@@ -646,9 +619,7 @@ class StrategyManager:
                     return
 
                 if action_upper.startswith('DIFFER') or action_upper.startswith('Z_DIFFER'):
-                    # Bug 2: cooldown de 12s (era 5s)
                     self._apply_cooldown(12)
-                    # Bug 3: contador de losses consecutivos no DIFFER
                     self._consecutive_losses_differ += 1
                     if self._consecutive_losses_differ >= 2:
                         self._differ_cooldown_until = time.time() + 300
@@ -668,7 +639,6 @@ class StrategyManager:
                     self._apply_cooldown(5)
             else:
                 self._consecutive_losses = 0
-                # Reset seletivo que NÃO limpa a pausa do DIFFER
                 self._differ_sequence_used.clear()
                 self._parity_last_used_tick = 0
                 self._parity_martingale_used = False
@@ -679,7 +649,6 @@ class StrategyManager:
                     self._active_signals[key] = None
                 self._trade_locked = False
 
-                # Apenas um win no DIFFER cancela a pausa
                 if action_upper.startswith('DIFFER') or action_upper.startswith('Z_DIFFER'):
                     self._consecutive_losses_differ = 0
                     self._differ_cooldown_until = 0
@@ -737,4 +706,6 @@ class StrategyManager:
                 'zscore_digit': zscore_digit,
                 'zscore_reason': zscore_reason,
                 'zscore_ticks_left': self._ticks_left(self._active_signals.get('zscore')),
+                'pending_parity_bet': self._pending_parity_bet is not None,
+                'pending_differ_bet': self._pending_differ_bet is not None,
             }
