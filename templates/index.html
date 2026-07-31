@@ -15,6 +15,7 @@
       --muted: #64748b;
       --warning: #ffaa00;
       --purple: #8b5cf6;
+      --white: #ffffff;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     body { background: #020617; color: var(--text); min-height: 100vh; }
@@ -51,18 +52,23 @@
     .tbar-wrap { background: var(--card); border-radius: 4px; height: 6px; margin-bottom: 8px; overflow: hidden; }
     .tbar { height: 6px; border-radius: 4px; transition: width .8s linear; background: var(--accent); }
     .big-d { font-size: 64px; font-weight: 900; line-height: 1; }
-    .big-d.odd { color: var(--accent); } .big-d.even { color: var(--danger); } .big-d.wait { color: var(--muted); }
+    .big-d.odd { color: var(--white); } .big-d.even { color: var(--accent); } .big-d.wait { color: var(--muted); }
     .big-p { font-size: 15px; font-weight: 700; letter-spacing: 2px; }
     .hist-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
     .hist-row { display: flex; gap: 3px; width: max-content; padding: 1px; }
     .dbox { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 12px; font-weight: 700; flex-shrink: 0; background: #020617; }
-    .dbox.odd { color: var(--accent); border: 1.5px solid var(--accent); } .dbox.even { color: var(--danger); border: 1.5px solid var(--danger); }
+    .dbox.odd { color: var(--white); border: 1.5px solid var(--white); }
+    .dbox.even { color: var(--accent); border: 1.5px solid var(--accent); }
+    .dbox.win { box-shadow: 0 0 8px var(--accent); }
+    .dbox.loss { box-shadow: 0 0 8px var(--danger); }
     .ms { background: #020617; border-radius: 6px; padding: 6px; font-size: 11px; margin: 6px 0; }
     .bm { background: #ffaa00; color: #000; border: none; padding: 6px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 11px; }
     .bmr { background: var(--card); color: white; border: none; padding: 6px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 11px; }
     .lc { display: flex; gap: 6px; } .lc input { flex: 1; padding: 8px; font-size: 11px; }
     .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--card); border-radius: 12px; padding: 10px 18px; font-size: 12px; z-index: 2000; display: none; text-align: center; max-width: 300px; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
     .toast.show { display: block; animation: su .3s ease; }
+    .toast.win { border: 2px solid var(--accent); }
+    .toast.loss { border: 2px solid var(--danger); }
     @keyframes su { from { transform: translateX(-50%) translateY(12px); opacity: 0 } to { transform: translateX(-50%) translateY(0); opacity: 1 } }
     .modal { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 1100; display: flex; align-items: center; justify-content: center; }
     .mbox { background: var(--card); padding: 20px; border-radius: 14px; width: 90%; max-width: 340px; }
@@ -80,6 +86,8 @@
     .score-item { background: #020617; padding: 6px; border-radius: 6px; text-align: center; }
     .score-label { font-size: 8px; color: var(--muted); text-transform: uppercase; }
     .score-value { font-size: 18px; font-weight: 700; }
+    .score-value.win { color: var(--accent); }
+    .score-value.loss { color: var(--danger); }
     .freq-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; margin-top: 4px; }
     .freq-item { text-align: center; font-size: 9px; background: #020617; border-radius: 4px; padding: 2px; }
     .freq-bar { height: 20px; border-radius: 3px; margin-bottom: 2px; background: var(--accent); transition: height 0.5s; }
@@ -127,6 +135,9 @@
     .forex-confidence { font-size: 10px; color: var(--muted); }
     .forex-reason { font-size: 9px; color: var(--muted); margin-top: 2px; }
     .upgrade-banner { background: linear-gradient(135deg, var(--purple), var(--accent)); padding: 12px; border-radius: 8px; text-align: center; color: #000; font-weight: 700; margin-bottom: 8px; }
+
+    .pending-indicator { font-size: 9px; color: var(--warning); text-align: center; margin-top: 4px; display: none; }
+    .pending-indicator.visible { display: block; }
 
     @keyframes pulse {
         0% { transform: scale(1); }
@@ -239,8 +250,8 @@
       <div class="card-title">📡 PLACAR DE TRADES HOJE</div>
       <div class="scoreboard">
         <div class="score-item"><div class="score-label">TOTAL</div><div class="score-value" id="sigTotal">0</div></div>
-        <div class="score-item"><div class="score-label">GANHOS</div><div class="score-value" style="color:var(--accent)" id="sigWins">0</div></div>
-        <div class="score-item"><div class="score-label">WIN RATE</div><div class="score-value" style="color:var(--accent)" id="sigWinRate">-</div></div>
+        <div class="score-item"><div class="score-label">GANHOS</div><div class="score-value win" id="sigWins">0</div></div>
+        <div class="score-item"><div class="score-label">WIN RATE</div><div class="score-value" id="sigWinRate">-</div></div>
       </div>
     </div>
 
@@ -294,10 +305,12 @@
         <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')" style="padding:10px 14px">ÍMPAR</button>
         <button class="btn-sell" id="btnEven" onclick="tradeDigit('even')" style="padding:10px 14px">PAR</button>
       </div>
+      <div class="pending-indicator" id="parityPending">📅 Aposta agendada...</div>
       <div class="signal-ticks" id="parityTicks"></div>
       <div id="martingaleIndicator" style="font-size:10px;color:var(--warning);text-align:center;min-height:14px;margin-top:2px;"></div>
       <div class="block-reason" id="parityReason"></div>
       <button class="differ-btn" id="btnDiffer" onclick="tradeDiffer()">🎯 DIFFER (dígito menos frequente)</button>
+      <div class="pending-indicator" id="differPending">📅 Aposta DIFFER agendada...</div>
       <div class="signal-ticks" id="differTicks"></div>
       <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (dígito mais frequente) — payout ~9x</button>
       <div class="signal-ticks" id="matchesTicks"></div>
@@ -477,6 +490,10 @@ let _timerDigito = null;
 // Sugestão de valor
 let _suggestedAmount = 0.35;
 
+// Estado de agendamento
+let _parityScheduled = false;
+let _differScheduled = false;
+
 const FOREX_SYMBOL_MAP = {
     'EUR/USD': 'frxEURUSD', 'GBP/USD': 'frxGBPUSD', 'USD/JPY': 'frxUSDJPY',
     'EUR/GBP': 'frxEURGBP', 'AUD/USD': 'frxAUDUSD', 'USD/CAD': 'frxUSDCAD'
@@ -528,6 +545,7 @@ function updateScoreboard(){
       $_( 'signalScoreboard').style.display='block';
       $_( 'sigTotal').textContent = d.today_trades;
       $_( 'sigWins').textContent = d.wins;
+      $_( 'sigWins').className = 'score-value win';
       $_( 'sigWinRate').textContent = d.win_rate + '%';
     }
   }).catch(()=>{});
@@ -719,6 +737,7 @@ async function updateAll(){
     if(data.strategy){
       const tr = data.digits?.ticks_remaining;
       updateStrategyDisplay(data.strategy, tr, data.bot);
+      updatePendingIndicators(data.strategy);
     }
 
     if(bot.last_trade_result){
@@ -726,6 +745,8 @@ async function updateAll(){
       if(ltr.contract_id && ltr.contract_id !== _lastProcessedContractId){
         _lastProcessedContractId = ltr.contract_id;
         _tradePending = false;
+        _parityScheduled = false;
+        _differScheduled = false;
         clearTimeout(_tradeSubmittedTimer);
         clearTimeout(_tradePendingTimer);
         const displayDigit = ltr.exit_digit !== undefined ? ltr.exit_digit : ltr.digit;
@@ -734,7 +755,8 @@ async function updateAll(){
         const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
         const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
         const digitInfo = ltr.exit_digit !== undefined ? ` | Dígito: ${ltr.exit_digit}` : '';
-        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${digitInfo}${latencyInfo}`, ltr.is_win ? 'win' : 'loss', 4000);
+        const resultType = ltr.is_win ? 'win' : 'loss';
+        toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${digitInfo}${latencyInfo}`, resultType, 4000);
         
         if(ltr.latency_total_ms > 500){
             toast(`⚠️ Alta latência (${ltr.latency_total_ms}ms) — tick de entrada pode diferir do observado`, 'warning', 5000);
@@ -744,14 +766,15 @@ async function updateAll(){
         const auditContent = $_('auditContent');
         if(auditCard && auditContent){
             auditCard.style.display = 'block';
+            const resultColor = ltr.is_win ? 'var(--accent)' : 'var(--danger)';
             auditContent.innerHTML = `
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
                   <div>📌 Tick no clique: <b>${ltr.click_tick ?? '—'}</b></div>
                   <div>🎯 Tick entrada: <b>${ltr.entry_digit ?? '—'}</b></div>
-                  <div>🏁 Tick saída: <b style="color:${ltr.is_win?'var(--accent)':'var(--danger)'}">${ltr.exit_digit ?? '—'}</b></div>
+                  <div>🏁 Tick saída: <b style="color:${resultColor}">${ltr.exit_digit ?? '—'}</b></div>
                   <div>⏱ Latência: <b>${ltr.latency_total_ms ? ltr.latency_total_ms+'ms' : '—'}</b></div>
                   <div>📊 Estratégia: <b>${ltr.action ?? '—'}</b></div>
-                  <div>💰 Resultado: <b style="color:${ltr.is_win?'var(--accent)':'var(--danger)'}">${ltr.is_win?'WIN':'LOSS'}</b></div>
+                  <div>💰 Resultado: <b style="color:${resultColor}">${ltr.is_win?'WIN':'LOSS'}</b></div>
                 </div>
                 <div style="margin-top:4px;color:var(--muted);font-size:9px">
                   Clique → Compra → Resultado ${ltr.latency_total_ms ? '('+ltr.latency_total_ms+'ms total)' : ''}
@@ -792,7 +815,6 @@ async function updateAll(){
   }
 }
 
-// ══════════ F4: REMOVIDAS AS DUAS LINHAS QUE CONGELAVAM O DISPLAY ══════════
 function updateDigits(digits){
   if(!digits) return;
   const tpd=digits.ticks_per_digit||10, tr=Math.max(0,Math.round(digits.ticks_remaining||tpd));
@@ -800,15 +822,16 @@ function updateDigits(digits){
   $_( 'cdown').textContent=`⏱ ${tr} tick${tr!==1?'s':''}`;
   const recent=digits.recent||[], counter=digits.digit_counter||0;
 
-  // As duas linhas abaixo foram removidas (F4):
-  // if(_tradePending && !_tradeSubmitted){ return; }
-  // if(_showTradeResult){ return; }
-
   if(recent.length>0 && (recent.length!==lastDigitCount || counter!==lastDigitCounter)){
     lastDigitCount=recent.length; lastDigitCounter=counter;
     const newest=recent[recent.length-1], isOdd=newest%2!==0;
     
-    let html=''; recent.forEach((d)=>html+=`<div class="dbox ${d%2?'odd':'even'}">${d}</div>`);
+    let html='';
+    recent.forEach((d)=>{
+        const isOddDigit = d%2!==0;
+        const cls = isOddDigit ? 'odd' : 'even';
+        html+=`<div class="dbox ${cls}">${d}</div>`;
+    });
     $_( 'histRow').innerHTML=html;
     $_( 'histScroll').scrollLeft=$_('histScroll').scrollWidth;
     
@@ -830,7 +853,6 @@ function updateDigits(digits){
     else $_( 'entropyInfo').textContent='';
   }
 }
-// ══════════ FIM F4 ══════════
 
 function updateFreqGrid(freqs,leastDigit,mostDigit){
   const grid=$_('freqGrid'); if(!grid) return;
@@ -908,11 +930,11 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot){
   const btnOdd=$_('btnOdd'), btnEven=$_('btnEven'), parityReasonEl=$_('parityReason');
   if (strategy.parity_available) {
     if (strategy.parity_direction === 'odd') {
-      btnOdd.disabled = tradeLocked;
+      btnOdd.disabled = tradeLocked || _parityScheduled;
       btnEven.disabled = true;
     } else if (strategy.parity_direction === 'even') {
       btnOdd.disabled = true;
-      btnEven.disabled = tradeLocked;
+      btnEven.disabled = tradeLocked || _parityScheduled;
     } else {
       btnOdd.disabled = true;
       btnEven.disabled = true;
@@ -924,7 +946,7 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot){
     parityReasonEl.textContent = strategy.parity_reason || '';
   }
 
-  $_( 'btnDiffer').disabled = !strategy.differ_available || tradeLocked;
+  $_( 'btnDiffer').disabled = !strategy.differ_available || tradeLocked || _differScheduled;
   $_( 'btnMatches').disabled = !strategy.matches_available || tradeLocked;
 
   const matchesReasonEl=$_('matchesReason');
@@ -940,17 +962,30 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot){
   }
 }
 
+function updatePendingIndicators(strategy) {
+    const parityEl = $_('parityPending');
+    const differEl = $_('differPending');
+    
+    if (parityEl) {
+        parityEl.className = _parityScheduled ? 'pending-indicator visible' : 'pending-indicator';
+    }
+    if (differEl) {
+        differEl.className = _differScheduled ? 'pending-indicator visible' : 'pending-indicator';
+    }
+}
+
 function scheduleHistoryLoad(delay=5000){
   if(_historyDebounceTimer) clearTimeout(_historyDebounceTimer);
   _historyDebounceTimer = setTimeout(()=>{ loadHistory(); _historyDebounceTimer=null; }, delay);
 }
 
-// ══════════ FUNÇÕES DE TRADE ══════════
-function tradeDigit(pred){
+// ══════════ FUNÇÕES DE TRADE (com agendamento) ══════════
+async function tradeDigit(pred){
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+  if(_parityScheduled){ toast('📅 Aposta de paridade já agendada','warning'); return; }
+  
   const amt=parseFloat($_( 'amtDigit').value)||0.35;
   _tradeSubmitted = true;
-  _tradePending = false;
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) {
@@ -962,34 +997,35 @@ function tradeDigit(pred){
   const auditCard = $_('auditCard');
   if(auditCard) auditCard.style.display = 'none';
   
-  fetch('/api/trade/digit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})})
-  .then(r=>r.json()).then(d=>{
+  try {
+    const r = await fetch('/api/trade/digit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: amt })
+    });
+    const d = await r.json();
     _tradeSubmitted = false;
     clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else { 
-      _tradePending = true;
-      clearTimeout(_tradePendingTimer);
-      _tradePendingTimer = setTimeout(() => {
-        if (_tradePending) {
-          _tradePending = false;
-          toast('⚠️ Resultado demorou muito. Verifique o histórico.','warning', 6000);
-        }
-      }, 10000);
-      toast('⏳ Aposta enviada!','info'); 
-      scheduleHistoryLoad(5000); 
+    if(d.error){ 
+      toast('❌ '+d.error,'loss'); 
+    } else { 
+      _parityScheduled = true;
+      toast('📅 Aposta agendada para o fim do sinal','info');
+      updatePendingIndicators({});
     }
-  }).catch(e=>{
-    _tradeSubmitted = false; _tradePending = false;
-    clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer);
+  } catch(e) {
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
     toast('❌ Erro de rede','loss');
-  });
+  }
 }
 
 async function tradeDiffer(){
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+  if(_differScheduled){ toast('📅 Aposta DIFFER já agendada','warning'); return; }
+  
   const amt=parseFloat($_( 'amtDigit').value)||0.35;
-  _tradeSubmitted = true; _tradePending = false;
+  _tradeSubmitted = true;
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
@@ -998,20 +1034,27 @@ async function tradeDiffer(){
   const auditCard = $_('auditCard');
   if(auditCard) auditCard.style.display = 'none';
   
-  try{
-    const r=await fetch('/api/trade/differ',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
-    const d=await r.json();
-    _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ 
-      _tradePending = true;
-      clearTimeout(_tradePendingTimer);
-      _tradePendingTimer = setTimeout(() => {
-        if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
-      }, 10000);
-      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
+  try {
+    const r = await fetch('/api/trade/differ', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: amt })
+    });
+    const d = await r.json();
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+    if(d.error){ 
+      toast('❌ '+d.error,'loss'); 
+    } else { 
+      _differScheduled = true;
+      toast('📅 Aposta DIFFER agendada para o fim do sinal','info');
+      updatePendingIndicators({});
     }
-  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
+  } catch(e) {
+    toast('❌ Erro de rede','loss');
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+  }
 }
 
 async function tradeMatches(){
@@ -1084,7 +1127,6 @@ async function conectar(){
   try{ const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok,account_type:selectedAcct})}); const d=await r.json(); if(d.error){ toast('❌ '+d.error,'loss'); return; } toast('✅ Token guardado','win'); $_( 'conSt').textContent='🔄 A conectar...'; setTimeout(()=>{ fetch('/api/connect',{method:'POST'}).then(r=>r.json()).then(d=>{ if(d.status==='connecting') toast('🔄 Conectando...','info'); }); },500); } catch(e){ toast('❌ Erro de rede','loss'); }
 }
 
-// ══════════ CONEXÃO OAUTH (localStorage) ══════════
 async function connectWithDeriv() {
     try {
         const r = await fetch('/api/auth/deriv_oauth_url');
@@ -1275,7 +1317,6 @@ function updatePingDisplay(){
   pingEl.innerHTML = `✅ Ping: <span style="color:${cor}">${_lastValidPing}ms</span>`;
 }
 
-// ══════════ NOVAS FUNÇÕES ══════════
 function checkUserPlan(){
     fetch('/api/auth/status').then(r=>r.json()).then(d=>{
         if(d.authenticated && d.user){
@@ -1288,7 +1329,6 @@ function checkUserPlan(){
     }).catch(()=>{});
 }
 
-// ══════════ F1: THROTTLE DE 10s PARA 1s ══════════
 function iniciarThrottleDigito() {
   if (_timerDigito) clearInterval(_timerDigito);
   _timerDigito = setInterval(() => {
@@ -1301,9 +1341,8 @@ function iniciarThrottleDigito() {
       bp.textContent = _ultimoParidade;
       bp.className = 'big-p ' + (_ultimoParidade === 'ÍMPAR' ? 'odd' : 'even');
     }
-  }, 1000);  // F1: era 10000, agora 1000
+  }, 1000);
 }
-// ══════════ FIM F1 ══════════
 
 function updateLatencyIndicator(latencyMs) {
   const el = $_('latencyIndicator');
