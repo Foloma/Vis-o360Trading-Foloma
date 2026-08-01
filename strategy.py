@@ -11,7 +11,7 @@ class StrategyManager:
     """
     Implementa os módulos da Foloma Visão 360 com sincronização por snapshots.
     - Agendamento de apostas (paridade e DIFFER) para o final do ciclo de 10 ticks.
-    - Gate temporal: bloqueia agendamento nos últimos 2 segundos do ciclo.
+    - Gate temporal: bloqueia agendamento nos últimos 2 ticks do ciclo.
     - Retorno de execução exposto no get_status.
     """
 
@@ -120,16 +120,10 @@ class StrategyManager:
         return True, "OK"
 
     def _can_schedule(self):
-        if not self.client or not self.client._last_tick_time:
-            return False, "Sem ticks recentes"
-        elapsed = time.time() - self.client._last_tick_time
-        if elapsed < 1.0:
-            tr = self.analyzer.get_ticks_remaining() if hasattr(self.analyzer, 'get_ticks_remaining') else 10
-            if tr < 2:
-                return False, "Fim do ciclo iminente"
-        else:
-            if elapsed > 8.0:
-                return False, "Fim do ciclo iminente (último tick >8s atrás)"
+        """Bloqueia agendamento nos últimos 2 ticks do ciclo."""
+        tr = self.analyzer.get_ticks_remaining() if hasattr(self.analyzer, 'get_ticks_remaining') else 10
+        if tr < 2:
+            return False, "Fim do ciclo iminente"
         return True, "OK"
 
     def is_market_stable(self):
@@ -281,14 +275,18 @@ class StrategyManager:
                 return False, "Já existe um trade pendente"
 
             current_tick = self.analyzer.get_tick_count()
-            target_tick = current_tick + self.SIGNAL_VALIDITY_TICKS
+            ticks_remaining = self.analyzer.get_ticks_remaining()
+            if ticks_remaining <= 0:
+                return False, "Ciclo já fechou, aguarde o próximo"
+
+            target_tick = current_tick + ticks_remaining
             self._pending_parity_bet = {
                 'direction': direction,
                 'target_tick': target_tick,
                 'amount': amount,
                 'created_at': time.time()
             }
-            logger.info(f"📅 Aposta de paridade agendada: {direction} no tick {target_tick} (daqui a {self.SIGNAL_VALIDITY_TICKS} ticks)")
+            logger.info(f"📅 Aposta de paridade agendada: {direction} no tick {target_tick} (faltam {ticks_remaining} ticks)")
             return True, f"Aposta {direction} agendada para o tick {target_tick}"
 
     def schedule_differ_bet(self, digit, amount=0.35):
@@ -307,14 +305,18 @@ class StrategyManager:
                 return False, f"Pausa DIFFER {remaining:.0f}s restantes"
 
             current_tick = self.analyzer.get_tick_count()
-            target_tick = current_tick + self.SIGNAL_VALIDITY_TICKS
+            ticks_remaining = self.analyzer.get_ticks_remaining()
+            if ticks_remaining <= 0:
+                return False, "Ciclo já fechou, aguarde o próximo"
+
+            target_tick = current_tick + ticks_remaining
             self._pending_differ_bet = {
                 'digit': digit,
                 'target_tick': target_tick,
                 'amount': amount,
                 'created_at': time.time()
             }
-            logger.info(f"📅 Aposta DIFFER agendada: dígito {digit} no tick {target_tick} (daqui a {self.SIGNAL_VALIDITY_TICKS} ticks)")
+            logger.info(f"📅 Aposta DIFFER agendada: dígito {digit} no tick {target_tick} (faltam {ticks_remaining} ticks)")
             return True, f"DIFFER {digit} agendado para o tick {target_tick}"
 
     def _check_pending_bets(self):
