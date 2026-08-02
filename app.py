@@ -1288,7 +1288,7 @@ def _validate_amount(amount):
         return None, 'Valor entre 0.35 e 100'
     return amt, None
 
-# ==================== TRADING SINTÉTICOS (agendamento corrigido) ====================
+# ==================== TRADING SINTÉTICOS (com displayed_digit) ====================
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
@@ -1309,9 +1309,20 @@ def trade_digit():
         return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
 
     analyzer = sess['digit_analyzer']
-    last_digit = analyzer.get_current_digit()
-    if last_digit is None:
-        return jsonify({'error': 'Dígito indisponível'}), 400
+    displayed_digit = request.json.get('displayed_digit')
+    current_digit = analyzer.get_current_digit()
+
+    if displayed_digit is None:
+        return jsonify({'error': 'Dígito não informado'}), 400
+
+    if displayed_digit != current_digit:
+        return jsonify({
+            'error': 'O dígito mudou entre o clique e o processamento. Tente novamente.',
+            'displayed_digit': displayed_digit,
+            'current_digit': current_digit
+        }), 409  # Conflict
+
+    last_digit = current_digit
 
     amt, err = _validate_amount(request.json.get('amount', 0.35))
     if err:
@@ -1326,7 +1337,12 @@ def trade_digit():
     if not ok:
         return jsonify({'error': msg}), 400
 
-    return jsonify({'status': 'ok', 'message': f'📅 {msg}'})
+    return jsonify({
+        'status': 'ok',
+        'message': f'📅 Aposta {direction} agendada para o tick {strategy.analyzer.get_tick_count() + strategy.analyzer.get_ticks_remaining()}',
+        'digit_used': last_digit,
+        'direction': direction
+    })
 
 @app.route('/api/trade/differ', methods=['POST'])
 @require_auth
@@ -1348,9 +1364,20 @@ def trade_differ():
         return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
 
     analyzer = sess['digit_analyzer']
-    digit = analyzer.get_current_digit()
-    if digit is None:
-        return jsonify({'error': 'Dígito indisponível'}), 400
+    displayed_digit = request.json.get('displayed_digit')
+    current_digit = analyzer.get_current_digit()
+
+    if displayed_digit is None:
+        return jsonify({'error': 'Dígito não informado'}), 400
+
+    if displayed_digit != current_digit:
+        return jsonify({
+            'error': 'O dígito mudou entre o clique e o processamento. Tente novamente.',
+            'displayed_digit': displayed_digit,
+            'current_digit': current_digit
+        }), 409
+
+    digit = current_digit
 
     amt, err = _validate_amount(request.json.get('amount', 0.35))
     if err:
@@ -1362,7 +1389,12 @@ def trade_differ():
     if not ok:
         return jsonify({'error': msg}), 400
 
-    return jsonify({'status': 'ok', 'message': f'📅 {msg}'})
+    return jsonify({
+        'status': 'ok',
+        'message': f'📅 Aposta DIFFER no dígito {digit} agendada',
+        'digit_used': digit,
+        'direction': f'DIFFER_{digit}'
+    })
 
 @app.route('/api/trade/matches', methods=['POST'])
 @require_auth
