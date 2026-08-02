@@ -482,7 +482,7 @@ let _forexUpperBand = null, _forexMiddleBand = null, _forexLowerBand = null;
 let _forexGranularity = 60;
 let _forexSectionVisible = false;
 
-// Throttle dígito
+// Throttle dígito — variável atualizada a cada 1000ms
 let _ultimoDigito = null;
 let _ultimoParidade = null;
 let _timerDigito = null;
@@ -979,12 +979,82 @@ function scheduleHistoryLoad(delay=5000){
   _historyDebounceTimer = setTimeout(()=>{ loadHistory(); _historyDebounceTimer=null; }, delay);
 }
 
-// ══════════ FUNÇÕES DE TRADE (com agendamento) ══════════
+// ══════════ NOVAS FUNÇÕES DE TRADE COM RETRY ══════════
+async function tradeDigitWithRetry(pred, displayedDigit, retried = false) {
+  const amt = parseFloat($_( 'amtDigit').value) || 0.35;
+  try {
+    const r = await fetch('/api/trade/digit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: amt, displayed_digit: displayedDigit })
+    });
+    const d = await r.json();
+
+    if (r.status === 409 && d.current_digit !== undefined && !retried) {
+      return tradeDigitWithRetry(pred, d.current_digit, true);
+    }
+
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+
+    if (d.error) {
+      toast('❌ ' + d.error, 'loss');
+      return;
+    }
+
+    _parityScheduled = true;
+    const confirmMsg = d.digit_used !== undefined
+      ? `Aposta registada: ${d.direction.toUpperCase()}, dígito base ${d.digit_used}`
+      : d.message;
+    toast('📅 ' + confirmMsg, 'info');
+    updatePendingIndicators({});
+  } catch (e) {
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+    toast('❌ Erro de rede', 'loss');
+  }
+}
+
+async function tradeDifferWithRetry(displayedDigit, retried = false) {
+  const amt = parseFloat($_( 'amtDigit').value) || 0.35;
+  try {
+    const r = await fetch('/api/trade/differ', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: amt, displayed_digit: displayedDigit })
+    });
+    const d = await r.json();
+
+    if (r.status === 409 && d.current_digit !== undefined && !retried) {
+      return tradeDifferWithRetry(d.current_digit, true);
+    }
+
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+
+    if (d.error) {
+      toast('❌ ' + d.error, 'loss');
+      return;
+    }
+
+    _differScheduled = true;
+    const confirmMsg = d.digit_used !== undefined
+      ? `Aposta DIFFER registada: dígito base ${d.digit_used}`
+      : d.message;
+    toast('📅 ' + confirmMsg, 'info');
+    updatePendingIndicators({});
+  } catch (e) {
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+    toast('❌ Erro de rede', 'loss');
+  }
+}
+
+// ══════════ FUNÇÕES DE TRADE (públicas) ══════════
 async function tradeDigit(pred){
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   if(_parityScheduled){ toast('📅 Aposta de paridade já agendada','warning'); return; }
-  
-  const amt=parseFloat($_( 'amtDigit').value)||0.35;
+
   _tradeSubmitted = true;
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
@@ -993,68 +1063,27 @@ async function tradeDigit(pred){
       toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
     }
   }, 3000);
-  
+
   const auditCard = $_('auditCard');
   if(auditCard) auditCard.style.display = 'none';
-  
-  try {
-    const r = await fetch('/api/trade/digit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt })
-    });
-    const d = await r.json();
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ 
-      toast('❌ '+d.error,'loss'); 
-    } else { 
-      _parityScheduled = true;
-      toast('📅 Aposta agendada para o fim do sinal','info');
-      updatePendingIndicators({});
-    }
-  } catch(e) {
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-    toast('❌ Erro de rede','loss');
-  }
+
+  await tradeDigitWithRetry(pred, _ultimoDigito);
 }
 
 async function tradeDiffer(){
   if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
   if(_differScheduled){ toast('📅 Aposta DIFFER já agendada','warning'); return; }
-  
-  const amt=parseFloat($_( 'amtDigit').value)||0.35;
+
   _tradeSubmitted = true;
   clearTimeout(_tradeSubmittedTimer);
   _tradeSubmittedTimer = setTimeout(() => {
     if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
   }, 3000);
-  
+
   const auditCard = $_('auditCard');
   if(auditCard) auditCard.style.display = 'none';
-  
-  try {
-    const r = await fetch('/api/trade/differ', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt })
-    });
-    const d = await r.json();
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ 
-      toast('❌ '+d.error,'loss'); 
-    } else { 
-      _differScheduled = true;
-      toast('📅 Aposta DIFFER agendada para o fim do sinal','info');
-      updatePendingIndicators({});
-    }
-  } catch(e) {
-    toast('❌ Erro de rede','loss');
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-  }
+
+  await tradeDifferWithRetry(_ultimoDigito);
 }
 
 async function tradeMatches(){
