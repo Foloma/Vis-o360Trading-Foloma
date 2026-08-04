@@ -649,6 +649,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                             strategy.set_execution_error(f"Falha ao executar paridade: {contract}")
                         else:
                             strategy.clear_execution_error()
+                            credit_referral_commission(user_email, amt)   # <-- ADICIONADO
                 if pending_differ:
                     if strategy._check_pending_bets():
                         digit = pending_differ['digit']
@@ -658,6 +659,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                             strategy.set_execution_error(f"Falha ao executar DIFFER: {digit}")
                         else:
                             strategy.clear_execution_error()
+                            credit_referral_commission(user_email, amt)   # <-- ADICIONADO
             forex_mgr.on_tick(tick)
 
         client.on_tick_callback = tick_callback
@@ -1320,7 +1322,7 @@ def trade_digit():
             'error': 'O dígito mudou entre o clique e o processamento. Tente novamente.',
             'displayed_digit': displayed_digit,
             'current_digit': current_digit
-        }), 409  # Conflict
+        }), 409
 
     last_digit = current_digit
 
@@ -1773,6 +1775,7 @@ def forex_trade():
     while time.time() < deadline:
         status = client.get_pending_trade_status()
         if status is None:
+            credit_referral_commission(session['user_email'], amount)   # <-- ADICIONADO
             return jsonify({'status': 'ok', 'message': f'{direction} {symbol} ${amount:.2f} executado!'})
         if status.get('error'):
             err_msg = status['error'].get('message', 'Erro desconhecido')
