@@ -93,9 +93,6 @@ class ForexDataManager:
                 'timestamp': float(timestamp)
             })
 
-    # ========================================================================
-    # CORRIGIDO: deduplicação de velas refeita para nunca travar a atualização
-    # ========================================================================
     def on_candles(self, data, req_id=None):
         """
         Callback chamado quando uma resposta de ticks_history (candles) chega.
@@ -169,8 +166,11 @@ class ForexDataManager:
             ticks = list(self._ticks.get(symbol, []))
             return ticks[-count:] if count else ticks
 
-    def get_recent_candles(self, symbol, count=50, granularity=60):
-        """Retorna as últimas `count` velas para o símbolo e granularidade pedidos."""
+    def get_recent_candles(self, symbol, count=50, granularity=60, only_closed=True):
+        """
+        Retorna as últimas `count` velas para o símbolo e granularidade pedidos.
+        Se only_closed=True (padrão), exclui a vela ainda em formação.
+        """
         symbol = self._normalize_symbol(symbol)
         with self._lock:
             if symbol not in self._candles:
@@ -178,6 +178,9 @@ class ForexDataManager:
             if granularity not in self._candles[symbol]:
                 return []
             candles = list(self._candles[symbol][granularity])
+            if only_closed:
+                now = time.time()
+                candles = [c for c in candles if c['epoch'] + granularity <= now]
             return candles[-count:] if count else candles
 
     def get_latest_price(self, symbol):
