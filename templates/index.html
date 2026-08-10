@@ -191,33 +191,49 @@
       <button class="tf-btn" onclick="scrollToSection('g6')">Suporte</button>
       <button class="tf-btn" onclick="scrollToSection('g7')">Como Funciona</button>
     </div>
+
+    <!-- PAR/ÍMPAR — REESCRITO -->
     <div id="g1" style="margin-top:16px">
-      <h3>🎲 Par/Ímpar — Como interpretar o sinal</h3>
-      <p>O sistema observa os últimos dígitos e mostra uma tendência (ex: 5 de 6 ímpares). Quando a tendência é forte, o botão da direção oposta fica disponível para entrada.</p>
-      <p><b>Importante:</b> os dígitos no ecrã servem para análise de tendência, mas o contrato real pode abrir 1 a 3 ticks depois do clique, devido ao tempo de processamento da Deriv. Por isso o resultado final pode parecer diferente do que viste no momento do clique — isso é normal e está documentado pela própria Deriv, não é uma falha da plataforma.</p>
-      <p>Usa sempre o painel <b>"🔍 Auditoria do Último Trade"</b> depois de cada operação para veres exatamente qual foi o tick de entrada, o tick de saída e a latência real.</p>
+      <h3>🎲 Par/Ímpar — o que realmente acontece</h3>
+      <p>O sistema observa o último dígito recebido e acende o botão correspondente (PAR ou ÍMPAR) apenas como indicação visual do estado atual.</p>
+      <p><b>Importante:</b> após mais de 450 trades reais acumulados e um teste estatístico qui‑quadrado (1346 dígitos, p=0,29), <b>não foi encontrada nenhuma vantagem matemática</b> em relação a dígitos aleatórios. A probabilidade de acerto em cada aposta de paridade é de aproximadamente 50%, menos a margem da Deriv.</p>
+      <p>Opcionalmente podes usar esta funcionalidade como entretenimento ou para testar a plataforma, mas <b>não como estratégia de rendimento</b>.</p>
     </div>
+
+    <!-- DIFFER — REESCRITO -->
     <div id="g2" style="margin-top:16px">
-      <h3>🎯 DIFFER — Como funciona</h3>
-      <p>O sistema identifica quando um dígito se repetiu recentemente e sugere apostar que ele <b>não</b> vai repetir-se novamente no próximo resultado. É a estratégia com fundamento estatístico mais sólido entre as disponíveis.</p>
+      <h3>🎯 DIFFER — o que realmente acontece</h3>
+      <p>O sistema permite‑te clicar no botão DIFFER a qualquer momento. A aposta é agendada para o fim do ciclo visível de ticks.</p>
+      <p><b>Importante:</b> os mesmos testes estatísticos aplicados ao DIFFER mostraram que <b>não há edge explorável</b> — a taxa de acerto observada ficou dentro do intervalo esperado para uma distribuição uniforme de dígitos.</p>
+      <p>À semelhança da paridade, esta funcionalidade está disponível para testes ou entretenimento, mas <b>não é recomendada como estratégia de rendimento</b>.</p>
     </div>
+
+    <!-- MATCHES (mantido) -->
     <div id="g3" style="margin-top:16px">
       <h3>🎯 MATCHES — Como funciona</h3>
       <p>Aposta que um dígito específico (que está ausente há muitos ticks) vai aparecer. O payout é alto (~9x) mas a probabilidade de acerto é de apenas 10% por tentativa.</p>
     </div>
+
+    <!-- GESTÃO (mantido) -->
     <div id="g4" style="margin-top:16px">
       <h3>📈 Plano de gestão de banca</h3>
       <p>Define uma meta de lucro diário entre 5% e 10% da tua banca. Metas menores são mais sustentáveis.</p>
     </div>
+
+    <!-- EMOCIONAL (mantido) -->
     <div id="g5" style="margin-top:16px">
       <h3>🧠 Controlo emocional</h3>
       <p>A maior causa de perdas em trading não é a estratégia — é a reação emocional após uma perda ou um ganho.</p>
     </div>
+
+    <!-- SUPORTE (mantido) -->
     <div id="g6" style="margin-top:16px">
       <h3>📲 Suporte e recursos</h3>
       <p><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" style="color:var(--accent);font-weight:700">👉 Criar conta na Deriv</a></p>
       <p><a href="https://chat.whatsapp.com/L8e0ituCsH68uIk3PMlQc9" target="_blank" style="color:var(--accent);font-weight:700">👉 Grupo de Suporte Foloma Visão 360</a></p>
     </div>
+
+    <!-- COMO FUNCIONA (mantido) -->
     <div id="g7" style="margin-top:16px">
       <h3>⚖️ Como Funciona Realmente</h3>
       <p>A Foloma Visão 360 é uma ferramenta de execução e análise — não um sistema de previsão garantida.</p>
@@ -979,7 +995,7 @@ function scheduleHistoryLoad(delay=5000){
   _historyDebounceTimer = setTimeout(()=>{ loadHistory(); _historyDebounceTimer=null; }, delay);
 }
 
-// ══════════ NOVAS FUNÇÕES DE TRADE COM RETRY ══════════
+// ══════════ FUNÇÕES DE TRADE COM RETRY E CONFIRMAÇÃO ══════════
 async function tradeDigitWithRetry(pred, displayedDigit, retried = false) {
   const amt = parseFloat($_( 'amtDigit').value) || 0.35;
   try {
