@@ -1616,6 +1616,9 @@ def credit_referral_commission(user_email, amount):
     user = UserStore.get(user_email)
     if not user or not user.get('referral_code'):
         return
+    # FIX: só creditar comissão se a conta ativa for REAL
+    if user.get('active_account') != 'real':
+        return
     ref_code = user['referral_code']
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
     try:
