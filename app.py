@@ -649,7 +649,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                             strategy.set_execution_error(f"Falha ao executar paridade: {contract}")
                         else:
                             strategy.clear_execution_error()
-                            credit_referral_commission(user_email, amt)   # <-- ADICIONADO
+                            credit_referral_commission(user_email, amt)
                 if pending_differ:
                     if strategy._check_pending_bets():
                         digit = pending_differ['digit']
@@ -659,7 +659,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                             strategy.set_execution_error(f"Falha ao executar DIFFER: {digit}")
                         else:
                             strategy.clear_execution_error()
-                            credit_referral_commission(user_email, amt)   # <-- ADICIONADO
+                            credit_referral_commission(user_email, amt)
             forex_mgr.on_tick(tick)
 
         client.on_tick_callback = tick_callback
@@ -1668,7 +1668,7 @@ def forex_candles(symbol):
     granularity = request.args.get('granularity', 60, type=int)
     count = request.args.get('count', 50, type=int)
     sess['forex_data'].request_candles(symbol, granularity=granularity, count=count)
-    candles = sess['forex_data'].get_recent_candles(symbol, count=count, granularity=granularity)
+    candles = sess['forex_data'].get_recent_candles(symbol, count=count, granularity=granularity, only_closed=False)
     return jsonify({'candles': candles, 'symbol': symbol})
 
 UNIT_SECONDS = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
@@ -1778,7 +1778,7 @@ def forex_trade():
     while time.time() < deadline:
         status = client.get_pending_trade_status()
         if status is None:
-            credit_referral_commission(session['user_email'], amount)   # <-- ADICIONADO
+            credit_referral_commission(session['user_email'], amount)
             return jsonify({'status': 'ok', 'message': f'{direction} {symbol} ${amount:.2f} executado!'})
         if status.get('error'):
             err_msg = status['error'].get('message', 'Erro desconhecido')
