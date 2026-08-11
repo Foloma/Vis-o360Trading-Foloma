@@ -1,10 +1,3 @@
-"""
-Sistema de votação Ensemble para Forex.
-Cada indicador vota BUY, SELL ou NEUTRO.
-A direção final é determinada pela percentagem de votos concordantes.
-ADX não vota direção — serve apenas como filtro de força.
-"""
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,67 +5,77 @@ logger = logging.getLogger(__name__)
 
 class ForexEnsemble:
     """
-    Ensemble de indicadores técnicos.
-    Cada indicador emite um voto (BUY/SELL/NEUTRO).
-    A direção final requer um consenso mínimo (padrão: 60%).
+    Sistema de votação para sinais Forex.
+    Agrega os votos de vários indicadores e retorna uma direção consensual.
     """
 
     def __init__(self, consensus_threshold=0.6):
-        self.consensus_threshold = consensus_threshold  # 60% dos votos concordantes
+        """
+        consensus_threshold: proporção mínima de votos não neutros para aprovar um sinal (0.0 a 1.0)
+        """
+        self.consensus_threshold = consensus_threshold
 
     # -----------------------------------------------------------------
     # Votos individuais
     # -----------------------------------------------------------------
     def _vote_trend(self, ind):
-        """Tendência: EMA50 vs SMA200."""
-        sma200 = ind.get('sma_200')
+        """Voto baseado no cruzamento EMA50 vs SMA100."""
+        sma100 = ind.get('sma_100')
         ema50 = ind.get('ema_50')
-        if sma200 is None or ema50 is None:
+        if sma100 is None or ema50 is None:
             return 'NEUTRO'
-        if ema50 > sma200:
+        if ema50 > sma100:
             return 'BUY'
-        elif ema50 < sma200:
+        elif ema50 < sma100:
             return 'SELL'
-        return 'NEUTRO'
+        else:
+            return 'NEUTRO'
 
     def _vote_rsi(self, ind):
-        """RSI: <35 = sobrevendido (BUY), >65 = sobrecomprado (SELL)."""
+        """Voto baseado no RSI (14 períodos). Limiares: 35/65."""
         rsi = ind.get('rsi_14')
         if rsi is None:
             return 'NEUTRO'
-        if rsi < 35:
+        if rsi < 35:                # revertido de 30 para 35
             return 'BUY'
-        if rsi > 65:
+        elif rsi > 65:              # revertido de 70 para 65
             return 'SELL'
-        return 'NEUTRO'
+        else:
+            return 'NEUTRO'
 
     def _vote_macd(self, ind):
-        """MACD: linha > sinal = BUY, linha < sinal = SELL."""
-        macd_line = ind.get('macd_line')
-        signal_line = ind.get('signal_line')
-        if macd_line is None or signal_line is None:
+        """Voto baseado no MACD (cruzamento da linha de sinal)."""
+        macd = ind.get('macd_line')
+        signal = ind.get('signal_line')
+        if macd is None or signal is None:
             return 'NEUTRO'
-        if macd_line > signal_line:
+        if macd > signal:
             return 'BUY'
-        elif macd_line < signal_line:
+        elif macd < signal:
             return 'SELL'
-        return 'NEUTRO'
+        else:
+            return 'NEUTRO'
 
     def _vote_bollinger(self, ind):
-        """Bollinger: preço na banda inferior = BUY, na superior = SELL."""
+        """Voto baseado nas Bandas de Bollinger (reversão à média)."""
         bollinger = ind.get('bollinger')
         price = ind.get('latest_price')
-        if not bollinger or price is None:
+        if bollinger is None or price is None:
             return 'NEUTRO'
         upper, middle, lower = bollinger
-        if price <= lower:
+        if upper is None or lower is None:
+            return 'NEUTRO'
+        # Preço próximo da banda inferior → compra (reversão)
+        if price <= lower * 1.001:
             return 'BUY'
-        if price >= upper:
+        # Preço próximo da banda superior → venda (reversão)
+        elif price >= upper * 0.999:
             return 'SELL'
-        return 'NEUTRO'
+        else:
+            return 'NEUTRO'
 
     def _vote_momentum(self, ind):
-        """Momentum: positivo = BUY, negativo = SELL."""
+        """Voto baseado no Momentum (10 períodos)."""
         momentum = ind.get('momentum_10')
         if momentum is None:
             return 'NEUTRO'
@@ -80,46 +83,51 @@ class ForexEnsemble:
             return 'BUY'
         elif momentum < 0:
             return 'SELL'
-        return 'NEUTRO'
+        else:
+            return 'NEUTRO'
 
     # -----------------------------------------------------------------
     # Decisão do ensemble
     # -----------------------------------------------------------------
-    def decide(self, ind):
+    def decide(self, indicators):
         """
-        Recebe um dicionário de indicadores e retorna:
-        - direction: 'BUY', 'SELL' ou 'HOLD'
-        - consensus_pct: % de votos concordantes (0-100)
-        - votes: dicionário com o voto de cada indicador
+        Recebe um dicionário de indicadores e retorna (direction, consensus, votes).
+        direction: 'BUY', 'SELL' ou 'HOLD'
+        consensus: percentagem de votos alinhados (0-100)
+        votes: dicionário com o voto de cada indicador
         """
         votes = {
-            'trend': self._vote_trend(ind),
-            'rsi': self._vote_rsi(ind),
-            'macd': self._vote_macd(ind),
-            'bollinger': self._vote_bollinger(ind),
-            'momentum': self._vote_momentum(ind),
+            'trend':     self._vote_trend(indicators),
+            'rsi':       self._vote_rsi(indicators),
+            'macd':      self._vote_macd(indicators),
+            'bollinger': self._vote_bollinger(indicators),
+            'momentum':  self._vote_momentum(indicators),
         }
 
+        # Contar votos não neutros
         buy_votes = sum(1 for v in votes.values() if v == 'BUY')
         sell_votes = sum(1 for v in votes.values() if v == 'SELL')
-        total_voters = len(votes)
+        total_votes = len(votes)
+        neutral = total_votes - (buy_votes + sell_votes)
 
-        # ADX como filtro de força (não vota direção)
-        adx = ind.get('adx_14') or 0
-        strength_ok = adx > 20
-
-        if buy_votes / total_voters >= self.consensus_threshold and strength_ok:
+        # Calcular consenso (proporção de votos na direção vencedora)
+        if buy_votes > sell_votes:
             direction = 'BUY'
-        elif sell_votes / total_voters >= self.consensus_threshold and strength_ok:
+            consensus = buy_votes / total_votes
+        elif sell_votes > buy_votes:
             direction = 'SELL'
+            consensus = sell_votes / total_votes
         else:
             direction = 'HOLD'
+            consensus = 0
 
-        consensus_pct = round(max(buy_votes, sell_votes) / total_voters * 100)
+        consensus_pct = round(consensus * 100)
 
-        logger.debug(
-            f"Ensemble: BUY={buy_votes}/{total_voters}, SELL={sell_votes}/{total_voters}, "
-            f"ADX={adx}, strength_ok={strength_ok}, direction={direction}, consensus={consensus_pct}%"
-        )
+        logger.info(f"🔍 DEBUG ENSEMBLE: votes={votes}, buy={buy_votes}, sell={sell_votes}, "
+                    f"neutral={neutral}, direction={direction}, consensus={consensus_pct}%")
+
+        # Só aprova se o consenso atingir o limiar
+        if consensus < self.consensus_threshold:
+            direction = 'HOLD'
 
         return direction, consensus_pct, votes
