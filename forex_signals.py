@@ -3,7 +3,7 @@ import time
 from forex_indicators import ForexIndicators
 from forex_ensemble import ForexEnsemble
 from forex_risk import ForexRiskEngine
-from forex_scorer import ForexScorer  # Certifica-te que este módulo existe
+from forex_scorer import ForexScorer
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +26,8 @@ class ForexSignals:
     # Sinal de scoring (scorer legacy — apenas para registo paralelo)
     # -----------------------------------------------------------------
     def get_signal(self, symbol):
-        """
-        Analisa os indicadores para um símbolo e retorna um sinal
-        de scoring, se a confiança for >= threshold.
-        """
         ind = self._indicators.get_all_indicators(symbol, use_candles=True)
-        logger.info(f"🔍 DEBUG {symbol}: sma_200={ind.get('sma_200')}, ema_50={ind.get('ema_50')}, "
+        logger.info(f"🔍 DEBUG {symbol}: sma_100={ind.get('sma_100')}, ema_50={ind.get('ema_50')}, "
                     f"rsi_14={ind.get('rsi_14')}, adx_14={ind.get('adx_14')}, latest={ind.get('latest_price')}, "
                     f"macd={ind.get('macd_line')}, signal={ind.get('signal_line')}, "
                     f"bollinger={ind.get('bollinger')}, momentum={ind.get('momentum_10')}")
@@ -83,10 +79,10 @@ class ForexSignals:
         if ema_h1 is None or price is None:
             return None, "H1 sem dados (EMA ou preço None)"
 
-        # Margem de whipsaw reduzida para 0.02% (era 0.05%)
-        if price > ema_h1 * 1.0002:
+        # Margem de whipsaw reduzida para 0.01% (era 0.02%) para gerar mais sinais
+        if price > ema_h1 * 1.0001:
             h1_bias = 'BUY'
-        elif price < ema_h1 * 0.9998:
+        elif price < ema_h1 * 0.9999:
             h1_bias = 'SELL'
         else:
             motivo = f"H1 sem tendência clara (price={price:.5f}, ema_h1={ema_h1:.5f})"
@@ -94,9 +90,12 @@ class ForexSignals:
             return None, motivo
 
         # --- M15: ensemble completo ---
+        # NOVO: pedir velas frescas antes de avaliar
+        self._data.request_candles(symbol, granularity=900, count=50)
+
         ind_15 = self._indicators.get_all_indicators(symbol, granularity=900)
 
-        # --- DIAGNÓSTICO TEMPORÁRIO: verificar se a última vela M15 já fechou ---
+        # --- DIAGNÓSTICO DE REPAINT (mantido para monitorização) ---
         candles_check = self._data.get_recent_candles(symbol, count=1, granularity=900)
         if candles_check:
             last_epoch = candles_check[-1].get('epoch', 0)
@@ -105,7 +104,6 @@ class ForexSignals:
             logger.info(f"🔍 REPAINT-CHECK {symbol}: última vela epoch={last_epoch}, "
                         f"agora={now:.0f}, segundos dentro do período={seconds_into_candle:.0f}s "
                         f"(vela M15 fecha aos 900s)")
-        # --- FIM DIAGNÓSTICO ---
 
         if not ind_15.get('latest_price'):
             return None, "M15 sem preço"
@@ -114,9 +112,14 @@ class ForexSignals:
         logger.info(f"🔍 DEBUG {symbol} MTF: h1_bias={h1_bias}, m15_direction={direction}, consensus={consensus}%")
 
         if direction != h1_bias:
-            motivo = f"M15 ({direction}) discorda de H1 ({h1_bias})"
-            logger.info(f"🔍 DEBUG {symbol} MTF: {motivo} — sem sinal")
-            return None, motivo
+            # NOVO: permitir se o consenso for muito alto (≥75%)
+            if consensus >= 75:
+                logger.info(f"🔍 DEBUG {symbol} MTF: M15 discorda mas com consenso alto ({consensus}%) — aprovado como reversão")
+                h1_bias = direction  # ajustar o viés para o lado do M15
+            else:
+                motivo = f"M15 ({direction}) discorda de H1 ({h1_bias})"
+                logger.info(f"🔍 DEBUG {symbol} MTF: {motivo} — sem sinal")
+                return None, motivo
 
         # --- Risk Engine ---
         can_exec, reason = self._risk.can_execute(ind_15, consensus)
@@ -210,8 +213,8 @@ class ForexSignals:
                 (
                     symbol,
                     direction,
-                    source,          # signal_type
-                    source,          # strategy_used
+                    source,
+                    source,
                     confidence,
                     json.dumps(votes),
                     15,
@@ -228,8 +231,6 @@ class ForexSignals:
     # Registo de sinal bloqueado pelo MTF (comparação futura)
     # -----------------------------------------------------------------
     def _log_blocked_by_mtf(self, symbol, scorer_direction, scorer_total, mtf_reason, ind):
-        """Regista sinais que o scorer antigo teria dado, mas a hierarquia H1→M15 bloqueou.
-        Serve para avaliar depois, com dados reais, se o filtro novo é acertado ou excessivo."""
         try:
             import sqlite3, json, os
             db_path = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
@@ -255,7 +256,6 @@ class ForexSignals:
 
         signals = []
         for symbol in FOREX_SYMBOLS:
-            # Caminho principal, agora devolve (sinal, motivo)
             s, motivo_bloqueio = self.get_signal_multi_timeframe(symbol)
             if s:
                 pair_name = FOREX_SYMBOLS[symbol]
@@ -272,7 +272,6 @@ class ForexSignals:
                     'timeframe_label': s.get('timeframe_label', '15 min'),
                 })
 
-            # Scorer antigo: log de comparação + deteção de sinais bloqueados pela hierarquia
             scorer_result = self.get_signal(symbol)
             if scorer_result and not s:
                 ind_for_log = scorer_result['indicators']
@@ -284,7 +283,6 @@ class ForexSignals:
                     ind_for_log
                 )
 
-            # Sinal de liquidação
             liq = self.get_liquidation_signal(symbol)
             if liq:
                 pair_name = FOREX_SYMBOLS[symbol]
