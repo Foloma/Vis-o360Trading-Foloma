@@ -219,9 +219,10 @@ def _cleanup_loop():
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
+# ==================== NOVA THREAD: refresco periódico de candles (intervalo reduzido) ====================
 def _refresh_forex_candles_loop():
     while True:
-        time.sleep(600)
+        time.sleep(120)  # reduzido de 600 para 120 segundos
         try:
             with sessions_lock:
                 sessions_snapshot = list(sessions.items())
