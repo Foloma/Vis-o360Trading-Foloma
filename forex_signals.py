@@ -79,10 +79,10 @@ class ForexSignals:
         if ema_h1 is None or price is None:
             return None, "H1 sem dados (EMA ou preço None)"
 
-        # Margem de whipsaw reduzida para 0.01% (era 0.02%) para gerar mais sinais
-        if price > ema_h1 * 1.0001:
+        # Margem de whipsaw REVERTIDA para 0.02% (Fase 1 - base limpa)
+        if price > ema_h1 * 1.0002:
             h1_bias = 'BUY'
-        elif price < ema_h1 * 0.9999:
+        elif price < ema_h1 * 0.9998:
             h1_bias = 'SELL'
         else:
             motivo = f"H1 sem tendência clara (price={price:.5f}, ema_h1={ema_h1:.5f})"
@@ -90,7 +90,7 @@ class ForexSignals:
             return None, motivo
 
         # --- M15: ensemble completo ---
-        # NOVO: pedir velas frescas antes de avaliar
+        # Pedir velas frescas antes de avaliar (reduz obsolescência a longo prazo)
         self._data.request_candles(symbol, granularity=900, count=50)
 
         ind_15 = self._indicators.get_all_indicators(symbol, granularity=900)
@@ -111,15 +111,11 @@ class ForexSignals:
         direction, consensus, votes = self._ensemble.decide(ind_15)
         logger.info(f"🔍 DEBUG {symbol} MTF: h1_bias={h1_bias}, m15_direction={direction}, consensus={consensus}%")
 
+        # Regra original da Fase 1: só executar se M15 concordar com H1 (sem reversão)
         if direction != h1_bias:
-            # NOVO: permitir se o consenso for muito alto (≥75%)
-            if consensus >= 75:
-                logger.info(f"🔍 DEBUG {symbol} MTF: M15 discorda mas com consenso alto ({consensus}%) — aprovado como reversão")
-                h1_bias = direction  # ajustar o viés para o lado do M15
-            else:
-                motivo = f"M15 ({direction}) discorda de H1 ({h1_bias})"
-                logger.info(f"🔍 DEBUG {symbol} MTF: {motivo} — sem sinal")
-                return None, motivo
+            motivo = f"M15 ({direction}) discorda de H1 ({h1_bias})"
+            logger.info(f"🔍 DEBUG {symbol} MTF: {motivo} — sem sinal")
+            return None, motivo
 
         # --- Risk Engine ---
         can_exec, reason = self._risk.can_execute(ind_15, consensus)
