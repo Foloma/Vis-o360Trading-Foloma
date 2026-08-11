@@ -19,7 +19,7 @@ class ForexRiskEngine:
         self.min_consensus_pct = min_consensus_pct
         self.min_adx = min_adx
         self.max_atr_pct = max_atr_pct          # volatilidade máxima aceitável (ATR) – mantida em 0.5%
-        self.min_bandwidth_pct = 0.15           # NOVO: largura mínima de Bollinger (reduzida de 0.5% para 0.15%)
+        self.min_bandwidth_pct = 0.5            # REVERTIDO: largura mínima de Bollinger voltou a 0.5% (era 0.15% experimental)
 
     def can_execute(self, ind, consensus_pct):
         """
@@ -34,7 +34,7 @@ class ForexRiskEngine:
         if adx is None or adx < self.min_adx:
             return False, f"Mercado sem direção clara (ADX={adx})"
 
-        # 3. Volatilidade excessiva (ATR) – limiar mantido em 0.5%
+        # 3. Volatilidade excessiva (ATR)
         atr = ind.get('atr_14')
         price = ind.get('latest_price')
         if atr and price:
@@ -42,7 +42,7 @@ class ForexRiskEngine:
             if atr_pct > self.max_atr_pct:
                 return False, f"Volatilidade excessiva ({atr_pct:.2f}%)"
 
-        # 4. Mercado lateral (Bollinger muito estreito) – limiar reduzido de 0.5% para 0.15%
+        # 4. Mercado lateral (Bollinger muito estreito) – limiar original de 0.5%
         bollinger = ind.get('bollinger')
         if bollinger:
             upper, middle, lower = bollinger
