@@ -219,10 +219,10 @@ def _cleanup_loop():
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
-# ==================== NOVA THREAD: refresco periódico de candles (intervalo reduzido) ====================
+# ==================== THREAD: refresco periódico de candles (intervalo 120s) ====================
 def _refresh_forex_candles_loop():
     while True:
-        time.sleep(120)  # reduzido de 600 para 120 segundos
+        time.sleep(120)
         try:
             with sessions_lock:
                 sessions_snapshot = list(sessions.items())
@@ -238,6 +238,23 @@ def _refresh_forex_candles_loop():
             logger.error(f"Erro no refresco periódico de candles Forex: {e}")
 
 threading.Thread(target=_refresh_forex_candles_loop, daemon=True).start()
+
+# ==================== NOVA THREAD: geração contínua de sinais Forex ====================
+def _generate_forex_signals_loop():
+    while True:
+        time.sleep(90)  # a cada 90 segundos
+        try:
+            with sessions_lock:
+                sessions_snapshot = list(sessions.items())
+            for uid, sess in sessions_snapshot:
+                forex_signals = sess.get('forex_signals')
+                client = sess.get('client')
+                if forex_signals and client and client.authorized:
+                    forex_signals.get_all_signals()
+        except Exception as e:
+            logger.error(f"Erro no loop de geração de sinais Forex: {e}")
+
+threading.Thread(target=_generate_forex_signals_loop, daemon=True).start()
 
 def load_markup_from_db():
     try:
