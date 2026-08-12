@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class ForexSignals:
     """
     Gera sinais de trading (compra/venda) para pares de Forex.
-    Usa o Ensemble para votação e o RiskEngine para validação final.
-    Inclui sugestão de duração baseada em hierarquia top-down.
+    Usa o Ensemble para votação e o RiskEngine para ajuste de confiança.
+    Mantém o filtro estrutural de concordância H1↔M15.
     """
 
     def __init__(self, data_manager):
@@ -70,6 +70,7 @@ class ForexSignals:
         Hierarquia:
         1. H1 define tendência de fundo (EMA20 vs preço).
         2. M15 procura entrada com o ensemble completo, só na direção do H1.
+        3. Risk Engine ajusta confiança com base nas condições de mercado.
         Retorna (sinal, motivo_bloqueio) onde sinal é o dicionário do sinal ou None.
         """
 
@@ -79,7 +80,7 @@ class ForexSignals:
         if ema_h1 is None or price is None:
             return None, "H1 sem dados (EMA ou preço None)"
 
-        # Margem de whipsaw REVERTIDA para 0.02% (Fase 1 - base limpa)
+        # Margem de whipsaw 0.02%
         if price > ema_h1 * 1.0002:
             h1_bias = 'BUY'
         elif price < ema_h1 * 0.9998:
@@ -90,12 +91,11 @@ class ForexSignals:
             return None, motivo
 
         # --- M15: ensemble completo ---
-        # Pedir velas frescas antes de avaliar (reduz obsolescência a longo prazo)
         self._data.request_candles(symbol, granularity=900, count=50)
 
         ind_15 = self._indicators.get_all_indicators(symbol, granularity=900)
 
-        # --- DIAGNÓSTICO DE REPAINT (mantido para monitorização) ---
+        # --- DIAGNÓSTICO DE REPAINT ---
         candles_check = self._data.get_recent_candles(symbol, count=1, granularity=900)
         if candles_check:
             last_epoch = candles_check[-1].get('epoch', 0)
@@ -111,35 +111,36 @@ class ForexSignals:
         direction, consensus, votes = self._ensemble.decide(ind_15)
         logger.info(f"🔍 DEBUG {symbol} MTF: h1_bias={h1_bias}, m15_direction={direction}, consensus={consensus}%")
 
-        # Regra original da Fase 1: só executar se M15 concordar com H1 (sem reversão)
+        # Filtro estrutural: só executar se M15 concordar com H1 (sem reversão nesta fase)
         if direction != h1_bias:
             motivo = f"M15 ({direction}) discorda de H1 ({h1_bias})"
             logger.info(f"🔍 DEBUG {symbol} MTF: {motivo} — sem sinal")
             return None, motivo
 
-        # --- Risk Engine ---
-        can_exec, reason = self._risk.can_execute(ind_15, consensus)
-        logger.info(f"🔍 DEBUG {symbol} RISK: can_exec={can_exec}, reason={reason}")
-        if not can_exec:
-            motivo = f"Risk Engine: {reason}"
-            logger.info(f"Sinal {symbol} vetado pelo Risk Engine: {reason}")
-            return None, motivo
+        # --- Risk Engine (agora ajusta confiança, não bloqueia) ---
+        adjusted_confidence, risk_reasons = self._risk.evaluate(ind_15, consensus)
+        logger.info(f"🔍 DEBUG {symbol} RISK: raw_consensus={consensus}%, adjusted={adjusted_confidence}%, reasons={risk_reasons}")
 
-        # Sinal aprovado
         seconds_into_candle = None
         if candles_check:
             seconds_into_candle = round(time.time() - candles_check[-1].get('epoch', 0))
-        logger.info(f"🔍 REPAINT-AT-SIGNAL {symbol}: sinal aprovado com vela a {seconds_into_candle}s de maturidade (de 900s)")
+        logger.info(f"🔍 REPAINT-AT-SIGNAL {symbol}: sinal com vela a {seconds_into_candle}s de maturidade (de 900s)")
 
         votes_with_meta = dict(votes)
         votes_with_meta['_candle_maturity_seconds'] = seconds_into_candle
+        votes_with_meta['_risk_penalties'] = risk_reasons
 
-        self._log_signal(symbol, direction, consensus, votes_with_meta, ind_15, source='ensemble')
+        self._log_signal(symbol, direction, adjusted_confidence, votes_with_meta, ind_15, source='ensemble')
+
+        reason_text = f"H1 define {h1_bias}, M15 confirma com {consensus}% de consenso"
+        if risk_reasons:
+            reason_text += f" — ajustado: {', '.join(risk_reasons)}"
 
         sinal = {
             'direction': direction,
-            'confidence': consensus,
-            'reason': f"H1 define {h1_bias}, M15 confirma com {consensus}% de consenso",
+            'confidence': adjusted_confidence,
+            'raw_consensus': consensus,
+            'reason': reason_text,
             'indicators': ind_15,
             'breakdown': votes_with_meta,
             'type': 'ensemble',
