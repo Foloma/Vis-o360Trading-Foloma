@@ -1,7 +1,7 @@
 """
 Motor de risco para Forex.
 Independente da lógica de sinal — avalia condições de mercado
-e decide se o trade deve avançar, mesmo com consenso alto.
+e ajusta a confiança do sinal em vez de simplesmente bloquear.
 """
 
 import logging
@@ -11,18 +11,20 @@ logger = logging.getLogger(__name__)
 
 class ForexRiskEngine:
     """
-    Avalia se as condições de mercado permitem a execução de um trade.
-    Não substitui o Ensemble — é chamado depois dele, como filtro adicional.
+    Avalia as condições de mercado e ajusta a confiança do sinal.
+    Mantém o método can_execute() para compatibilidade, mas o novo
+    método evaluate() devolve confiança ajustada e motivos de penalização.
     """
 
     def __init__(self, min_consensus_pct=60, min_adx=20, max_atr_pct=0.5):
         self.min_consensus_pct = min_consensus_pct
         self.min_adx = min_adx
-        self.max_atr_pct = max_atr_pct          # volatilidade máxima aceitável (ATR) – mantida em 0.5%
-        self.min_bandwidth_pct = 0.5            # REVERTIDO: largura mínima de Bollinger voltou a 0.5% (era 0.15% experimental)
+        self.max_atr_pct = max_atr_pct          # volatilidade máxima aceitável (ATR)
+        self.min_bandwidth_pct = 0.5            # largura mínima de Bollinger
 
     def can_execute(self, ind, consensus_pct):
         """
+        Método antigo, mantido para compatibilidade.
         Retorna (True, "OK") ou (False, motivo).
         """
         # 1. Consenso mínimo
@@ -42,7 +44,7 @@ class ForexRiskEngine:
             if atr_pct > self.max_atr_pct:
                 return False, f"Volatilidade excessiva ({atr_pct:.2f}%)"
 
-        # 4. Mercado lateral (Bollinger muito estreito) – limiar original de 0.5%
+        # 4. Mercado lateral (Bollinger muito estreito)
         bollinger = ind.get('bollinger')
         if bollinger:
             upper, middle, lower = bollinger
@@ -52,3 +54,38 @@ class ForexRiskEngine:
                     return False, f"Mercado lateral (Bollinger bandwidth={bandwidth:.2f}% < {self.min_bandwidth_pct}%)"
 
         return True, "OK"
+
+    def evaluate(self, ind, consensus_pct):
+        """
+        Novo método: não bloqueia, devolve confiança ajustada e motivos de penalização.
+        """
+        penalty = 0
+        reasons = []
+
+        # ADX fraco
+        adx = ind.get('adx_14')
+        if adx is None or adx < self.min_adx:
+            penalty += 15
+            reasons.append(f"Tendência fraca (ADX={adx if adx is not None else 'N/A'})")
+
+        # Volatilidade excessiva
+        atr = ind.get('atr_14')
+        price = ind.get('latest_price')
+        if atr and price:
+            atr_pct = (atr / price) * 100
+            if atr_pct > self.max_atr_pct:
+                penalty += 10
+                reasons.append(f"Volatilidade excessiva ({atr_pct:.2f}%)")
+
+        # Bollinger muito estreito (lateral)
+        bollinger = ind.get('bollinger')
+        if bollinger:
+            upper, middle, lower = bollinger
+            if upper and middle and lower:
+                bandwidth = (upper - lower) / middle * 100
+                if bandwidth < self.min_bandwidth_pct:
+                    penalty += 15
+                    reasons.append(f"Mercado lateral (bandwidth={bandwidth:.2f}%)")
+
+        adjusted_confidence = max(0, consensus_pct - penalty)
+        return adjusted_confidence, reasons
