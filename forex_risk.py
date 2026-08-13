@@ -20,7 +20,7 @@ class ForexRiskEngine:
         self.min_consensus_pct = min_consensus_pct
         self.min_adx = min_adx
         self.max_atr_pct = max_atr_pct          # volatilidade máxima aceitável (ATR)
-        self.min_bandwidth_pct = 0.5            # largura mínima de Bollinger
+        self.min_bandwidth_pct = 0.5            # largura mínima de Bollinger (mantida em can_execute)
 
     def can_execute(self, ind, consensus_pct):
         """
@@ -57,18 +57,21 @@ class ForexRiskEngine:
 
     def evaluate(self, ind, consensus_pct):
         """
-        Novo método: não bloqueia, devolve confiança ajustada e motivos de penalização.
+        Penalização calibrada com dados reais (1467 sinais, ago/2026).
+        - ADX fraco: peso 25 (evidência forte: 31.2% vs 61.6%)
+        - ATR: mantido por precaução (nunca disparou na amostra, investigar)
+        - Bandwidth lateral: REMOVIDO (efeito invertido: 52.1% vs 47.1%)
         """
         penalty = 0
         reasons = []
 
-        # ADX fraco
+        # ADX fraco — preditor forte confirmado. Peso aumentado.
         adx = ind.get('adx_14')
         if adx is None or adx < self.min_adx:
-            penalty += 15
+            penalty += 25   # era 15
             reasons.append(f"Tendência fraca (ADX={adx if adx is not None else 'N/A'})")
 
-        # Volatilidade excessiva
+        # ATR — nunca disparou em 1467 sinais nesta amostra. Mantido por precaução.
         atr = ind.get('atr_14')
         price = ind.get('latest_price')
         if atr and price:
@@ -77,15 +80,15 @@ class ForexRiskEngine:
                 penalty += 10
                 reasons.append(f"Volatilidade excessiva ({atr_pct:.2f}%)")
 
-        # Bollinger muito estreito (lateral)
-        bollinger = ind.get('bollinger')
-        if bollinger:
-            upper, middle, lower = bollinger
-            if upper and middle and lower:
-                bandwidth = (upper - lower) / middle * 100
-                if bandwidth < self.min_bandwidth_pct:
-                    penalty += 15
-                    reasons.append(f"Mercado lateral (bandwidth={bandwidth:.2f}%)")
+        # Bandwidth lateral — REMOVIDO (efeito invertido nos dados).
+        # bollinger = ind.get('bollinger')
+        # if bollinger:
+        #     upper, middle, lower = bollinger
+        #     if upper and middle and lower:
+        #         bandwidth = (upper - lower) / middle * 100
+        #         if bandwidth < self.min_bandwidth_pct:
+        #             penalty += 15
+        #             reasons.append(f"Mercado lateral (bandwidth={bandwidth:.2f}%)")
 
         adjusted_confidence = max(0, consensus_pct - penalty)
         return adjusted_confidence, reasons
