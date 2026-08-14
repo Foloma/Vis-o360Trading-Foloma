@@ -1449,9 +1449,8 @@ async function loadForexSignals() {
             const duration = s.suggested_duration_minutes || 15;
             let amount = _suggestedAmount || 1;
             let actionButton = '';
-            if (conf >= 80) {
-                actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},${duration})" style="margin-top:6px;padding:6px 16px;background:var(--accent);color:#000;border:none;border-radius:4px;font-weight:700;animation:pulse 1.5s infinite;cursor:pointer">⚡ ENTRAR AGORA (${conf}%)</button>`;
-            } else if (conf >= 60) {
+            // REMOVIDO destaque especial para conf>=80
+            if (conf >= 60) {
                 actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},${duration})" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR (${conf}%)</button>`;
             }
 
@@ -1469,7 +1468,6 @@ async function loadForexSignals() {
                 breakdownHTML += `<div style="font-size:9px;color:var(--accent);margin-top:2px">⏱ Duração sugerida: ${s.timeframe_label}</div>`;
             }
 
-            // NEW: Exibir duração do sinal
             const durationLabel = s.is_new_signal
                 ? '🆕 Novo'
                 : `⏱ Ativo há ${Math.floor((s.active_duration_seconds || 0) / 60)} min`;
