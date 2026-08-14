@@ -1,5 +1,6 @@
 import logging
 import time
+import os
 from forex_indicators import ForexIndicators
 from forex_ensemble import ForexEnsemble
 from forex_risk import ForexRiskEngine
@@ -13,6 +14,8 @@ class ForexSignals:
     Gera sinais de trading (compra/venda) para pares de Forex.
     Usa o Ensemble para votação e o RiskEngine para ajuste de confiança.
     Mantém o filtro estrutural de concordância H1↔M15.
+    Rastreia há quanto tempo um sinal está ativo para melhorar UX e reduzir
+    pseudo-replicação na base de dados.
     """
 
     def __init__(self, data_manager):
@@ -21,6 +24,38 @@ class ForexSignals:
         self._risk = ForexRiskEngine(min_consensus_pct=60, min_adx=20, max_atr_pct=0.5)
         self._scorer = ForexScorer()
         self._data = data_manager
+
+        # Caminho da base de dados para consulta de persistência
+        self._db_path = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
+
+        # Rastreamento de persistência: {(symbol, direction): timestamp}
+        self._active_since = {}
+
+    # -----------------------------------------------------------------
+    # Consulta do histórico persistente para o rastreamento
+    # -----------------------------------------------------------------
+    def _get_persisted_active_since(self, symbol, direction):
+        """
+        Tenta recuperar o timestamp do último registo consecutivo do mesmo
+        símbolo+direção na base de dados. Usado para que o sinal não apareça
+        como "novo" após uma reconexão ou reinício de sessão.
+        """
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self._db_path, timeout=5)
+            row = conn.execute(
+                "SELECT timestamp FROM forex_signal_log "
+                "WHERE symbol=? AND direction=? AND strategy_used='ensemble' "
+                "ORDER BY id DESC LIMIT 1",
+                (symbol, direction)
+            ).fetchone()
+            conn.close()
+            if row:
+                return row[0]
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao consultar histórico de persistência: {e}")
+            return None
 
     # -----------------------------------------------------------------
     # Sinal de scoring (scorer legacy — apenas para registo paralelo)
@@ -71,7 +106,7 @@ class ForexSignals:
         1. H1 define tendência de fundo (EMA20 vs preço).
         2. M15 procura entrada com o ensemble completo, só na direção do H1.
         3. Risk Engine ajusta confiança com base nas condições de mercado.
-        Retorna (sinal, motivo_bloqueio) onde sinal é o dicionário do sinal ou None.
+        Rastreia persistência do sinal e regista na base de dados de forma seletiva.
         """
 
         # --- H1: contexto de tendência ---
@@ -117,20 +152,42 @@ class ForexSignals:
             logger.info(f"🔍 DEBUG {symbol} MTF: {motivo} — sem sinal")
             return None, motivo
 
-        # --- Risk Engine (agora ajusta confiança, não bloqueia) ---
+        # --- Risk Engine (ajusta confiança) ---
         adjusted_confidence, risk_reasons = self._risk.evaluate(ind_15, consensus)
         logger.info(f"🔍 DEBUG {symbol} RISK: raw_consensus={consensus}%, adjusted={adjusted_confidence}%, reasons={risk_reasons}")
 
-        seconds_into_candle = None
-        if candles_check:
-            seconds_into_candle = round(time.time() - candles_check[-1].get('epoch', 0))
-        logger.info(f"🔍 REPAINT-AT-SIGNAL {symbol}: sinal com vela a {seconds_into_candle}s de maturidade (de 900s)")
+        # --- Rastreamento de persistência (híbrido: memória + histórico) ---
+        key = (symbol, direction)
+        now = time.time()
 
-        votes_with_meta = dict(votes)
-        votes_with_meta['_candle_maturity_seconds'] = seconds_into_candle
-        votes_with_meta['_risk_penalties'] = risk_reasons
+        if key not in self._active_since:
+            # Tentar recuperar do histórico persistente
+            persisted_since = self._get_persisted_active_since(symbol, direction)
+            if persisted_since and (now - persisted_since) < 900:  # < 15 min
+                self._active_since = {k: v for k, v in self._active_since.items() if k[0] != symbol}
+                self._active_since[key] = persisted_since
+            else:
+                # Sinal genuinamente novo
+                self._active_since = {k: v for k, v in self._active_since.items() if k[0] != symbol}
+                self._active_since[key] = now
 
-        self._log_signal(symbol, direction, adjusted_confidence, votes_with_meta, ind_15, source='ensemble')
+        active_since = self._active_since[key]
+        active_duration_seconds = round(now - active_since)
+        is_new_signal = active_duration_seconds < 120  # considera "novo" se detetado há menos de 2 min
+
+        # --- Registo seletivo no log: só gravar se novo, ou a cada ~15 min de persistência ---
+        should_log = is_new_signal or (active_duration_seconds % 900 < 90)
+        if should_log:
+            seconds_into_candle = None
+            if candles_check:
+                seconds_into_candle = round(time.time() - candles_check[-1].get('epoch', 0))
+            logger.info(f"🔍 REPAINT-AT-SIGNAL {symbol}: sinal com vela a {seconds_into_candle}s de maturidade (de 900s)")
+
+            votes_with_meta = dict(votes)
+            votes_with_meta['_candle_maturity_seconds'] = seconds_into_candle
+            votes_with_meta['_risk_penalties'] = risk_reasons
+
+            self._log_signal(symbol, direction, adjusted_confidence, votes_with_meta, ind_15, source='ensemble')
 
         reason_text = f"H1 define {h1_bias}, M15 confirma com {consensus}% de consenso"
         if risk_reasons:
@@ -142,13 +199,16 @@ class ForexSignals:
             'raw_consensus': consensus,
             'reason': reason_text,
             'indicators': ind_15,
-            'breakdown': votes_with_meta,
+            'breakdown': votes,
             'type': 'ensemble',
             'suggested_duration_minutes': 15,
             'timeframe_label': '15 min (H1 + M15)',
             'h1_bias': h1_bias,
             'm30_confidence': None,
-            'h1_confidence': None
+            'h1_confidence': None,
+            'active_since': active_since,
+            'active_duration_seconds': active_duration_seconds,
+            'is_new_signal': is_new_signal,
         }
         return sinal, None
 
@@ -267,6 +327,8 @@ class ForexSignals:
                     'type': s.get('type', 'ensemble'),
                     'suggested_duration_minutes': s.get('suggested_duration_minutes', 15),
                     'timeframe_label': s.get('timeframe_label', '15 min'),
+                    'active_duration_seconds': s.get('active_duration_seconds', 0),
+                    'is_new_signal': s.get('is_new_signal', False),
                 })
 
             scorer_result = self.get_signal(symbol)
