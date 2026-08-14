@@ -134,6 +134,9 @@
     .forex-direction.sell { color: var(--danger); }
     .forex-confidence { font-size: 10px; color: var(--muted); }
     .forex-reason { font-size: 9px; color: var(--muted); margin-top: 2px; }
+    .forex-duration { font-size: 9px; margin-top: 2px; font-weight: 600; }
+    .forex-duration.new { color: var(--accent); }
+    .forex-duration.old { color: var(--warning); }
     .upgrade-banner { background: linear-gradient(135deg, var(--purple), var(--accent)); padding: 12px; border-radius: 8px; text-align: center; color: #000; font-weight: 700; margin-bottom: 8px; }
 
     .pending-indicator { font-size: 9px; color: var(--warning); text-align: center; margin-top: 4px; display: none; }
@@ -192,7 +195,7 @@
       <button class="tf-btn" onclick="scrollToSection('g7')">Como Funciona</button>
     </div>
 
-    <!-- PAR/ÍMPAR — REESCRITO -->
+    <!-- PAR/ÍMPAR -->
     <div id="g1" style="margin-top:16px">
       <h3>🎲 Par/Ímpar — o que realmente acontece</h3>
       <p>O sistema observa o último dígito recebido e acende o botão correspondente (PAR ou ÍMPAR) apenas como indicação visual do estado atual.</p>
@@ -200,7 +203,7 @@
       <p>Opcionalmente podes usar esta funcionalidade como entretenimento ou para testar a plataforma, mas <b>não como estratégia de rendimento</b>.</p>
     </div>
 
-    <!-- DIFFER — REESCRITO -->
+    <!-- DIFFER -->
     <div id="g2" style="margin-top:16px">
       <h3>🎯 DIFFER — o que realmente acontece</h3>
       <p>O sistema permite‑te clicar no botão DIFFER a qualquer momento. A aposta é agendada para o fim do ciclo visível de ticks.</p>
@@ -208,32 +211,32 @@
       <p>À semelhança da paridade, esta funcionalidade está disponível para testes ou entretenimento, mas <b>não é recomendada como estratégia de rendimento</b>.</p>
     </div>
 
-    <!-- MATCHES (mantido) -->
+    <!-- MATCHES -->
     <div id="g3" style="margin-top:16px">
       <h3>🎯 MATCHES — Como funciona</h3>
       <p>Aposta que um dígito específico (que está ausente há muitos ticks) vai aparecer. O payout é alto (~9x) mas a probabilidade de acerto é de apenas 10% por tentativa.</p>
     </div>
 
-    <!-- GESTÃO (mantido) -->
+    <!-- GESTÃO -->
     <div id="g4" style="margin-top:16px">
       <h3>📈 Plano de gestão de banca</h3>
       <p>Define uma meta de lucro diário entre 5% e 10% da tua banca. Metas menores são mais sustentáveis.</p>
     </div>
 
-    <!-- EMOCIONAL (mantido) -->
+    <!-- EMOCIONAL -->
     <div id="g5" style="margin-top:16px">
       <h3>🧠 Controlo emocional</h3>
       <p>A maior causa de perdas em trading não é a estratégia — é a reação emocional após uma perda ou um ganho.</p>
     </div>
 
-    <!-- SUPORTE (mantido) -->
+    <!-- SUPORTE -->
     <div id="g6" style="margin-top:16px">
       <h3>📲 Suporte e recursos</h3>
       <p><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" style="color:var(--accent);font-weight:700">👉 Criar conta na Deriv</a></p>
       <p><a href="https://chat.whatsapp.com/L8e0ituCsH68uIk3PMlQc9" target="_blank" style="color:var(--accent);font-weight:700">👉 Grupo de Suporte Foloma Visão 360</a></p>
     </div>
 
-    <!-- COMO FUNCIONA (mantido) -->
+    <!-- COMO FUNCIONA -->
     <div id="g7" style="margin-top:16px">
       <h3>⚖️ Como Funciona Realmente</h3>
       <p>A Foloma Visão 360 é uma ferramenta de execução e análise — não um sistema de previsão garantida.</p>
@@ -1466,6 +1469,12 @@ async function loadForexSignals() {
                 breakdownHTML += `<div style="font-size:9px;color:var(--accent);margin-top:2px">⏱ Duração sugerida: ${s.timeframe_label}</div>`;
             }
 
+            // NEW: Exibir duração do sinal
+            const durationLabel = s.is_new_signal
+                ? '🆕 Novo'
+                : `⏱ Ativo há ${Math.floor((s.active_duration_seconds || 0) / 60)} min`;
+            const durationHTML = `<div class="forex-duration ${s.is_new_signal ? 'new' : 'old'}">${durationLabel}</div>`;
+
             html += `<div class="forex-signal-card ${dirClass==='sell'?'sell':''} ${s.type==='liquidation'?'liquidation':''}">
                 <div style="display:flex;justify-content:space-between;align-items:center">
                     <span class="forex-pair">${s.pair}</span>
@@ -1473,6 +1482,7 @@ async function loadForexSignals() {
                     <span class="forex-confidence">${conf}% consenso</span>
                 </div>
                 <div class="forex-reason">${s.reason}</div>
+                ${durationHTML}
                 ${breakdownHTML}
                 ${actionButton}
             </div>`;
