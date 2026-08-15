@@ -1187,6 +1187,16 @@ def debug():
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
 
+# ==================== NOVA ROTA: DEBUG DE DÍGITOS ====================
+@app.route('/api/debug/digits')
+@require_admin
+def debug_digits():
+    sess = get_session(session['user_id'])
+    if not sess:
+        return jsonify({'error': 'Sem sessão'}), 400
+    analyzer = sess['digit_analyzer']
+    return jsonify({'digits': analyzer.get_recent_digits()})
+
 # ==================== OAUTH PKCE + OTP ====================
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
