@@ -132,6 +132,15 @@ def init_db():
         actual_profit REAL
     )''')
 
+    # NOVA TABELA: registo contínuo de dígitos para análise de dependência serial
+    c.execute('''CREATE TABLE IF NOT EXISTS digit_stream_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT,
+        digit INTEGER,
+        tick_count INTEGER,
+        timestamp REAL
+    )''')
+
     try:
         c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
     except sqlite3.OperationalError:
@@ -199,6 +208,8 @@ def _cleanup_loop():
             conn = sqlite3.connect(DATABASE_PATH, timeout=10)
             conn.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
             conn.execute("DELETE FROM oauth_states WHERE created_at < ?", (time.time() - OAUTH_STATE_TTL,))
+            # Limpeza do registo contínuo de dígitos (30 dias)
+            conn.execute("DELETE FROM digit_stream_log WHERE timestamp < ?", (time.time() - 30*86400,))
             conn.commit()
             conn.close()
             now = time.time()
@@ -678,6 +689,22 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                         else:
                             strategy.clear_execution_error()
                             credit_referral_commission(user_email, amt)
+
+            # NOVO: registo contínuo do dígito para análise de dependência serial
+            if os.environ.get('ENABLE_DIGIT_STREAM_LOG', 'false').lower() == 'true':
+                try:
+                    current_digit = analyzer.get_current_digit()
+                    if current_digit is not None:
+                        conn = sqlite3.connect(DATABASE_PATH, timeout=5)
+                        conn.execute(
+                            "INSERT INTO digit_stream_log (symbol, digit, tick_count, timestamp) VALUES (?,?,?,?)",
+                            (tick.get('symbol', ''), current_digit, analyzer.get_tick_count(), time.time())
+                        )
+                        conn.commit()
+                        conn.close()
+                except Exception as e:
+                    logger.error(f"Erro ao registar digit_stream_log: {e}")
+
             forex_mgr.on_tick(tick)
 
         client.on_tick_callback = tick_callback
