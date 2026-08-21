@@ -187,7 +187,11 @@ class ForexSignals:
             votes_with_meta['_candle_maturity_seconds'] = seconds_into_candle
             votes_with_meta['_risk_penalties'] = risk_reasons
 
-            self._log_signal(symbol, direction, adjusted_confidence, votes_with_meta, ind_15, source='ensemble')
+            # NOVO: passar active_duration_seconds para o _log_signal
+            self._log_signal(
+                symbol, direction, adjusted_confidence, votes_with_meta, ind_15,
+                source='ensemble', active_duration_seconds=active_duration_seconds
+            )
 
         reason_text = f"H1 define {h1_bias}, M15 confirma com {consensus}% de consenso"
         if risk_reasons:
@@ -258,15 +262,15 @@ class ForexSignals:
     # -----------------------------------------------------------------
     # Registo de sinal para tracking de performance
     # -----------------------------------------------------------------
-    def _log_signal(self, symbol, direction, confidence, votes, indicators, source='ensemble'):
+    def _log_signal(self, symbol, direction, confidence, votes, indicators, source='ensemble', active_duration_seconds=None):
         try:
             import sqlite3, json, os
             db_path = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
             conn = sqlite3.connect(db_path, timeout=10)
             conn.execute(
                 "INSERT INTO forex_signal_log (symbol, direction, signal_type, strategy_used, "
-                "confidence, breakdown_json, suggested_duration_minutes, price_at_signal, timestamp) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "confidence, breakdown_json, suggested_duration_minutes, price_at_signal, timestamp, active_duration_seconds) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     symbol,
                     direction,
@@ -276,7 +280,8 @@ class ForexSignals:
                     json.dumps(votes),
                     15,
                     indicators.get('latest_price'),
-                    time.time()
+                    time.time(),
+                    active_duration_seconds
                 )
             )
             conn.commit()
