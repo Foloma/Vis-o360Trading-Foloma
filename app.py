@@ -132,6 +132,12 @@ def init_db():
         actual_profit REAL
     )''')
 
+    # NOVA COLUNA: duração ativa em segundos (para sinais Forex)
+    try:
+        c.execute("ALTER TABLE forex_signal_log ADD COLUMN active_duration_seconds INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
     # NOVA TABELA: registo contínuo de dígitos para análise de dependência serial
     c.execute('''CREATE TABLE IF NOT EXISTS digit_stream_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
