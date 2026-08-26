@@ -214,7 +214,6 @@ def _cleanup_loop():
             conn = sqlite3.connect(DATABASE_PATH, timeout=10)
             conn.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
             conn.execute("DELETE FROM oauth_states WHERE created_at < ?", (time.time() - OAUTH_STATE_TTL,))
-            # Limpeza do registo contínuo de dígitos (30 dias)
             conn.execute("DELETE FROM digit_stream_log WHERE timestamp < ?", (time.time() - 30*86400,))
             conn.commit()
             conn.close()
@@ -259,7 +258,7 @@ threading.Thread(target=_refresh_forex_candles_loop, daemon=True).start()
 # ==================== NOVA THREAD: geração contínua de sinais Forex ====================
 def _generate_forex_signals_loop():
     while True:
-        time.sleep(90)  # a cada 90 segundos
+        time.sleep(90)
         try:
             with sessions_lock:
                 sessions_snapshot = list(sessions.items())
@@ -591,6 +590,30 @@ from forex_data import ForexDataManager, FOREX_SYMBOLS
 from forex_indicators import ForexIndicators
 from forex_signals import ForexSignals
 
+def _update_session_goals(sess, profit):
+    """
+    Atualiza o P&L da sessão e verifica se meta ou stop-loss foram atingidos.
+    Ativa goals_reached quando aplicável.
+    """
+    if not sess or 'session_goals' not in sess:
+        return
+    sg = sess['session_goals']
+    sg['session_pnl'] += profit
+
+    if sg.get('profit_target', 0) > 0 and sg['session_pnl'] >= sg['profit_target']:
+        sg['goals_reached'] = True
+        sg['goal_type'] = 'profit'
+        sg['message'] = f"🎯 Meta de lucro atingida: +${sg['session_pnl']:.2f}"
+        logger.info(f"Meta de lucro atingida para sessão: {sg['message']}")
+        return
+
+    if sg.get('stop_loss', 0) > 0 and sg['session_pnl'] <= -sg['stop_loss']:
+        sg['goals_reached'] = True
+        sg['goal_type'] = 'loss'
+        sg['message'] = f"🛑 Stop-loss atingido: -${sg['stop_loss']:.2f}"
+        logger.info(f"Stop-loss atingido para sessão: {sg['message']}")
+        return
+
 def create_session(user_id, user, force=False, ws_url_override=None):
     with sessions_lock:
         if user_id in sessions:
@@ -643,6 +666,21 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         strategy = StrategyManager(client, analyzer)
         bot.strategy = strategy
 
+        # Inicializar sessão com metas zeradas
+        new_sess = {}
+        new_sess['session_goals'] = {
+            'entry_amount': 0.0,
+            'profit_target': 0.0,
+            'stop_loss': 0.0,
+            'session_pnl': 0.0,
+            'goals_reached': False,
+            'goal_type': None,
+            'message': ''
+        }
+
+        # Referência para callbacks
+        session_ref = {'sess': new_sess}
+
         def on_trade_result(trade):
             try:
                 result = 'win' if trade.get('is_win') else 'loss'
@@ -666,6 +704,9 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 if strategy.is_global_stop:
                     bot.reset_martingale()
                     _save_martingale_state(user_id, bot)
+
+                # Atualizar metas de sessão
+                _update_session_goals(session_ref['sess'], profit)
             except Exception as e:
                 logger.error(f"Callback de trade falhou: {e}")
 
@@ -696,7 +737,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                             strategy.clear_execution_error()
                             credit_referral_commission(user_email, amt)
 
-            # NOVO: registo contínuo do dígito para análise de dependência serial
             if os.environ.get('ENABLE_DIGIT_STREAM_LOG', 'false').lower() == 'true':
                 try:
                     current_digit = analyzer.get_current_digit()
@@ -756,11 +796,11 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         bot.on_signal_result_callback = on_signal_result
         bot._last_signal_id = None
 
-        new_sess = {
+        new_sess.update({
             'client': client, 'trading_bot': bot, 'digit_analyzer': analyzer,
             'strategy': strategy, 'candles': [],
             'forex_data': forex_mgr, 'forex_signals': forex_signals, 'forex_indicators': forex_indicators
-        }
+        })
 
         def on_candles(candles, req_id=None):
             new_sess['candles'] = candles
@@ -1131,6 +1171,41 @@ def switch_account():
         sess['trading_bot'].currency = currency
     return jsonify({'status': 'connecting', 'message': f'Conta {acc_type} ativada. A aguardar conexão...', 'account_type': acc_type})
 
+@app.route('/api/session-goals', methods=['POST'])
+@require_auth
+def set_session_goals():
+    d = request.json
+    try:
+        entry = float(d.get('entry_amount', 0))
+        profit_target = float(d.get('profit_target', 0))
+        stop_loss = float(d.get('stop_loss', 0))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Valores inválidos'}), 400
+
+    if entry <= 0 or profit_target < 0 or stop_loss < 0:
+        return jsonify({'error': 'Valores devem ser positivos (meta/stop podem ser 0 para desativar)'}), 400
+
+    sess = get_session(session['user_id'])
+    if not sess:
+        return jsonify({'error': 'Sessão não encontrada'}), 400
+
+    sess['session_goals'] = {
+        'entry_amount': entry,
+        'profit_target': profit_target,
+        'stop_loss': stop_loss,
+        'session_pnl': 0.0,
+        'goals_reached': False,
+        'goal_type': None,
+        'message': ''
+    }
+    logger.info(f"Metas de sessão configuradas: entrada={entry}, meta={profit_target}, stop={stop_loss}")
+    return jsonify({'status': 'ok', 'session_goals': sess['session_goals']})
+
+def _session_goals_block(sess):
+    if sess and sess.get('session_goals', {}).get('goals_reached'):
+        return sess['session_goals'].get('message', 'Sessão bloqueada por metas atingidas')
+    return None
+
 @app.route('/api/status')
 @require_auth
 def status():
@@ -1165,6 +1240,7 @@ def status():
     most_frequent = analyzer.get_most_frequent_digit()
     _save_daily_stats_to_db(session.get('user_email'), bot)
     forex_status = sess.get('forex_data').get_status() if sess.get('forex_data') else {}
+    session_goals = sess.get('session_goals', {})
     return jsonify({
         'bot': bot_status,
         'digits': {
@@ -1184,7 +1260,8 @@ def status():
         'strategy': strategy.get_status() if strategy else {},
         'symbols': config.AVAILABLE_SYMBOLS,
         'loginid': client.loginid if client else None,
-        'forex': forex_status
+        'forex': forex_status,
+        'session_goals': session_goals
     })
 
 @app.route('/api/daily-stats/sync', methods=['POST'])
@@ -1359,6 +1436,9 @@ def trade_digit():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado'}), 400
+    block_msg = _session_goals_block(sess)
+    if block_msg:
+        return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
     if bot.stop_loss_active:
         return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
@@ -1414,6 +1494,9 @@ def trade_differ():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado'}), 400
+    block_msg = _session_goals_block(sess)
+    if block_msg:
+        return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
     if bot.stop_loss_active:
         return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
@@ -1466,6 +1549,9 @@ def trade_matches():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado'}), 400
+    block_msg = _session_goals_block(sess)
+    if block_msg:
+        return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
     if bot.stop_loss_active:
         return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
@@ -1502,6 +1588,9 @@ def trade_zscore():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado'}), 400
+    block_msg = _session_goals_block(sess)
+    if block_msg:
+        return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
     if bot.stop_loss_active:
         return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
@@ -1815,6 +1904,9 @@ def forex_trade():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado à Deriv'}), 400
+    block_msg = _session_goals_block(sess)
+    if block_msg:
+        return jsonify({'error': block_msg}), 400
 
     client = sess['client']
     if client.pending_trade is not None:
