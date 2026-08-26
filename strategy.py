@@ -24,7 +24,6 @@ class StrategyManager:
         self.analyzer = analyzer
         self._lock = threading.RLock()
 
-        # Estado interno
         self._last_differ_digit = None
         self._last_parity_action = None
         self._last_matches_digit = None
@@ -71,7 +70,6 @@ class StrategyManager:
 
         self.parity_alternance_mode = True
 
-        # Parâmetros de probabilidade
         self.MIN_SCORE_PARITY = 65.0
         self.MIN_SCORE_DIFFER = 65.0
         self.LATENCY_LIMIT_MS = 150.0
@@ -154,7 +152,9 @@ class StrategyManager:
                 for price in recent:
                     variation = abs(price - avg_price) / avg_price if avg_price > 0 else 0
                     if variation > self.MARKET_SPIKE_THRESHOLD:
-                        logger.warning(f"⚠️ SPIKE BLOQUEIO | preços={recent} | avg={avg_price:.5f} | variação={variation:.3%}")
+                        logger.warning(
+                            f"⚠️ SPIKE BLOQUEIO | preços={recent} | avg={avg_price:.5f} | variação={variation:.3%}"
+                        )
                         return False, f"Spike detetado (variação {variation:.3%})"
             return True, "OK"
         except Exception as e:
@@ -203,7 +203,7 @@ class StrategyManager:
                     signal = self._active_signals.get(strategy)
                     if signal and not self._is_signal_still_valid(signal):
                         self._active_signals[strategy] = None
-                        logger.info(f"⏰ Sinal {strategy} expirado (ID {signal.get('id', '?'))}")
+                        logger.info(f"⏰ Sinal {strategy} expirado (ID {signal.get('id', '?')})")  # CORRIGIDO
         except Exception as e:
             logger.error(f"Erro em refresh_signals: {e}")
 
