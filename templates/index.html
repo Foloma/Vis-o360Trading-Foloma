@@ -37,8 +37,8 @@
     .container { max-width: 500px; margin: auto; padding: 8px; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 8px; }
     .card-title { font-size: 10px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; display: flex; justify-content: space-between; align-items: center; }
-    input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #020617; color: white; font-size: 13px; transition: border 0.3s; }
-    input:focus { border-color: var(--accent); }
+    input, select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #020617; color: white; font-size: 13px; transition: border 0.3s; }
+    input:focus, select:focus { border-color: var(--accent); }
     button { padding: 10px; border: none; border-radius: 10px; font-weight: 700; cursor: pointer; transition: .2s; font-size: 13px; }
     button:active { transform: scale(.97); }
     .btn-buy { background: var(--accent); color: #000; }
@@ -51,8 +51,10 @@
     .dig-main { background: linear-gradient(135deg, #020617, #0f172a); padding: 10px; text-align: center; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 8px; }
     .tbar-wrap { background: var(--card); border-radius: 4px; height: 6px; margin-bottom: 8px; overflow: hidden; }
     .tbar { height: 6px; border-radius: 4px; transition: width .8s linear; background: var(--accent); }
-    .big-d { font-size: 64px; font-weight: 900; line-height: 1; }
+    .big-d { font-size: 64px; font-weight: 900; line-height: 1; transition: color 0.3s, text-shadow 0.3s; }
     .big-d.odd { color: var(--white); } .big-d.even { color: var(--accent); } .big-d.wait { color: var(--muted); }
+    .big-d.win { color: var(--accent); text-shadow: 0 0 20px var(--accent); }
+    .big-d.loss { color: var(--danger); text-shadow: 0 0 20px var(--danger); }
     .big-p { font-size: 15px; font-weight: 700; letter-spacing: 2px; }
     .hist-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
     .hist-row { display: flex; gap: 3px; width: max-content; padding: 1px; }
@@ -142,6 +144,20 @@
     .pending-indicator { font-size: 9px; color: var(--warning); text-align: center; margin-top: 4px; display: none; }
     .pending-indicator.visible { display: block; }
 
+    .target-digit-display { font-size: 12px; color: var(--muted); text-align: center; margin-top: 4px; }
+    .target-digit-value { font-weight: 800; font-size: 16px; color: var(--warning); }
+    .result-digit-display { font-size: 12px; text-align: center; margin-top: 2px; }
+    .result-digit-value { font-weight: 800; font-size: 16px; }
+    .result-digit-value.win { color: var(--accent); }
+    .result-digit-value.loss { color: var(--danger); }
+
+    .session-goals-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+    .session-goals-grid label { font-size: 9px; color: var(--muted); display: block; margin-bottom: 2px; }
+    .session-goals-grid input { padding: 6px; font-size: 11px; }
+    .session-goals-status { font-size: 10px; color: var(--muted); text-align: center; margin-top: 4px; }
+    .session-goals-alert { display: none; background: var(--danger); color: #fff; padding: 6px; border-radius: 6px; text-align: center; font-size: 11px; margin-top: 4px; }
+    .session-goals-alert.visible { display: block; }
+
     @keyframes pulse {
         0% { transform: scale(1); }
         50% { transform: scale(1.05); background: #00ffcc; }
@@ -156,6 +172,7 @@
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
+<!-- ==================== TOP BAR & MENU ==================== -->
 <div class="top-bar">
   <button class="menu-btn" onclick="toggleMenu()">☰</button>
   <div class="logo">FOLOMA VISÃO 360</div>
@@ -181,6 +198,7 @@
 <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
 <div class="toast" id="toast"></div>
 
+<!-- ==================== GUIA MODAL ==================== -->
 <div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
   <div class="guide-modal" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeGuide()">✕</button>
@@ -194,49 +212,35 @@
       <button class="tf-btn" onclick="scrollToSection('g6')">Suporte</button>
       <button class="tf-btn" onclick="scrollToSection('g7')">Como Funciona</button>
     </div>
-
-    <!-- PAR/ÍMPAR -->
     <div id="g1" style="margin-top:16px">
       <h3>🎲 Par/Ímpar — o que realmente acontece</h3>
       <p>O sistema observa o último dígito recebido e acende o botão correspondente (PAR ou ÍMPAR) apenas como indicação visual do estado atual.</p>
       <p><b>Importante:</b> após mais de 450 trades reais acumulados e um teste estatístico qui‑quadrado (1346 dígitos, p=0,29), <b>não foi encontrada nenhuma vantagem matemática</b> em relação a dígitos aleatórios. A probabilidade de acerto em cada aposta de paridade é de aproximadamente 50%, menos a margem da Deriv.</p>
       <p>Opcionalmente podes usar esta funcionalidade como entretenimento ou para testar a plataforma, mas <b>não como estratégia de rendimento</b>.</p>
     </div>
-
-    <!-- DIFFER -->
     <div id="g2" style="margin-top:16px">
       <h3>🎯 DIFFER — o que realmente acontece</h3>
       <p>O sistema permite‑te clicar no botão DIFFER a qualquer momento. A aposta é agendada para o fim do ciclo visível de ticks.</p>
       <p><b>Importante:</b> os mesmos testes estatísticos aplicados ao DIFFER mostraram que <b>não há edge explorável</b> — a taxa de acerto observada ficou dentro do intervalo esperado para uma distribuição uniforme de dígitos.</p>
       <p>À semelhança da paridade, esta funcionalidade está disponível para testes ou entretenimento, mas <b>não é recomendada como estratégia de rendimento</b>.</p>
     </div>
-
-    <!-- MATCHES -->
     <div id="g3" style="margin-top:16px">
       <h3>🎯 MATCHES — Como funciona</h3>
       <p>Aposta que um dígito específico (que está ausente há muitos ticks) vai aparecer. O payout é alto (~9x) mas a probabilidade de acerto é de apenas 10% por tentativa.</p>
     </div>
-
-    <!-- GESTÃO -->
     <div id="g4" style="margin-top:16px">
       <h3>📈 Plano de gestão de banca</h3>
       <p>Define uma meta de lucro diário entre 5% e 10% da tua banca. Metas menores são mais sustentáveis.</p>
     </div>
-
-    <!-- EMOCIONAL -->
     <div id="g5" style="margin-top:16px">
       <h3>🧠 Controlo emocional</h3>
       <p>A maior causa de perdas em trading não é a estratégia — é a reação emocional após uma perda ou um ganho.</p>
     </div>
-
-    <!-- SUPORTE -->
     <div id="g6" style="margin-top:16px">
       <h3>📲 Suporte e recursos</h3>
       <p><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" style="color:var(--accent);font-weight:700">👉 Criar conta na Deriv</a></p>
       <p><a href="https://chat.whatsapp.com/L8e0ituCsH68uIk3PMlQc9" target="_blank" style="color:var(--accent);font-weight:700">👉 Grupo de Suporte Foloma Visão 360</a></p>
     </div>
-
-    <!-- COMO FUNCIONA -->
     <div id="g7" style="margin-top:16px">
       <h3>⚖️ Como Funciona Realmente</h3>
       <p>A Foloma Visão 360 é uma ferramenta de execução e análise — não um sistema de previsão garantida.</p>
@@ -244,6 +248,7 @@
   </div>
 </div>
 
+<!-- ==================== CONTEÚDO PRINCIPAL ==================== -->
 <div class="container" id="mainContent" style="display:none">
   <div id="dashboard-section">
     <div class="card">
@@ -263,6 +268,18 @@
       <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:2px">Preço: <span id="priceEl" style="color:var(--accent)">---</span></div>
       <div id="strategyStatus" style="margin-top:6px; font-size:10px;"></div>
       <div id="debugInfo" style="font-size:9px;color:var(--muted);text-align:center;margin-top:2px"></div>
+    </div>
+
+    <div class="card" id="sessionGoalsCard">
+      <div class="card-title">🎯 GESTÃO DE SESSÃO</div>
+      <div class="session-goals-grid">
+        <div><label>Valor de entrada</label><input type="number" id="goalEntry" value="0.35" step="0.01" min="0.35"></div>
+        <div><label>Meta de lucro ($)</label><input type="number" id="goalProfit" value="10" step="0.5" min="0"></div>
+        <div><label>Stop-loss ($)</label><input type="number" id="goalStop" value="15" step="0.5" min="0"></div>
+      </div>
+      <button class="btn-buy" style="width:100%;margin-top:6px;" onclick="saveSessionGoals()">💾 Aplicar Metas</button>
+      <div id="sessionGoalsStatus" class="session-goals-status">P&L da sessão: $0.00</div>
+      <div id="sessionGoalsAlert" class="session-goals-alert"></div>
     </div>
 
     <div class="card" id="signalScoreboard" style="display:none">
@@ -293,32 +310,21 @@
         <div class="big-d wait" id="bigD">—</div>
         <div class="big-p wait" id="bigP">AGUARDANDO</div>
         <div id="cdown" style="color:#ffaa00;font-size:12px;margin-top:4px">⏱ 10 ticks</div>
+        <div id="targetDigitDisplay" class="target-digit-display">Alvo: <span id="targetDigitValue" class="target-digit-value">—</span></div>
+        <div id="resultDigitDisplay" class="result-digit-display">Resultado: <span id="resultDigitValue" class="result-digit-value">—</span></div>
       </div>
       <div id="cycleBlocker" style="display:none;text-align:center;color:var(--warning);font-size:11px;margin-bottom:4px;"></div>
       <div id="seqInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
       <div id="entropyInfo" style="font-size:10px;color:var(--muted);text-align:center"></div>
       <div class="hist-scroll" id="histScroll"><div class="hist-row" id="histRow"></div></div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:6px;font-size:10px">
-        <div style="background:#020617;padding:4px;border-radius:6px;text-align:center">
-          <div style="color:var(--muted);font-size:8px">ÍMPAR 10t</div>
-          <div id="pctOdd10" style="color:var(--accent);font-weight:700">--%</div>
-        </div>
-        <div style="background:#020617;padding:4px;border-radius:6px;text-align:center">
-          <div style="color:var(--muted);font-size:8px">ÍMPAR 20t</div>
-          <div id="pctOdd20" style="color:var(--accent);font-weight:700">--%</div>
-        </div>
-        <div style="background:#020617;padding:4px;border-radius:6px;text-align:center">
-          <div style="color:var(--muted);font-size:8px">ÍMPAR 50t</div>
-          <div id="pctOdd50" style="color:var(--accent);font-weight:700">--%</div>
-        </div>
+        <div style="background:#020617;padding:4px;border-radius:6px;text-align:center"><div style="color:var(--muted);font-size:8px">ÍMPAR 10t</div><div id="pctOdd10" style="color:var(--accent);font-weight:700">--%</div></div>
+        <div style="background:#020617;padding:4px;border-radius:6px;text-align:center"><div style="color:var(--muted);font-size:8px">ÍMPAR 20t</div><div id="pctOdd20" style="color:var(--accent);font-weight:700">--%</div></div>
+        <div style="background:#020617;padding:4px;border-radius:6px;text-align:center"><div style="color:var(--muted);font-size:8px">ÍMPAR 50t</div><div id="pctOdd50" style="color:var(--accent);font-weight:700">--%</div></div>
       </div>
-      <div style="font-size:9px;color:var(--muted);text-align:center;margin-top:4px">
-        ⚠️ O dígito exibido pode diferir do dígito do contrato (latência do servidor)
-      </div>
-
+      <div style="font-size:9px;color:var(--muted);text-align:center;margin-top:4px">⚠️ O dígito exibido pode diferir do dígito do contrato (latência do servidor)</div>
       <div class="card-title" style="margin-top:8px">📊 FREQUÊNCIA DOS DÍGITOS (0-9)</div>
       <div class="freq-grid" id="freqGrid"></div>
-
       <div class="trade-row" style="margin-top:6px">
         <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" onfocus="this.dataset.userEdited='true'" onchange="this.dataset.userEdited='true'">
         <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')" style="padding:10px 14px">ÍMPAR</button>
@@ -337,18 +343,9 @@
       <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
       <div class="ms">
         Martingale: <span id="mgtActDig">INATIVO</span> | Próx: <span id="mgtNxtDig">$0.35</span>
-        <div style="margin-top:4px">
-          <label style="font-size:9px;color:var(--muted)">Máx. passos (1-4):</label>
-          <input type="number" id="mgtMaxSteps" value="2" min="1" max="4" style="width:50px;padding:4px;font-size:11px;display:inline-block">
-        </div>
-        <div style="font-size:9px;color:var(--warning);margin-top:2px">
-          ⚠️ Cada passo dobra o valor. 4 passos = 16x o valor inicial.
-        </div>
-        <div class="inline-actions">
-          <button class="bm" id="btnMgtMultiply" onclick="mgtMultiply('amtDigit')">✕</button>
-          <button class="bmr" onclick="mgtDivide('amtDigit')">÷</button>
-          <button class="bmr" onclick="rstMgt()">⟲</button>
-        </div>
+        <div style="margin-top:4px"><label style="font-size:9px;color:var(--muted)">Máx. passos (1-4):</label><input type="number" id="mgtMaxSteps" value="2" min="1" max="4" style="width:50px;padding:4px;font-size:11px;display:inline-block"></div>
+        <div style="font-size:9px;color:var(--warning);margin-top:2px">⚠️ Cada passo dobra o valor. 4 passos = 16x o valor inicial.</div>
+        <div class="inline-actions"><button class="bm" id="btnMgtMultiply" onclick="mgtMultiply('amtDigit')">✕</button><button class="bmr" onclick="mgtDivide('amtDigit')">÷</button><button class="bmr" onclick="rstMgt()">⟲</button></div>
       </div>
     </div>
 
@@ -364,12 +361,11 @@
     </div>
   </div>
 
+  <!-- Forex Section -->
   <div id="forex-section" class="hidden">
     <div class="card">
       <div class="card-title">💱 SINAIS FOREX <span style="font-size:9px;color:var(--accent)">Ensemble</span></div>
-      <div id="forexSignalsContainer">
-        <p style="text-align:center;color:var(--muted);font-size:11px">A carregar sinais...</p>
-      </div>
+      <div id="forexSignalsContainer"><p style="text-align:center;color:var(--muted);font-size:11px">A carregar sinais...</p></div>
     </div>
     <div class="card">
       <div class="card-title">📈 GRÁFICO FOREX</div>
@@ -384,56 +380,50 @@
     </div>
     <div class="card">
       <div class="card-title">📊 INDICADORES</div>
-      <div id="forexIndicators" style="font-size:10px;color:var(--muted)">
-        <p style="text-align:center">Seleccione um par para ver os indicadores</p>
-      </div>
+      <div id="forexIndicators" style="font-size:10px;color:var(--muted)"><p style="text-align:center">Seleccione um par para ver os indicadores</p></div>
     </div>
     <div class="card" style="margin-top:12px;">
       <div class="card-title">🎯 TRADE MANUAL</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;">
         <select id="forexManualPair" style="flex:1;min-width:100px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;" onchange="loadForexDurations()">
-          <option value="EUR/USD">EUR/USD</option>
-          <option value="GBP/USD">GBP/USD</option>
-          <option value="USD/JPY">USD/JPY</option>
-          <option value="EUR/GBP">EUR/GBP</option>
-          <option value="AUD/USD">AUD/USD</option>
-          <option value="USD/CAD">USD/CAD</option>
+          <option value="EUR/USD">EUR/USD</option><option value="GBP/USD">GBP/USD</option><option value="USD/JPY">USD/JPY</option><option value="EUR/GBP">EUR/GBP</option><option value="AUD/USD">AUD/USD</option><option value="USD/CAD">USD/CAD</option>
         </select>
-        <select id="forexManualDir" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
-          <option value="BUY">COMPRA</option>
-          <option value="SELL">VENDA</option>
-        </select>
+        <select id="forexManualDir" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;"><option value="BUY">COMPRA</option><option value="SELL">VENDA</option></select>
         <input type="number" id="forexManualAmt" placeholder="Valor" value="1" step="0.01" min="0.35" style="flex:1;min-width:80px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
-        <select id="forexManualDur" style="flex:1;min-width:100px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;">
-          <option value="">A carregar...</option>
-        </select>
+        <select id="forexManualDur" style="flex:1;min-width:100px;padding:6px;border-radius:6px;background:#020617;border:1px solid var(--border);color:white;font-size:11px;"><option value="">A carregar...</option></select>
         <button onclick="executarTradeManual()" style="padding:6px 12px;background:var(--accent);color:#000;border:none;border-radius:6px;font-weight:700;font-size:11px;cursor:pointer;">ENVIAR</button>
       </div>
       <div style="font-size:9px;color:var(--muted);margin-top:4px;">Seleccione um par para ver as durações disponíveis</div>
     </div>
   </div>
 
+  <!-- Affiliate -->
   <div id="affiliate-section" class="hidden">
     <div class="card"><div class="card-title">🔗 SEU LINK</div><div class="lc"><input type="text" id="refLink" readonly><button class="bmr" onclick="cpLink()">📋</button></div><div id="affiliateEarnings"></div></div>
   </div>
+  <!-- History -->
   <div id="history-section" class="hidden">
     <div class="card"><div class="card-title">📊 RESUMO</div><div id="histSummary2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px"></div><div class="card-title">📋 OPERAÇÕES</div><div id="histList2"></div></div>
   </div>
+  <!-- Payment -->
   <div id="payment-section" class="hidden">
     <div class="card"><div class="card-title">💰 DEPÓSITO</div><a href="/go/airtm" target="_blank" class="btn-buy" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#000">💳 Depositar via AirTM</a></div>
     <div class="card"><div class="card-title">🏦 SAQUE</div><a href="https://app.deriv.com/cashier/withdrawal" target="_blank" class="btn-sell" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#fff">🏧 Sacar via Deriv</a></div>
   </div>
+  <!-- Settings -->
   <div id="settings-section" class="hidden">
     <div class="card"><div class="card-title">🚀 CRIAR CONTA DERIV</div><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" class="btn-buy" style="display:block;text-align:center;padding:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#000">🚀 Criar Conta</a></div>
     <div class="card"><div class="card-title">🔐 TOKEN DERIV</div><input type="password" id="tokIn" placeholder="Cole o token"><div style="display:flex;gap:6px;margin-top:6px"><button class="bmr" style="flex:1" onclick="saveTokAcct('demo')">💾 DEMO</button><button class="bmr" style="flex:1" onclick="saveTokAcct('real')">💾 REAL</button></div><div class="token-display" id="tokenDisplay" style="display:none"><div class="token-row"><span><span class="token-dot" id="dotDemo"></span> Demo</span><span id="statusDemo" style="color:var(--muted)">---</span></div><div class="token-row"><span><span class="token-dot" id="dotReal"></span> Real</span><span id="statusReal" style="color:var(--muted)">---</span></div><div class="token-row"><span style="color:var(--accent);font-weight:600">Activa:</span><span id="activeAccountDisplay" style="color:var(--accent);font-weight:700">DEMO</span></div></div></div>
     <div class="card"><div class="card-title">📖 GUIA</div><button class="btn-buy" style="width:100%" onclick="openGuide()">📖 Ver Guia</button></div>
   </div>
+  <!-- Admin -->
   <div id="admin-section" class="hidden">
     <div class="card"><div class="card-title">👑 ADMIN</div><div id="adminUserList"></div><button class="bmr" style="width:100%;margin-top:8px" onclick="loadAdminUsers()">🔄 Actualizar</button></div>
     <div class="card"><div class="card-title">💸 COMISSÃO DE AFILIADOS (%)</div><input type="number" id="markupInput" value="0.5" step="0.1" min="0" max="3"><button class="btn-buy" style="width:100%;margin-top:6px" onclick="saveMarkup()">GUARDAR</button><div id="markupMsg" style="text-align:center;margin-top:4px;font-size:11px"></div></div>
   </div>
 </div>
 
+<!-- ==================== AUTH MODAL ==================== -->
 <div id="authModal" class="modal" onclick="if(event.target===this)closeAuthModal()">
   <div class="mbox" onclick="event.stopPropagation()">
     <h2 style="color:var(--accent);text-align:center;margin-bottom:12px">FOLOMA VISÃO 360</h2>
@@ -460,7 +450,7 @@
 </div>
 
 <script>
-// ══════════════ ESTADO GLOBAL ══════════════
+// ==================== ESTADO GLOBAL ====================
 let selectedAcct='demo', curSym='R_100';
 let lastDigitCount=0, lastDigitCounter=0;
 let _updateInterval=null;
@@ -469,7 +459,8 @@ let isConnected = false;
 let _loggingIn = false;
 let _registering = false;
 let currentGranularity = 60;
-let resizeObserver = null;
+let mainResizeObserver = null;
+let forexResizeObserver = null;
 const syms={'R_100':'Volatility 100','R_75':'Volatility 75','R_50':'Volatility 50'};
 let candleChart = null, candleSeries = null;
 let _pollRunning = false;
@@ -491,7 +482,6 @@ let _lastValidPing = 0;
 let _prevDifferAvail = false;
 let _prevParityAvail = false;
 
-// Estado Forex
 let _userPlan = 'free';
 let _forexPairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'EUR/GBP', 'AUD/USD', 'USD/CAD'];
 let _forexCurPair = 'EUR/USD';
@@ -501,17 +491,21 @@ let _forexUpperBand = null, _forexMiddleBand = null, _forexLowerBand = null;
 let _forexGranularity = 60;
 let _forexSectionVisible = false;
 
-// Throttle dígito — variável atualizada a cada 1000ms
 let _ultimoDigito = null;
 let _ultimoParidade = null;
 let _timerDigito = null;
 
-// Sugestão de valor
 let _suggestedAmount = 0.35;
 
-// Estado de agendamento
 let _parityScheduled = false;
 let _differScheduled = false;
+
+let _targetDigit = null;
+let _resultDigit = null;
+let _resultIsWin = null;
+let _resultTimeout = null;
+
+let _sessionGoals = null;
 
 const FOREX_SYMBOL_MAP = {
     'EUR/USD': 'frxEURUSD', 'GBP/USD': 'frxGBPUSD', 'USD/JPY': 'frxUSDJPY',
@@ -630,7 +624,10 @@ function initCandleChart(){
   try {
     candleChart=LightweightCharts.createChart(container,{width:container.clientWidth,height:160,layout:{background:{color:'#020617'},textColor:'#e2e8f0'},grid:{vertLines:{color:'#1e293b'},horzLines:{color:'#1e293b'}},rightPriceScale:{borderColor:'#1e293b'},timeScale:{borderColor:'#1e293b',timeVisible:true}});
     candleSeries=candleChart.addCandlestickSeries({upColor:'#00f0b5',downColor:'#ff4d4d',borderUpColor:'#00f0b5',borderDownColor:'#ff4d4d',wickUpColor:'#00f0b5',wickDownColor:'#ff4d4d'});
-    if(window.ResizeObserver){ resizeObserver=new ResizeObserver(()=>{if(candleChart&&container) candleChart.applyOptions({width:container.clientWidth});}); resizeObserver.observe(container); }
+    if(window.ResizeObserver){
+      mainResizeObserver = new ResizeObserver(()=>{ if(candleChart&&container) candleChart.applyOptions({width:container.clientWidth}); });
+      mainResizeObserver.observe(container);
+    }
   } catch(e) { console.error('Chart init error:', e); }
 }
 async function loadCandles(){
@@ -660,20 +657,14 @@ document.addEventListener('click',(e)=>{
   }
 });
 
+// ==================== FUNÇÕES DE UI ====================
 function updateSignalTicks(strategy, ticksLeft) {
     const el = $_(strategy + 'Ticks');
     if (!el) return;
     if (ticksLeft === undefined || ticksLeft === null) { el.textContent = ''; return; }
-    if (ticksLeft > 0) {
-        el.textContent = `Sinal válido por ${ticksLeft} ticks`;
-        el.className = 'signal-ticks';
-    } else if (ticksLeft === 0) {
-        el.textContent = 'Sinal expirado';
-        el.className = 'signal-ticks expired';
-    } else {
-        el.textContent = '';
-        el.className = 'signal-ticks';
-    }
+    if (ticksLeft > 0) { el.textContent = `Sinal válido por ${ticksLeft} ticks`; el.className = 'signal-ticks'; }
+    else if (ticksLeft === 0) { el.textContent = 'Sinal expirado'; el.className = 'signal-ticks expired'; }
+    else { el.textContent = ''; el.className = 'signal-ticks'; }
 }
 
 function calcPct(digits, n) {
@@ -682,6 +673,98 @@ function calcPct(digits, n) {
     return Math.round(last.filter(d => d%2!==0).length / last.length * 100) + '%';
 }
 
+function setTargetDigit(digit) {
+  _targetDigit = digit;
+  updateTargetResultDisplay();
+}
+
+function updateTargetResultDisplay() {
+  const targetEl = $_('targetDigitValue');
+  const resultEl = $_('resultDigitValue');
+  const bigD = $_('bigD');
+  if (targetEl) targetEl.textContent = _targetDigit !== null ? _targetDigit : '—';
+  if (resultEl) {
+    if (_resultDigit !== null) {
+      resultEl.textContent = _resultDigit;
+      resultEl.className = 'result-digit-value ' + (_resultIsWin ? 'win' : 'loss');
+      if (bigD) {
+        bigD.classList.remove('win','loss');
+        bigD.classList.add(_resultIsWin ? 'win' : 'loss');
+      }
+    } else {
+      resultEl.textContent = '—';
+      resultEl.className = 'result-digit-value';
+      if (bigD) bigD.classList.remove('win','loss');
+    }
+  }
+}
+
+function highlightHistoryDigit(digit, isWin) {
+  const boxes = document.querySelectorAll('.hist-row .dbox');
+  for (let i = boxes.length - 1; i >= 0; i--) {
+    if (parseInt(boxes[i].dataset.digit) === digit) {
+      boxes[i].classList.add(isWin ? 'win' : 'loss');
+      break;
+    }
+  }
+}
+
+function clearDigitHighlight() {
+  document.querySelectorAll('.hist-row .dbox.win, .hist-row .dbox.loss').forEach(el => el.classList.remove('win','loss'));
+  const bigD = $_('bigD');
+  if (bigD) bigD.classList.remove('win','loss');
+}
+
+function updateSessionGoalsUI(sg) {
+  const statusEl = $_('sessionGoalsStatus');
+  const alertEl = $_('sessionGoalsAlert');
+  if (!sg) return;
+  if (sg.goals_reached) {
+    alertEl.textContent = sg.message || 'Metas atingidas';
+    alertEl.classList.add('visible');
+    statusEl.textContent = '';
+    disableTradeButtons(true);
+  } else {
+    alertEl.classList.remove('visible');
+    const pnl = sg.session_pnl || 0;
+    const pnlClass = pnl >= 0 ? 'var(--accent)' : 'var(--danger)';
+    statusEl.innerHTML = `P&L da sessão: <span style="color:${pnlClass}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span>`;
+    disableTradeButtons(false);
+  }
+}
+
+function disableTradeButtons(disable) {
+  const buttons = ['btnOdd', 'btnEven', 'btnDiffer', 'btnMatches'];
+  buttons.forEach(id => { const btn = $_(id); if (btn) btn.disabled = disable; });
+  document.querySelectorAll('#forex-section button').forEach(btn => { if (btn.textContent.includes('EXECUTAR')) btn.disabled = disable; });
+}
+
+async function saveSessionGoals() {
+  const entry = parseFloat($_('goalEntry').value);
+  const profit = parseFloat($_('goalProfit').value);
+  const stop = parseFloat($_('goalStop').value);
+  if (isNaN(entry) || entry <= 0 || isNaN(profit) || profit < 0 || isNaN(stop) || stop < 0) {
+    toast('Valores inválidos', 'warning');
+    return;
+  }
+  try {
+    const r = await fetch('/api/session-goals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entry_amount: entry, profit_target: profit, stop_loss: stop })
+    });
+    const d = await r.json();
+    if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
+    toast('✅ Metas de sessão aplicadas', 'win');
+    if (entry > 0) {
+      const amtInput = $_('amtDigit');
+      if (amtInput) amtInput.value = entry.toFixed(2);
+    }
+    updateSessionGoalsUI(d.session_goals);
+  } catch(e) { toast('❌ Erro de rede', 'loss'); }
+}
+
+// ==================== UPDATE PRINCIPAL ====================
 async function updateAll(){
   const [statusResp, martingaleResp] = await Promise.allSettled([
     fetch('/api/status').then(r=>r.json()),
@@ -759,6 +842,11 @@ async function updateAll(){
       updatePendingIndicators(data.strategy);
     }
 
+    if (data.session_goals) {
+      _sessionGoals = data.session_goals;
+      updateSessionGoalsUI(_sessionGoals);
+    }
+
     if(bot.last_trade_result){
       const ltr = bot.last_trade_result;
       if(ltr.contract_id && ltr.contract_id !== _lastProcessedContractId){
@@ -777,6 +865,19 @@ async function updateAll(){
         const resultType = ltr.is_win ? 'win' : 'loss';
         toast(`Resultado: ${tipo} ${ltr.is_win ? '✅' : '❌'} ${ltr.is_win ? '+' + ltr.profit.toFixed(2) : '-' + Math.abs(ltr.profit).toFixed(2)}${digitInfo}${latencyInfo}`, resultType, 4000);
         
+        if (_targetDigit !== null) {
+          _resultDigit = displayDigit;
+          _resultIsWin = ltr.is_win;
+          updateTargetResultDisplay();
+          highlightHistoryDigit(displayDigit, ltr.is_win);
+          if (_resultTimeout) clearTimeout(_resultTimeout);
+          _resultTimeout = setTimeout(() => {
+            clearDigitHighlight();
+            _resultDigit = null; _resultIsWin = null;
+            updateTargetResultDisplay();
+          }, 5000);
+        }
+
         if(ltr.latency_total_ms > 500){
             toast(`⚠️ Alta latência (${ltr.latency_total_ms}ms) — tick de entrada pode diferir do observado`, 'warning', 5000);
         }
@@ -834,6 +935,7 @@ async function updateAll(){
   }
 }
 
+// ==================== DEMAIS FUNÇÕES (implementação completa) ====================
 function updateDigits(digits){
   if(!digits) return;
   const tpd=digits.ticks_per_digit||10, tr=Math.max(0,Math.round(digits.ticks_remaining||tpd));
@@ -849,7 +951,7 @@ function updateDigits(digits){
     recent.forEach((d)=>{
         const isOddDigit = d%2!==0;
         const cls = isOddDigit ? 'odd' : 'even';
-        html+=`<div class="dbox ${cls}">${d}</div>`;
+        html+=`<div class="dbox ${cls}" data-digit="${d}">${d}</div>`;
     });
     $_( 'histRow').innerHTML=html;
     $_( 'histScroll').scrollLeft=$_('histScroll').scrollWidth;
@@ -993,182 +1095,50 @@ function updatePendingIndicators(strategy) {
     }
 }
 
-function scheduleHistoryLoad(delay=5000){
-  if(_historyDebounceTimer) clearTimeout(_historyDebounceTimer);
-  _historyDebounceTimer = setTimeout(()=>{ loadHistory(); _historyDebounceTimer=null; }, delay);
+function loadAffiliate(){
+  fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{ if(d.link) $_( 'refLink').value=d.link; });
+  fetch('/api/affiliate/earnings').then(r=>r.json()).then(d=>{
+    const el=$_('affiliateEarnings'); if(!el) return; if(d.error){ el.innerHTML=''; return; }
+    el.innerHTML=`<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px"><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">GANHOS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">$${d.earnings?.toFixed(2)||'0.00'}</div></div><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">REFERIDOS</div><div style="font-size:16px;font-weight:bold">${d.referred_count||0}</div></div></div>`;
+  });
+}
+function cpLink(){ const el=$_('refLink'); if(!el) return; const text=el.value; navigator.clipboard.writeText(text).then(()=>{ toast('📋 Copiado!','win'); }).catch(()=>{ el.select(); document.execCommand('copy'); toast('📋 Copiado!','win'); }); }
+
+function loadHistory(){
+  fetch('/api/report').then(r=>r.json()).then(d=>{
+    const sum=$_('histSummary2'), list=$_('histList2'), miniList=$_('histList');
+    if(d.error){ if(sum) sum.innerHTML=''; if(list) list.innerHTML=''; if(miniList) miniList.innerHTML=''; return; }
+    const r=d.resumo;
+    if(sum) sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${r.total_trades}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${r.trades_hoje}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WINS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${r.wins}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">LOSSES</div><div style="font-size:16px;font-weight:bold;color:var(--danger)">${r.losses}</div></div>`;
+    const html=d.historico.map(t=>{
+      const win=t.result==='win', lose=t.result==='loss', cor=win?'var(--accent)':lose?'var(--danger)':'#ffaa00', icon=win?'✅':lose?'❌':'⏳';
+      let actionLabel=t.action||''; if(t.is_digit){ actionLabel=(t.action==='BUY'||t.action==='CALL')?'ÍMPAR 🎲':'PAR 🎲'; }
+      const profitText=t.profit?`<div style="color:${t.profit>0?'var(--accent)':'var(--danger)'}">${t.profit>0?'+':''}$${t.profit.toFixed(2)}</div>`:'';
+      return`<div style="padding:6px;background:#020617;border-radius:6px;margin-bottom:4px;font-size:11px"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">${t.time}</span><span style="font-weight:700;color:${cor}">${icon} ${t.result.toUpperCase()}</span></div><div>${actionLabel} ${t.symbol} $${t.amount.toFixed(2)}</div>${profitText}</div>`;
+    }).join('');
+    if(list) list.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+    if(miniList) miniList.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';
+  }).catch(()=>toast('❌ Erro histórico','loss'));
+}
+function clearHistory(){ fetch('/api/clear_history',{method:'POST'}).then(r=>r.json()).then(()=>{ toast('🗑️ Histórico limpo','info'); loadHistory(); }); }
+
+async function mgtMultiply(fieldId){
+    if(_mgtLocked){ toast('⏳ Aguarde...', 'warning'); return; }
+    _mgtLocked = true;
+    const input=$_(fieldId); const currentAmount=parseFloat(input.value)||0.35;
+    const maxStepsInput = $_('mgtMaxSteps');
+    const maxSteps = maxStepsInput ? Math.min(4, Math.max(1, parseInt(maxStepsInput.value)||2)) : 2;
+    try{
+        const r=await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:currentAmount, max_steps:maxSteps})});
+        const d=await r.json();
+        if(d.error){ toast('❌ '+d.error,'loss'); }
+        else { const nextAmount=d.martingale.next_amount; $_( 'amtDigit').value=nextAmount.toFixed(2); toast('📈 '+d.martingale.message,'info'); }
+    } catch(e) { toast('❌ Erro de rede','loss'); }
+    _mgtLocked = false;
 }
 
-// ══════════ FUNÇÕES DE TRADE COM RETRY E CONFIRMAÇÃO ══════════
-async function tradeDigitWithRetry(pred, displayedDigit, retried = false) {
-  const amt = parseFloat($_( 'amtDigit').value) || 0.35;
-  try {
-    const r = await fetch('/api/trade/digit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt, displayed_digit: displayedDigit })
-    });
-    const d = await r.json();
-
-    if (r.status === 409 && d.current_digit !== undefined && !retried) {
-      return tradeDigitWithRetry(pred, d.current_digit, true);
-    }
-
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-
-    if (d.error) {
-      toast('❌ ' + d.error, 'loss');
-      return;
-    }
-
-    _parityScheduled = true;
-    const confirmMsg = d.digit_used !== undefined
-      ? `Aposta registada: ${d.direction.toUpperCase()}, dígito base ${d.digit_used}`
-      : d.message;
-    toast('📅 ' + confirmMsg, 'info');
-    updatePendingIndicators({});
-  } catch (e) {
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-    toast('❌ Erro de rede', 'loss');
-  }
-}
-
-async function tradeDifferWithRetry(displayedDigit, retried = false) {
-  const amt = parseFloat($_( 'amtDigit').value) || 0.35;
-  try {
-    const r = await fetch('/api/trade/differ', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt, displayed_digit: displayedDigit })
-    });
-    const d = await r.json();
-
-    if (r.status === 409 && d.current_digit !== undefined && !retried) {
-      return tradeDifferWithRetry(d.current_digit, true);
-    }
-
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-
-    if (d.error) {
-      toast('❌ ' + d.error, 'loss');
-      return;
-    }
-
-    _differScheduled = true;
-    const confirmMsg = d.digit_used !== undefined
-      ? `Aposta DIFFER registada: dígito base ${d.digit_used}`
-      : d.message;
-    toast('📅 ' + confirmMsg, 'info');
-    updatePendingIndicators({});
-  } catch (e) {
-    _tradeSubmitted = false;
-    clearTimeout(_tradeSubmittedTimer);
-    toast('❌ Erro de rede', 'loss');
-  }
-}
-
-// ══════════ FUNÇÕES DE TRADE (públicas) ══════════
-async function tradeDigit(pred){
-  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
-  if(_parityScheduled){ toast('📅 Aposta de paridade já agendada','warning'); return; }
-
-  _tradeSubmitted = true;
-  clearTimeout(_tradeSubmittedTimer);
-  _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) {
-      _tradeSubmitted = false;
-      toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000);
-    }
-  }, 3000);
-
-  const auditCard = $_('auditCard');
-  if(auditCard) auditCard.style.display = 'none';
-
-  await tradeDigitWithRetry(pred, _ultimoDigito);
-}
-
-async function tradeDiffer(){
-  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
-  if(_differScheduled){ toast('📅 Aposta DIFFER já agendada','warning'); return; }
-
-  _tradeSubmitted = true;
-  clearTimeout(_tradeSubmittedTimer);
-  _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
-  }, 3000);
-
-  const auditCard = $_('auditCard');
-  if(auditCard) auditCard.style.display = 'none';
-
-  await tradeDifferWithRetry(_ultimoDigito);
-}
-
-async function tradeMatches(){
-  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
-  const amt=parseFloat($_( 'amtDigit').value)||0.35;
-  _tradeSubmitted = true; _tradePending = false;
-  clearTimeout(_tradeSubmittedTimer);
-  _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
-  }, 3000);
-  
-  const auditCard = $_('auditCard');
-  if(auditCard) auditCard.style.display = 'none';
-  
-  try{
-    const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
-    const d=await r.json();
-    _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ 
-      _tradePending = true;
-      clearTimeout(_tradePendingTimer);
-      _tradePendingTimer = setTimeout(() => {
-        if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
-      }, 10000);
-      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
-    }
-  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
-}
-
-async function tradeZscore(){
-  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
-  const amt=parseFloat($_( 'amtDigit').value)||0.35;
-  _tradeSubmitted = true; _tradePending = false;
-  clearTimeout(_tradeSubmittedTimer);
-  _tradeSubmittedTimer = setTimeout(() => {
-    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
-  }, 3000);
-  
-  const auditCard = $_('auditCard');
-  if(auditCard) auditCard.style.display = 'none';
-  
-  try{
-    const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
-    const d=await r.json();
-    _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
-    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
-    else{ 
-      _tradePending = true;
-      clearTimeout(_tradePendingTimer);
-      _tradePendingTimer = setTimeout(() => {
-        if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
-      }, 10000);
-      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
-    }
-  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
-}
-
-async function ignoreZscore(){
-    try {
-        const r = await fetch('/api/zscore/ignore', { method: 'POST' });
-        const d = await r.json();
-        if (d.status === 'ok') { toast('🚫 Sinal Z‑Score ignorado', 'info'); }
-        else { toast('❌ ' + (d.error || 'Erro ao ignorar'), 'loss'); }
-    } catch(e) { toast('❌ Erro de rede', 'loss'); }
-}
+async function mgtDivide(fieldId){ const input=$_(fieldId); const currentAmount=parseFloat(input.value)||0.35; const nextAmount=Math.max(0.35,currentAmount/2); input.value=nextAmount.toFixed(2); toast('📉 $'+nextAmount.toFixed(2),'info'); }
+async function rstMgt(){ await fetch('/api/martingale/reset',{method:'POST'}); $_( 'amtDigit').value='0.35'; toast('🔄 Martingale resetado','info'); }
 
 async function conectar(){
   const tok=$_('tokIn').value.trim(); if(!tok){ toast('❌ Token obrigatório','loss'); return; }
@@ -1227,51 +1197,6 @@ function selAcct(a){
   }).catch(e=>{ toast('❌ Erro','loss'); });
 }
 
-async function mgtMultiply(fieldId){
-    if(_mgtLocked){ toast('⏳ Aguarde...', 'warning'); return; }
-    _mgtLocked = true;
-    const input=$_(fieldId); const currentAmount=parseFloat(input.value)||0.35;
-    const maxStepsInput = $_('mgtMaxSteps');
-    const maxSteps = maxStepsInput ? Math.min(4, Math.max(1, parseInt(maxStepsInput.value)||2)) : 2;
-    try{
-        const r=await fetch('/api/martingale/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({last_amount:currentAmount, max_steps:maxSteps})});
-        const d=await r.json();
-        if(d.error){ toast('❌ '+d.error,'loss'); }
-        else { const nextAmount=d.martingale.next_amount; $_( 'amtDigit').value=nextAmount.toFixed(2); toast('📈 '+d.martingale.message,'info'); }
-    } catch(e) { toast('❌ Erro de rede','loss'); }
-    _mgtLocked = false;
-}
-
-async function mgtDivide(fieldId){ const input=$_(fieldId); const currentAmount=parseFloat(input.value)||0.35; const nextAmount=Math.max(0.35,currentAmount/2); input.value=nextAmount.toFixed(2); toast('📉 $'+nextAmount.toFixed(2),'info'); }
-async function rstMgt(){ await fetch('/api/martingale/reset',{method:'POST'}); $_( 'amtDigit').value='0.35'; toast('🔄 Martingale resetado','info'); }
-async function clearHistory(){ await fetch('/api/clear_history',{method:'POST'}); toast('🗑️ Histórico limpo','info'); loadHistory(); }
-
-function loadAffiliate(){
-  fetch('/api/affiliate/link').then(r=>r.json()).then(d=>{ if(d.link) $_( 'refLink').value=d.link; });
-  fetch('/api/affiliate/earnings').then(r=>r.json()).then(d=>{
-    const el=$_('affiliateEarnings'); if(!el) return; if(d.error){ el.innerHTML=''; return; }
-    el.innerHTML=`<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px"><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">GANHOS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">$${d.earnings?.toFixed(2)||'0.00'}</div></div><div style="background:#020617;padding:8px;border-radius:6px;text-align:center"><div style="font-size:10px;color:var(--muted)">REFERIDOS</div><div style="font-size:16px;font-weight:bold">${d.referred_count||0}</div></div></div>`;
-  });
-}
-function cpLink(){ const el=$_('refLink'); if(!el) return; const text=el.value; navigator.clipboard.writeText(text).then(()=>{ toast('📋 Copiado!','win'); }).catch(()=>{ el.select(); document.execCommand('copy'); toast('📋 Copiado!','win'); }); }
-
-function loadHistory(){
-  fetch('/api/report').then(r=>r.json()).then(d=>{
-    const sum=$_('histSummary2'), list=$_('histList2'), miniList=$_('histList');
-    if(d.error){ if(sum) sum.innerHTML=''; if(list) list.innerHTML=''; if(miniList) miniList.innerHTML=''; return; }
-    const r=d.resumo;
-    if(sum) sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${r.total_trades}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${r.trades_hoje}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WINS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${r.wins}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">LOSSES</div><div style="font-size:16px;font-weight:bold;color:var(--danger)">${r.losses}</div></div>`;
-    const html=d.historico.map(t=>{
-      const win=t.result==='win', lose=t.result==='loss', cor=win?'var(--accent)':lose?'var(--danger)':'#ffaa00', icon=win?'✅':lose?'❌':'⏳';
-      let actionLabel=t.action||''; if(t.is_digit){ actionLabel=(t.action==='BUY'||t.action==='CALL')?'ÍMPAR 🎲':'PAR 🎲'; }
-      const profitText=t.profit?`<div style="color:${t.profit>0?'var(--accent)':'var(--danger)'}">${t.profit>0?'+':''}$${t.profit.toFixed(2)}</div>`:'';
-      return`<div style="padding:6px;background:#020617;border-radius:6px;margin-bottom:4px;font-size:11px"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">${t.time}</span><span style="font-weight:700;color:${cor}">${icon} ${t.result.toUpperCase()}</span></div><div>${actionLabel} ${t.symbol} $${t.amount.toFixed(2)}</div>${profitText}</div>`;
-    }).join('');
-    if(list) list.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';
-    if(miniList) miniList.innerHTML=html||'<p style="color:var(--muted);text-align:center">Sem operações.</p>';
-  }).catch(()=>toast('❌ Erro histórico','loss'));
-}
-
 function loadAdminUsers(){
   fetch('/api/admin/users').then(r=>r.json()).then(d=>{
     const el=$_('adminUserList'); if(!el) return;
@@ -1319,7 +1244,7 @@ function doReset(){
     const el=$_('fMsg'); if(el){ el.textContent=d.error?d.error:'✅ Verifique o email'; el.style.color=d.error?'var(--danger)':'var(--accent)'; }
   });
 }
-function doLogout(){ stopPolling(); if(resizeObserver) resizeObserver.disconnect(); fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload()); }
+function doLogout(){ stopPolling(); if(mainResizeObserver) mainResizeObserver.disconnect(); if(forexResizeObserver) forexResizeObserver.disconnect(); fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload()); }
 async function saveTokAcct(acctType){
   const tok=$_('tokIn').value.trim(); if(!tok){ toast('❌ Cole o token','loss'); return; }
   try{ const r=await fetch('/api/auth/save_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok,account_type:acctType})}); const d=await r.json(); if(d.error){ toast('❌ '+d.error,'loss'); return; } toast(`✅ Token ${acctType.toUpperCase()} guardado`,'win'); $_( 'tokIn').value=''; updateTokenDisplay(); } catch(e){ toast('❌ Erro','loss'); }
@@ -1356,15 +1281,6 @@ function showSec(s){
     _forexSectionVisible = false;
   }
 }
-
-function updatePingDisplay(){
-  if(!isConnected) return;
-  const pingEl = $_( 'conSt');
-  if (!pingEl) return;
-  const cor = _lastValidPing < 100 ? 'var(--accent)' : _lastValidPing < 250 ? 'var(--warning)' : 'var(--danger)';
-  pingEl.innerHTML = `✅ Ping: <span style="color:${cor}">${_lastValidPing}ms</span>`;
-}
-
 function checkUserPlan(){
     fetch('/api/auth/status').then(r=>r.json()).then(d=>{
         if(d.authenticated && d.user){
@@ -1376,7 +1292,6 @@ function checkUserPlan(){
         }
     }).catch(()=>{});
 }
-
 function iniciarThrottleDigito() {
   if (_timerDigito) clearInterval(_timerDigito);
   _timerDigito = setInterval(() => {
@@ -1391,7 +1306,6 @@ function iniciarThrottleDigito() {
     }
   }, 1000);
 }
-
 function updateLatencyIndicator(latencyMs) {
   const el = $_('latencyIndicator');
   if (!el) return;
@@ -1401,7 +1315,6 @@ function updateLatencyIndicator(latencyMs) {
   else { color = 'var(--danger)'; text = '🔴 ' + latencyMs + 'ms'; }
   el.innerHTML = `<span style="color:${color};font-size:10px">${text}</span>`;
 }
-
 function updateSuggestedAmount(balance) {
   if (!balance || balance <= 0) return;
   _suggestedAmount = Math.min(100, Math.max(0.35, balance * 0.02)).toFixed(2);
@@ -1410,7 +1323,6 @@ function updateSuggestedAmount(balance) {
     amtInput.value = _suggestedAmount;
   }
 }
-
 function updateCycleBlocker(ticksRemaining) {
   const blocker = $_('cycleBlocker');
   const tradeRow = document.querySelector('.trade-row');
@@ -1429,6 +1341,7 @@ function updateCycleBlocker(ticksRemaining) {
   }
 }
 
+// ==================== FUNÇÕES FOREX ====================
 async function loadForexSignals() {
     if (!_forexSectionVisible) return;
     const container = $_('forexSignalsContainer');
@@ -1449,11 +1362,9 @@ async function loadForexSignals() {
             const duration = s.suggested_duration_minutes || 15;
             let amount = _suggestedAmount || 1;
             let actionButton = '';
-            // REMOVIDO destaque especial para conf>=80
             if (conf >= 60) {
                 actionButton = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},${duration})" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR (${conf}%)</button>`;
             }
-
             let breakdownHTML = '';
             if (s.breakdown) {
                 const votes = s.breakdown;
@@ -1463,16 +1374,11 @@ async function loadForexSignals() {
                 }
                 breakdownHTML = `<div style="font-size:9px;color:var(--muted);margin-top:4px">📊 ${parts.join(' | ')}</div>`;
             }
-
             if (s.timeframe_label) {
                 breakdownHTML += `<div style="font-size:9px;color:var(--accent);margin-top:2px">⏱ Duração sugerida: ${s.timeframe_label}</div>`;
             }
-
-            const durationLabel = s.is_new_signal
-                ? '🆕 Novo'
-                : `⏱ Ativo há ${Math.floor((s.active_duration_seconds || 0) / 60)} min`;
+            const durationLabel = s.is_new_signal ? '🆕 Novo' : `⏱ Ativo há ${Math.floor((s.active_duration_seconds || 0) / 60)} min`;
             const durationHTML = `<div class="forex-duration ${s.is_new_signal ? 'new' : 'old'}">${durationLabel}</div>`;
-
             html += `<div class="forex-signal-card ${dirClass==='sell'?'sell':''} ${s.type==='liquidation'?'liquidation':''}">
                 <div style="display:flex;justify-content:space-between;align-items:center">
                     <span class="forex-pair">${s.pair}</span>
@@ -1509,10 +1415,10 @@ function initForexChart(){
         _forexMiddleBand = _forexChart.addLineSeries({ color: 'rgba(255,255,255,0.5)', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted });
         _forexLowerBand = _forexChart.addLineSeries({ color: 'rgba(255,255,255,0.3)', lineWidth: 1 });
         if(window.ResizeObserver){
-            resizeObserver = new ResizeObserver(() => {
+            forexResizeObserver = new ResizeObserver(() => {
                 if(_forexChart && container) _forexChart.applyOptions({ width: container.clientWidth });
             });
-            resizeObserver.observe(container);
+            forexResizeObserver.observe(container);
         }
     }catch(e){ console.error('Forex chart init error:', e); }
 }
@@ -1559,7 +1465,6 @@ function initForexSyms(){
     _forexPairs.forEach(p => { h += `<button class="sym-btn ${p===_forexCurPair?'active':''}" onclick="chgForexPair('${p}',this)">${p}</button>`; });
     el.innerHTML = h;
 }
-
 function chgForexPair(pair, el){
     _forexCurPair = pair;
     document.querySelectorAll('#forexSymSel .sym-btn').forEach(b => b.classList.remove('active'));
@@ -1597,11 +1502,9 @@ async function loadForexDurations() {
     const pairSelect = document.getElementById('forexManualPair');
     const durSelect = document.getElementById('forexManualDur');
     if (!pairSelect || !durSelect) return;
-
     const pair = pairSelect.value;
     const symbol = FOREX_SYMBOL_MAP[pair] || pair;
     durSelect.innerHTML = '<option value="">A carregar...</option>';
-
     try {
         const r = await fetch(`/api/forex/contracts_for/${symbol}`);
         const d = await r.json();
@@ -1609,13 +1512,11 @@ async function loadForexDurations() {
             durSelect.innerHTML = '<option value="">Indisponível — tente novamente</option>';
             return;
         }
-
         const callLimits = d.durations['CALL'];
         if (!callLimits) {
             durSelect.innerHTML = '<option value="">Sem durações para este par</option>';
             return;
         }
-
         const unit = callLimits.unit === 'm' ? 'min' : (callLimits.unit === 't' ? 'ticks' : 's');
         let html = '';
         callLimits.allowed_values.forEach(v => {
@@ -1645,12 +1546,149 @@ function executarTradeManual() {
     executarTradeForex(symbol, direction, amount, duration);
 }
 
-document.getElementById('forexManualPair')?.addEventListener('change', loadForexDurations);
+// ==================== FUNÇÕES DE TRADE ====================
+async function tradeDigitWithRetry(pred, displayedDigit, retried = false) {
+  const amt = parseFloat($_( 'amtDigit').value) || 0.35;
+  try {
+    const r = await fetch('/api/trade/digit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: amt, displayed_digit: displayedDigit })
+    });
+    const d = await r.json();
+    if (r.status === 409 && d.current_digit !== undefined && !retried) {
+      return tradeDigitWithRetry(pred, d.current_digit, true);
+    }
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+    if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
+    _parityScheduled = true;
+    const confirmMsg = d.digit_used !== undefined ? `Aposta registada: ${d.direction.toUpperCase()}, dígito base ${d.digit_used}` : d.message;
+    toast('📅 ' + confirmMsg, 'info');
+    if (d.digit_used !== undefined) setTargetDigit(d.digit_used);
+    updatePendingIndicators({});
+  } catch (e) {
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+    toast('❌ Erro de rede', 'loss');
+  }
+}
 
-// ══════════ INICIALIZAÇÃO ══════════
-setInterval(()=>{if(isConnected)loadCandles();},10000);
-setInterval(updateScoreboard,30000); updateScoreboard();
+async function tradeDifferWithRetry(displayedDigit, retried = false) {
+  const amt = parseFloat($_( 'amtDigit').value) || 0.35;
+  try {
+    const r = await fetch('/api/trade/differ', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: amt, displayed_digit: displayedDigit })
+    });
+    const d = await r.json();
+    if (r.status === 409 && d.current_digit !== undefined && !retried) {
+      return tradeDifferWithRetry(d.current_digit, true);
+    }
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+    if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
+    _differScheduled = true;
+    const confirmMsg = d.digit_used !== undefined ? `Aposta DIFFER registada: dígito base ${d.digit_used}` : d.message;
+    toast('📅 ' + confirmMsg, 'info');
+    if (d.digit_used !== undefined) setTargetDigit(d.digit_used);
+    updatePendingIndicators({});
+  } catch (e) {
+    _tradeSubmitted = false;
+    clearTimeout(_tradeSubmittedTimer);
+    toast('❌ Erro de rede', 'loss');
+  }
+}
 
+async function tradeDigit(pred){
+  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+  if(_parityScheduled){ toast('📅 Aposta de paridade já agendada','warning'); return; }
+  _tradeSubmitted = true;
+  clearTimeout(_tradeSubmittedTimer);
+  _tradeSubmittedTimer = setTimeout(() => {
+    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito. Tente novamente.', 'warning', 5000); }
+  }, 3000);
+  const auditCard = $_('auditCard');
+  if(auditCard) auditCard.style.display = 'none';
+  await tradeDigitWithRetry(pred, _ultimoDigito);
+}
+
+async function tradeDiffer(){
+  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+  if(_differScheduled){ toast('📅 Aposta DIFFER já agendada','warning'); return; }
+  _tradeSubmitted = true;
+  clearTimeout(_tradeSubmittedTimer);
+  _tradeSubmittedTimer = setTimeout(() => {
+    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
+  }, 3000);
+  const auditCard = $_('auditCard');
+  if(auditCard) auditCard.style.display = 'none';
+  await tradeDifferWithRetry(_ultimoDigito);
+}
+
+async function tradeMatches(){
+  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+  const amt=parseFloat($_( 'amtDigit').value)||0.35;
+  _tradeSubmitted = true; _tradePending = false;
+  clearTimeout(_tradeSubmittedTimer);
+  _tradeSubmittedTimer = setTimeout(() => {
+    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
+  }, 3000);
+  const auditCard = $_('auditCard');
+  if(auditCard) auditCard.style.display = 'none';
+  try{
+    const r=await fetch('/api/trade/matches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+    const d=await r.json();
+    _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
+    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
+    else{ 
+      _tradePending = true;
+      clearTimeout(_tradePendingTimer);
+      _tradePendingTimer = setTimeout(() => {
+        if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
+      }, 10000);
+      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
+    }
+  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
+}
+
+async function tradeZscore(){
+  if(_tradeSubmitted){ toast('⏳ Proposta anterior ainda a ser processada','warning'); return; }
+  const amt=parseFloat($_( 'amtDigit').value)||0.35;
+  _tradeSubmitted = true; _tradePending = false;
+  clearTimeout(_tradeSubmittedTimer);
+  _tradeSubmittedTimer = setTimeout(() => {
+    if (_tradeSubmitted) { _tradeSubmitted = false; toast('⚠️ Proposta demorou muito.','warning',5000); }
+  }, 3000);
+  const auditCard = $_('auditCard');
+  if(auditCard) auditCard.style.display = 'none';
+  try{
+    const r=await fetch('/api/trade/zscore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+    const d=await r.json();
+    _tradeSubmitted = false; clearTimeout(_tradeSubmittedTimer);
+    if(d.error){ toast('❌ '+d.error,'loss'); _tradePending = false; }
+    else{ 
+      _tradePending = true;
+      clearTimeout(_tradePendingTimer);
+      _tradePendingTimer = setTimeout(() => {
+        if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
+      }, 10000);
+      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
+    }
+  }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
+}
+
+async function ignoreZscore(){
+    try {
+        const r = await fetch('/api/zscore/ignore', { method: 'POST' });
+        const d = await r.json();
+        if (d.status === 'ok') { toast('🚫 Sinal Z‑Score ignorado', 'info'); }
+        else { toast('❌ ' + (d.error || 'Erro ao ignorar'), 'loss'); }
+    } catch(e) { toast('❌ Erro de rede', 'loss'); }
+}
+
+// ==================== INICIALIZAÇÃO ====================
 (function(){
   const p=new URLSearchParams(location.search);
   const ref=p.get('ref');
