@@ -1063,16 +1063,9 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot){
 
   const btnOdd=$_('btnOdd'), btnEven=$_('btnEven'), parityReasonEl=$_('parityReason');
   if (strategy.parity_available) {
-    if (strategy.parity_direction === 'odd') {
-      btnOdd.disabled = tradeLocked || _parityScheduled;
-      btnEven.disabled = true;
-    } else if (strategy.parity_direction === 'even') {
-      btnOdd.disabled = true;
-      btnEven.disabled = tradeLocked || _parityScheduled;
-    } else {
-      btnOdd.disabled = true;
-      btnEven.disabled = true;
-    }
+    // Ambos os botões habilitados, independentemente da paridade atual
+    btnOdd.disabled = tradeLocked || _parityScheduled;
+    btnEven.disabled = tradeLocked || _parityScheduled;
     parityReasonEl.textContent = '';
   } else {
     btnOdd.disabled = true;
@@ -1566,7 +1559,7 @@ async function tradeDigitWithRetry(pred, displayedDigit, retried = false) {
     const r = await fetch('/api/trade/digit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt, displayed_digit: displayedDigit })
+      body: JSON.stringify({ amount: amt, displayed_digit: displayedDigit, direction: pred })
     });
     const d = await r.json();
     if (r.status === 409 && d.current_digit !== undefined && !retried) {
@@ -1593,12 +1586,9 @@ async function tradeDifferWithRetry(displayedDigit, retried = false) {
     const r = await fetch('/api/trade/differ', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt, displayed_digit: displayedDigit })
+      body: JSON.stringify({ amount: amt })
     });
     const d = await r.json();
-    if (r.status === 409 && d.current_digit !== undefined && !retried) {
-      return tradeDifferWithRetry(d.current_digit, true);
-    }
     _tradeSubmitted = false;
     clearTimeout(_tradeSubmittedTimer);
     if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
