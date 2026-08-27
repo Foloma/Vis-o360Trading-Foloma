@@ -1435,7 +1435,7 @@ def _validate_amount(amount):
         return None, 'Valor entre 0.35 e 100'
     return amt, None
 
-# ==================== TRADING SINTÉTICOS (com displayed_digit) ====================
+# ==================== TRADING SINTÉTICOS ====================
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
@@ -1472,14 +1472,16 @@ def trade_digit():
             'current_digit': current_digit
         }), 409
 
+    # Aceitar a direção escolhida pelo utilizador, não recalcular
+    direction = request.json.get('direction')
+    if direction not in ('odd', 'even'):
+        return jsonify({'error': 'Direção inválida'}), 400
+
     last_digit = current_digit
 
     amt, err = _validate_amount(request.json.get('amount', 0.35))
     if err:
         return jsonify({'error': err}), 400
-
-    is_odd = last_digit % 2 != 0
-    direction = 'odd' if not is_odd else 'even'
 
     bot._last_click_tick = last_digit
 
@@ -1517,36 +1519,27 @@ def trade_differ():
         return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
 
     analyzer = sess['digit_analyzer']
-    displayed_digit = request.json.get('displayed_digit')
-    current_digit = analyzer.get_current_digit()
 
-    if displayed_digit is None:
-        return jsonify({'error': 'Dígito não informado'}), 400
-
-    if displayed_digit != current_digit:
-        return jsonify({
-            'error': 'O dígito mudou entre o clique e o processamento. Tente novamente.',
-            'displayed_digit': displayed_digit,
-            'current_digit': current_digit
-        }), 409
-
-    digit = current_digit
+    # Usar o dígito do sinal ativo (o mesmo que aparece no botão), não o último dígito
+    differ_available, differ_digit = strategy._peek_differ()
+    if not differ_available or differ_digit is None:
+        return jsonify({'error': 'Nenhum sinal DIFFER disponível no momento'}), 400
 
     amt, err = _validate_amount(request.json.get('amount', 0.35))
     if err:
         return jsonify({'error': err}), 400
 
-    bot._last_click_tick = digit
+    bot._last_click_tick = analyzer.get_current_digit()
 
-    ok, msg = strategy.schedule_differ_bet(digit, amt)
+    ok, msg = strategy.schedule_differ_bet(differ_digit, amt)
     if not ok:
         return jsonify({'error': msg}), 400
 
     return jsonify({
         'status': 'ok',
-        'message': f'📅 Aposta DIFFER no dígito {digit} agendada',
-        'digit_used': digit,
-        'direction': f'DIFFER_{digit}'
+        'message': f'📅 Aposta DIFFER no dígito {differ_digit} agendada',
+        'digit_used': differ_digit,
+        'direction': f'DIFFER_{differ_digit}'
     })
 
 @app.route('/api/trade/matches', methods=['POST'])
