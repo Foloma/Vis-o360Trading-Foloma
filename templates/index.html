@@ -505,9 +505,8 @@ let _resultIsWin = null;
 let _resultTimeout = null;
 
 let _sessionGoals = null;
-
-// NOVO: controlo de exibição de erros de execução
 let _lastShownExecutionError = null;
+let _recentDigits = [];
 
 const FOREX_SYMBOL_MAP = {
     'EUR/USD': 'frxEURUSD', 'GBP/USD': 'frxGBPUSD', 'USD/JPY': 'frxUSDJPY',
@@ -840,7 +839,7 @@ async function updateAll(){
 
     if(data.strategy){
       const tr = data.digits?.ticks_remaining;
-      updateStrategyDisplay(data.strategy, tr, data.bot);
+      updateStrategyDisplay(data.strategy, tr, data.bot, data.digits);
       updatePendingIndicators(data.strategy);
     }
 
@@ -849,7 +848,6 @@ async function updateAll(){
       updateSessionGoalsUI(_sessionGoals);
     }
 
-    // Exibir erro de execução pendente (apenas quando mudar)
     if (bot.last_execution_error && bot.last_execution_error !== _lastShownExecutionError) {
       _lastShownExecutionError = bot.last_execution_error;
       toast('❌ ' + bot.last_execution_error, 'loss', 5000);
@@ -955,6 +953,7 @@ function updateDigits(digits){
   $_( 'tBar').style.width=Math.min(100,(tr/tpd)*100)+'%';
   $_( 'cdown').textContent=`⏱ ${tr} tick${tr!==1?'s':''}`;
   const recent=digits.recent||[], counter=digits.digit_counter||0;
+  _recentDigits = recent;
 
   if(recent.length>0 && (recent.length!==lastDigitCount || counter!==lastDigitCounter)){
     lastDigitCount=recent.length; lastDigitCounter=counter;
@@ -1008,7 +1007,7 @@ function updateHistSummary(bot){
   sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${s.total||0}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WIN RATE</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${s.win_rate||0}%</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">P/L</div><div style="font-size:16px;font-weight:bold;color:${cor}">${sinal}$${Math.abs(pl).toFixed(2)}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${d?d.trades:0}</div></div>`;
 }
 
-function updateStrategyDisplay(strategy, ticksRemaining, bot){
+function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   if(!strategy) return;
   const el = $_( 'strategyStatus');
   if(!el) return;
@@ -1061,11 +1060,47 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot){
     blockerMsg.textContent = ticksBlocked ? `⏳ Aguarde novo ciclo. ${ticksRemaining} tick(s) restantes.` : '';
   }
 
-  const btnOdd=$_('btnOdd'), btnEven=$_('btnEven'), parityReasonEl=$_('parityReason');
+  const btnOdd = $_('btnOdd'), btnEven = $_('btnEven'), parityReasonEl = $_('parityReason');
+
   if (strategy.parity_available) {
-    // Ambos os botões habilitados, independentemente da paridade atual
-    btnOdd.disabled = tradeLocked || _parityScheduled;
-    btnEven.disabled = tradeLocked || _parityScheduled;
+    const recent = digits?.recent || _recentDigits;
+    if (recent.length > 0) {
+      const lastDigit = recent[recent.length - 1];
+      const lastIsOdd = lastDigit % 2 !== 0;
+      let seqLen = 1;
+      for (let i = recent.length - 2; i >= 0; i--) {
+        if ((recent[i] % 2 !== 0) === lastIsOdd) {
+          seqLen++;
+        } else {
+          break;
+        }
+      }
+
+      const HYBRID_SEQUENCE_THRESHOLD = 4;
+
+      if (seqLen >= HYBRID_SEQUENCE_THRESHOLD) {
+        // Seguir tendência
+        if (lastIsOdd) {
+          btnOdd.disabled = tradeLocked || _parityScheduled;
+          btnEven.disabled = true;
+        } else {
+          btnOdd.disabled = true;
+          btnEven.disabled = tradeLocked || _parityScheduled;
+        }
+      } else {
+        // Alternância normal
+        if (lastIsOdd) {
+          btnOdd.disabled = true;
+          btnEven.disabled = tradeLocked || _parityScheduled;
+        } else {
+          btnOdd.disabled = tradeLocked || _parityScheduled;
+          btnEven.disabled = true;
+        }
+      }
+    } else {
+      btnOdd.disabled = true;
+      btnEven.disabled = true;
+    }
     parityReasonEl.textContent = '';
   } else {
     btnOdd.disabled = true;
