@@ -172,7 +172,6 @@
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
-<!-- ==================== TOP BAR & MENU ==================== -->
 <div class="top-bar">
   <button class="menu-btn" onclick="toggleMenu()">☰</button>
   <div class="logo">FOLOMA VISÃO 360</div>
@@ -506,6 +505,9 @@ let _resultIsWin = null;
 let _resultTimeout = null;
 
 let _sessionGoals = null;
+
+// NOVO: controlo de exibição de erros de execução
+let _lastShownExecutionError = null;
 
 const FOREX_SYMBOL_MAP = {
     'EUR/USD': 'frxEURUSD', 'GBP/USD': 'frxGBPUSD', 'USD/JPY': 'frxUSDJPY',
@@ -847,6 +849,18 @@ async function updateAll(){
       updateSessionGoalsUI(_sessionGoals);
     }
 
+    // Exibir erro de execução pendente (apenas quando mudar)
+    if (bot.last_execution_error && bot.last_execution_error !== _lastShownExecutionError) {
+      _lastShownExecutionError = bot.last_execution_error;
+      toast('❌ ' + bot.last_execution_error, 'loss', 5000);
+      _parityScheduled = false;
+      _differScheduled = false;
+      updatePendingIndicators({});
+    }
+    if (!bot.last_execution_error) {
+      _lastShownExecutionError = null;
+    }
+
     if(bot.last_trade_result){
       const ltr = bot.last_trade_result;
       if(ltr.contract_id && ltr.contract_id !== _lastProcessedContractId){
@@ -935,7 +949,6 @@ async function updateAll(){
   }
 }
 
-// ==================== DEMAIS FUNÇÕES (implementação completa) ====================
 function updateDigits(digits){
   if(!digits) return;
   const tpd=digits.ticks_per_digit||10, tr=Math.max(0,Math.round(digits.ticks_remaining||tpd));
@@ -1648,7 +1661,7 @@ async function tradeMatches(){
       _tradePendingTimer = setTimeout(() => {
         if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
       }, 10000);
-      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
+      toast(d.message,'win',4000); playBeep(); setTimeout(loadHistory, 5000); 
     }
   }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
 }
@@ -1674,7 +1687,7 @@ async function tradeZscore(){
       _tradePendingTimer = setTimeout(() => {
         if (_tradePending) { _tradePending = false; toast('⚠️ Resultado demorou muito. Verifique o histórico.', 'warning', 6000); }
       }, 10000);
-      toast(d.message,'win',4000); playBeep(); scheduleHistoryLoad(5000); 
+      toast(d.message,'win',4000); playBeep(); setTimeout(loadHistory, 5000); 
     }
   }catch(e){ toast('❌ Erro de rede','loss'); _tradeSubmitted = false; _tradePending = false; clearTimeout(_tradeSubmittedTimer); clearTimeout(_tradePendingTimer); }
 }
