@@ -666,7 +666,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
         strategy = StrategyManager(client, analyzer)
         bot.strategy = strategy
 
-        # Inicializar sessão com metas zeradas
         new_sess = {}
         new_sess['session_goals'] = {
             'entry_amount': 0.0,
@@ -678,7 +677,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             'message': ''
         }
 
-        # Referência para callbacks
         session_ref = {'sess': new_sess}
 
         def on_trade_result(trade):
@@ -705,7 +703,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                     bot.reset_martingale()
                     _save_martingale_state(user_id, bot)
 
-                # Atualizar metas de sessão
                 _update_session_goals(session_ref['sess'], profit)
             except Exception as e:
                 logger.error(f"Callback de trade falhou: {e}")
@@ -715,27 +712,32 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             if strategy:
                 strategy.on_tick(tick)
                 pending_parity, pending_differ = strategy.get_pending_bets()
-                if pending_parity:
-                    if strategy._check_pending_bets():
-                        direction = pending_parity['direction']
-                        amt = pending_parity['amount']
-                        contract = 'CALL' if direction == 'odd' else 'PUT'
-                        ok = client.place_trade(contract, amt, is_digit=True)
-                        if not ok:
-                            strategy.set_execution_error(f"Falha ao executar paridade: {contract}")
-                        else:
-                            strategy.clear_execution_error()
-                            credit_referral_commission(user_email, amt)
-                if pending_differ:
-                    if strategy._check_pending_bets():
-                        digit = pending_differ['digit']
-                        amt = pending_differ['amount']
-                        ok = client.place_differ_trade(digit, amt)
-                        if not ok:
-                            strategy.set_execution_error(f"Falha ao executar DIFFER: {digit}")
-                        else:
-                            strategy.clear_execution_error()
-                            credit_referral_commission(user_email, amt)
+                parity_ready, differ_ready = strategy._check_pending_bets()
+
+                if parity_ready and pending_parity:
+                    direction = pending_parity['direction']
+                    amt = pending_parity['amount']
+                    contract = 'CALL' if direction == 'odd' else 'PUT'
+                    ok = client.place_trade(contract, amt, is_digit=True)
+                    if not ok:
+                        strategy.set_execution_error(f"Falha ao executar paridade: {contract}")
+                    else:
+                        strategy.clear_execution_error()
+                        credit_referral_commission(user_email, amt)
+                    with strategy._lock:
+                        strategy._pending_parity_bet = None
+
+                if differ_ready and pending_differ:
+                    digit = pending_differ['digit']
+                    amt = pending_differ['amount']
+                    ok = client.place_differ_trade(digit, amt)
+                    if not ok:
+                        strategy.set_execution_error(f"Falha ao executar DIFFER: {digit}")
+                    else:
+                        strategy.clear_execution_error()
+                        credit_referral_commission(user_email, amt)
+                    with strategy._lock:
+                        strategy._pending_differ_bet = None
 
             if os.environ.get('ENABLE_DIGIT_STREAM_LOG', 'false').lower() == 'true':
                 try:
@@ -860,7 +862,7 @@ app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
 
-is_production = os.environ.get('RENDER', 'false').lower() == 'true' or os.environ.get('FLASK_DEBUG', '0') == '0'
+is_production = os.environ.get('RENDER', 'false').lower() == 'true'
 app.config['SESSION_COOKIE_SECURE'] = is_production
 app.config['SESSION_COOKIE_SAMESITE'] = 'None' if is_production else 'Lax'
 
@@ -1393,7 +1395,12 @@ def oauth_callback():
         conn.commit()
     finally:
         conn.close()
-    email_row = sqlite3.connect(DATABASE_PATH, timeout=10).execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    conn2 = sqlite3.connect(DATABASE_PATH, timeout=10)
+    try:
+        email_row = conn2.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    finally:
+        conn2.close()
     if not email_row:
         return redirect('/?error=user_not_found')
     email = email_row[0]
@@ -1766,7 +1773,6 @@ def credit_referral_commission(user_email, amount):
     user = UserStore.get(user_email)
     if not user or not user.get('referral_code'):
         return
-    # FIX: só creditar comissão se a conta ativa for REAL
     if user.get('active_account') != 'real':
         return
     ref_code = user['referral_code']
