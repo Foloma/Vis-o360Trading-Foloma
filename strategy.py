@@ -17,6 +17,8 @@ class StrategyManager:
     - Análise contínua de sequências para Differ (ausência curta).
     - Filtros de probabilidade estatística antes de agendar.
     - Versão robusta com proteções contra erros e validações.
+    - Correções: _check_pending_bets retorna tupla; differ gerado apenas por sequência;
+      paridade recalculada a cada tick (sem prender recomendação).
     """
 
     def __init__(self, client, analyzer):
@@ -68,12 +70,10 @@ class StrategyManager:
 
         self._last_execution_error = None
 
-        self.parity_alternance_mode = True
-
         self.MIN_SCORE_PARITY = 65.0
         self.MIN_SCORE_DIFFER = 65.0
         self.LATENCY_LIMIT_MS = 150.0
-        self.MARTINGALE_AMOUNT_THRESHOLD = 1.0
+        self.MARTINGALE_AMOUNT_THRESHOLD = 1.0   # mantido para compatibilidade, mas latência é sempre verificada
         self.DIFFER_SHORT_ABSENCE_THRESHOLD = 8
 
     # -----------------------------------------------------------------
@@ -191,6 +191,7 @@ class StrategyManager:
 
                 self.refresh_signals()
                 self._maybe_generate_signals()
+                # DIFFER é gerado somente por sequência curta, não no _maybe_generate_signals
                 self._maybe_generate_sequence_differ()
         except Exception as e:
             logger.error(f"Erro em on_tick: {e}")
@@ -203,11 +204,12 @@ class StrategyManager:
                     signal = self._active_signals.get(strategy)
                     if signal and not self._is_signal_still_valid(signal):
                         self._active_signals[strategy] = None
-                        logger.info(f"⏰ Sinal {strategy} expirado (ID {signal.get('id', '?')})")  # CORRIGIDO
+                        logger.info(f"⏰ Sinal {strategy} expirado (ID {signal.get('id', '?')})")
         except Exception as e:
             logger.error(f"Erro em refresh_signals: {e}")
 
     def _maybe_generate_sequence_differ(self):
+        """Gera sinal Differ se um dígito está ausente há poucos ticks (ex.: 8), sem cluster."""
         try:
             with self._lock:
                 if self._trade_locked:
@@ -255,6 +257,7 @@ class StrategyManager:
             return None
 
     def _maybe_generate_signals(self):
+        """Gera sinais de paridade a cada tick, e matches/zscore no início do ciclo."""
         try:
             with self._lock:
                 if self._trade_locked:
@@ -264,12 +267,22 @@ class StrategyManager:
                 if self.client and getattr(self.client, 'active_trades', None):
                     return
 
+                # Paridade: recalcular sempre, a cada tick, sem depender de expiração
+                preview_func = getattr(self, '_preview_parity_signal', None)
+                if preview_func:
+                    preview = preview_func()
+                    if preview:
+                        self._create_signal('parity', preview['recommendation'],
+                                            preview.get('digits', []), preview['reason'],
+                                            mode=preview.get('mode', 'parity'))
+
+                # Apenas matches e zscore são gerados no início do ciclo
                 tpd = getattr(self.analyzer, 'TICKS_PER_DIGIT', 10)
                 tr = self.analyzer.get_ticks_remaining() if hasattr(self.analyzer, 'get_ticks_remaining') else 10
                 inicio_ciclo = tr >= tpd - 1
 
                 if inicio_ciclo:
-                    for strategy in ('parity', 'differ'):
+                    for strategy in ('matches', 'zscore'):
                         if self._active_signals.get(strategy) and self._is_signal_still_valid(self._active_signals[strategy]):
                             continue
                         preview_func = getattr(self, f'_preview_{strategy}_signal', None)
@@ -279,17 +292,6 @@ class StrategyManager:
                                 self._create_signal(strategy, preview['recommendation'],
                                                     preview.get('digits', []), preview['reason'],
                                                     mode=preview.get('mode', strategy))
-
-                for strategy in ('matches', 'zscore'):
-                    if self._active_signals.get(strategy) and self._is_signal_still_valid(self._active_signals[strategy]):
-                        continue
-                    preview_func = getattr(self, f'_preview_{strategy}_signal', None)
-                    if preview_func:
-                        preview = preview_func()
-                        if preview:
-                            self._create_signal(strategy, preview['recommendation'],
-                                                preview.get('digits', []), preview['reason'],
-                                                mode=preview.get('mode', strategy))
         except Exception as e:
             logger.error(f"Erro em _maybe_generate_signals: {e}")
 
@@ -450,24 +452,23 @@ class StrategyManager:
             return False, "Erro interno ao agendar DIFFER"
 
     def _check_pending_bets(self):
-        executed = False
+        """
+        Verifica quais apostas agendadas venceram no tick atual.
+        Retorna (parity_ready: bool, differ_ready: bool).
+        Não limpa os slots; a limpeza é feita pelo chamador após execução.
+        """
+        parity_ready = False
+        differ_ready = False
         try:
             with self._lock:
                 current_tick = self.analyzer.get_tick_count()
-                if self._pending_parity_bet:
-                    if current_tick >= self._pending_parity_bet['target_tick']:
-                        logger.info(f"⏰ Executando aposta agendada de paridade: {self._pending_parity_bet['direction']}")
-                        self._pending_parity_bet = None
-                        executed = True
-
-                if self._pending_differ_bet:
-                    if current_tick >= self._pending_differ_bet['target_tick']:
-                        logger.info(f"⏰ Executando aposta agendada DIFFER: {self._pending_differ_bet['digit']}")
-                        self._pending_differ_bet = None
-                        executed = True
+                if self._pending_parity_bet and current_tick >= self._pending_parity_bet['target_tick']:
+                    parity_ready = True
+                if self._pending_differ_bet and current_tick >= self._pending_differ_bet['target_tick']:
+                    differ_ready = True
         except Exception as e:
             logger.error(f"Erro em _check_pending_bets: {e}")
-        return executed
+        return parity_ready, differ_ready
 
     def get_pending_bets(self):
         try:
@@ -492,6 +493,7 @@ class StrategyManager:
     # Métodos de preview
     # -----------------------------------------------------------------
     def _preview_differ_signal(self):
+        # Não é mais usada para gerar sinal manual; apenas retorna sinal ativo se existir.
         try:
             signal = self._active_signals.get('differ')
             if signal and self._is_signal_still_valid(signal):
@@ -499,13 +501,6 @@ class StrategyManager:
                         'digits': signal['digits'],
                         'reason': signal['reason'],
                         'mode': signal['mode']}
-            recent = self.analyzer.get_recent_digits(1)
-            if recent and isinstance(recent, list) and len(recent) > 0:
-                digit = recent[0]
-                return {'recommendation': digit,
-                        'digits': [digit],
-                        'reason': f"DIFFER {digit}: aposta manual",
-                        'mode': 'manual'}
             return None
         except Exception as e:
             logger.error(f"Erro em _preview_differ_signal: {e}")
@@ -513,21 +508,13 @@ class StrategyManager:
 
     def _preview_parity_signal(self):
         try:
-            signal = self._active_signals.get('parity')
-            if signal and self._is_signal_still_valid(signal):
-                return {'recommendation': signal['recommendation'],
-                        'digits': signal['digits'],
-                        'reason': signal['reason'],
-                        'mode': signal['mode']}
             recent = self.analyzer.get_recent_digits(1)
             if recent and isinstance(recent, list) and len(recent) > 0:
                 last = recent[0]
                 is_odd = last % 2 != 0
                 rec = 'even' if is_odd else 'odd'
-                return {'recommendation': rec,
-                        'digits': [last],
-                        'reason': f"Último dígito {last} → apostar {rec}",
-                        'mode': 'alternancia'}
+                return {'recommendation': rec, 'digits': [last],
+                        'reason': f"Último dígito {last} → apostar {rec}", 'mode': 'alternancia'}
             return None
         except Exception as e:
             logger.error(f"Erro em _preview_parity_signal: {e}")
@@ -581,9 +568,6 @@ class StrategyManager:
             signal = self._active_signals.get('differ')
             if signal and self._is_signal_still_valid(signal):
                 return True, signal['recommendation']
-            preview = self._preview_differ_signal()
-            if preview:
-                return True, preview['recommendation']
             return False, None
         except Exception as e:
             logger.error(f"Erro em _peek_differ: {e}")
@@ -815,11 +799,7 @@ class StrategyManager:
                             self._consecutive_losses_differ = 0
                             logger.warning("⏸️ Pausa DIFFER por 5 minutos — usar apenas PARIDADE")
                     elif action_upper in ('CALL', 'PUT', 'DIGITODD', 'DIGITEVEN'):
-                        if not self._parity_martingale_used and self._last_parity_streak_type:
-                            self._apply_cooldown(1)
-                            logger.info("🔄 Janela de entrada reiniciada para martingale")
-                        else:
-                            self._apply_cooldown(5)
+                        self._apply_cooldown(5)
                     elif action_upper.startswith('MATCH') or action_upper.startswith('Z_MATCH'):
                         self._matches_cooldown_until = time.time() + 45
                         self._apply_cooldown(10)
@@ -829,8 +809,6 @@ class StrategyManager:
                 else:
                     self._consecutive_losses = 0
                     self._differ_sequence_used.clear()
-                    self._parity_martingale_used = False
-                    self._last_parity_streak_type = None
                     self._matches_sequence_used = False
                     self._zscore_sequence_used = False
                     for key in self._active_signals:
@@ -962,10 +940,10 @@ class StrategyManager:
             score = balance_score + seq_bonus - seq_penalty
             score = max(0, min(100, score))
 
-            if amount > self.MARTINGALE_AMOUNT_THRESHOLD:
-                lat = getattr(self.client, 'last_trade_latency_ms', 0)
-                if lat > self.LATENCY_LIMIT_MS:
-                    return score, False, f"Latência alta ({lat}ms) – abortando para evitar bad fill"
+            # Verificação de latência sempre aplicada
+            lat = getattr(self.client, 'last_trade_latency_ms', 0)
+            if lat > self.LATENCY_LIMIT_MS:
+                return score, False, f"Latência alta ({lat}ms) – abortando para evitar bad fill"
 
             approved = score >= self.MIN_SCORE_PARITY
             reason = f"Score {score:.1f}% (balance={ratio:.2f}, seq={seq_len})" if approved else f"Score baixo {score:.1f}%"
@@ -978,9 +956,10 @@ class StrategyManager:
         try:
             N = 50
             window = recent_digits[-N:]
+            actual_n = len(window)
             freq = self._get_digit_frequency(digit, window)
             expected = 0.1
-            std = math.sqrt(expected * (1 - expected) / N) if N > 0 else 0
+            std = math.sqrt(expected * (1 - expected) / actual_n) if actual_n > 0 else 0
             z_score = (freq - expected) / std if std > 0 else 0
 
             ticks_since_last = self._ticks_since_last_appearance(digit, recent_digits)
@@ -997,10 +976,10 @@ class StrategyManager:
             score = z_score_component + absence_component - freq_penalty
             score = max(0, min(100, score))
 
-            if amount > self.MARTINGALE_AMOUNT_THRESHOLD:
-                lat = getattr(self.client, 'last_trade_latency_ms', 0)
-                if lat > self.LATENCY_LIMIT_MS:
-                    return score, False, f"Latência alta ({lat}ms) – abortando"
+            # Verificação de latência sempre aplicada
+            lat = getattr(self.client, 'last_trade_latency_ms', 0)
+            if lat > self.LATENCY_LIMIT_MS:
+                return score, False, f"Latência alta ({lat}ms) – abortando"
 
             approved = score >= self.MIN_SCORE_DIFFER
             reason = f"Score {score:.1f}% (z={z_score:.2f}, ausência={ticks_since_last})" if approved else f"Score baixo {score:.1f}%"
