@@ -18,7 +18,9 @@ class StrategyManager:
     - Filtros de probabilidade estatística antes de agendar.
     - Versão robusta com proteções contra erros e validações.
     - Correções: _check_pending_bets retorna tupla; differ gerado apenas por sequência;
-      paridade recalculada a cada tick (sem prender recomendação).
+      paridade recalculada a cada tick (sem prender recomendação);
+      latência usa _ping_ms em tempo real;
+      get_differ_signal() expõe sinal ativo de forma pública.
     """
 
     def __init__(self, client, analyzer):
@@ -73,7 +75,7 @@ class StrategyManager:
         self.MIN_SCORE_PARITY = 65.0
         self.MIN_SCORE_DIFFER = 65.0
         self.LATENCY_LIMIT_MS = 150.0
-        self.MARTINGALE_AMOUNT_THRESHOLD = 1.0   # mantido para compatibilidade, mas latência é sempre verificada
+        self.MARTINGALE_AMOUNT_THRESHOLD = 1.0   # não usado para filtro de latência agora, mantido para compatibilidade
         self.DIFFER_SHORT_ABSENCE_THRESHOLD = 8
 
     # -----------------------------------------------------------------
@@ -489,11 +491,14 @@ class StrategyManager:
         with self._lock:
             self._last_execution_error = None
 
+    def get_differ_signal(self):
+        """Retorna (available, digit) do sinal DIFFER ativo."""
+        return self._peek_differ()
+
     # -----------------------------------------------------------------
     # Métodos de preview
     # -----------------------------------------------------------------
     def _preview_differ_signal(self):
-        # Não é mais usada para gerar sinal manual; apenas retorna sinal ativo se existir.
         try:
             signal = self._active_signals.get('differ')
             if signal and self._is_signal_still_valid(signal):
@@ -619,10 +624,10 @@ class StrategyManager:
     # Métodos de entrada para MATCHES e ZSCORE
     # -----------------------------------------------------------------
     def evaluate_differ(self):
-        return None, "DIFFER agora é manual — use schedule_differ_bet"
+        return None, "DIFFER agora usa get_differ_signal() — não schedule_differ_bet manual"
 
     def _generate_differ_signal(self):
-        return None, "DIFFER agora é manual"
+        return None, "DIFFER agora usa sequência de ausência"
 
     def evaluate_parity(self):
         return None, "Paridade agora é manual — use schedule_parity_bet"
@@ -940,8 +945,15 @@ class StrategyManager:
             score = balance_score + seq_bonus - seq_penalty
             score = max(0, min(100, score))
 
-            # Verificação de latência sempre aplicada
-            lat = getattr(self.client, 'last_trade_latency_ms', 0)
+            # Latência em tempo real (ping atual, não histórico de trade)
+            raw_ping = getattr(self.client, '_ping_ms', 0)
+            streaming_ok = getattr(self.client, 'streaming', False)
+            last_tick_time = getattr(self.client, '_last_tick_time', 0)
+            if raw_ping >= 9999 and streaming_ok and last_tick_time and time.time() - last_tick_time < 10:
+                lat = 0
+            else:
+                lat = raw_ping
+
             if lat > self.LATENCY_LIMIT_MS:
                 return score, False, f"Latência alta ({lat}ms) – abortando para evitar bad fill"
 
@@ -976,8 +988,15 @@ class StrategyManager:
             score = z_score_component + absence_component - freq_penalty
             score = max(0, min(100, score))
 
-            # Verificação de latência sempre aplicada
-            lat = getattr(self.client, 'last_trade_latency_ms', 0)
+            # Latência em tempo real (ping atual, não histórico de trade)
+            raw_ping = getattr(self.client, '_ping_ms', 0)
+            streaming_ok = getattr(self.client, 'streaming', False)
+            last_tick_time = getattr(self.client, '_last_tick_time', 0)
+            if raw_ping >= 9999 and streaming_ok and last_tick_time and time.time() - last_tick_time < 10:
+                lat = 0
+            else:
+                lat = raw_ping
+
             if lat > self.LATENCY_LIMIT_MS:
                 return score, False, f"Latência alta ({lat}ms) – abortando"
 
