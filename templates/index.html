@@ -114,7 +114,7 @@
     .sym-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
     .tf-btn { padding: 3px 8px; background: #020617; border: 1px solid var(--border); color: var(--text); border-radius: 10px; font-size: 10px; cursor: pointer; touch-action: manipulation; }
     .tf-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    button:disabled { opacity: 0.35; filter: grayscale(0.7); cursor: not-allowed; }
     .strategy-indicators { display: flex; gap: 6px; margin-bottom: 6px; }
     .strat-badge { font-size: 9px; padding: 3px 8px; border-radius: 12px; font-weight: 700; text-align: center; }
     .strat-badge.ready { background: var(--accent); color: #000; }
@@ -172,6 +172,7 @@
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
+<!-- TOP BAR & MENU -->
 <div class="top-bar">
   <button class="menu-btn" onclick="toggleMenu()">☰</button>
   <div class="logo">FOLOMA VISÃO 360</div>
@@ -197,7 +198,7 @@
 <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
 <div class="toast" id="toast"></div>
 
-<!-- ==================== GUIA MODAL ==================== -->
+<!-- GUIA MODAL -->
 <div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
   <div class="guide-modal" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeGuide()">✕</button>
@@ -247,7 +248,7 @@
   </div>
 </div>
 
-<!-- ==================== CONTEÚDO PRINCIPAL ==================== -->
+<!-- CONTEÚDO PRINCIPAL -->
 <div class="container" id="mainContent" style="display:none">
   <div id="dashboard-section">
     <div class="card">
@@ -422,7 +423,7 @@
   </div>
 </div>
 
-<!-- ==================== AUTH MODAL ==================== -->
+<!-- AUTH MODAL -->
 <div id="authModal" class="modal" onclick="if(event.target===this)closeAuthModal()">
   <div class="mbox" onclick="event.stopPropagation()">
     <h2 style="color:var(--accent);text-align:center;margin-bottom:12px">FOLOMA VISÃO 360</h2>
@@ -1063,44 +1064,9 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   const btnOdd = $_('btnOdd'), btnEven = $_('btnEven'), parityReasonEl = $_('parityReason');
 
   if (strategy.parity_available) {
-    const recent = digits?.recent || _recentDigits;
-    if (recent.length > 0) {
-      const lastDigit = recent[recent.length - 1];
-      const lastIsOdd = lastDigit % 2 !== 0;
-      let seqLen = 1;
-      for (let i = recent.length - 2; i >= 0; i--) {
-        if ((recent[i] % 2 !== 0) === lastIsOdd) {
-          seqLen++;
-        } else {
-          break;
-        }
-      }
-
-      const HYBRID_SEQUENCE_THRESHOLD = 4;
-
-      if (seqLen >= HYBRID_SEQUENCE_THRESHOLD) {
-        // Seguir tendência
-        if (lastIsOdd) {
-          btnOdd.disabled = tradeLocked || _parityScheduled;
-          btnEven.disabled = true;
-        } else {
-          btnOdd.disabled = true;
-          btnEven.disabled = tradeLocked || _parityScheduled;
-        }
-      } else {
-        // Alternância normal
-        if (lastIsOdd) {
-          btnOdd.disabled = true;
-          btnEven.disabled = tradeLocked || _parityScheduled;
-        } else {
-          btnOdd.disabled = tradeLocked || _parityScheduled;
-          btnEven.disabled = true;
-        }
-      }
-    } else {
-      btnOdd.disabled = true;
-      btnEven.disabled = true;
-    }
+    // Ambos os botões habilitados, restritos apenas por trade lock e aposta agendada
+    btnOdd.disabled = tradeLocked || _parityScheduled;
+    btnEven.disabled = tradeLocked || _parityScheduled;
     parityReasonEl.textContent = '';
   } else {
     btnOdd.disabled = true;
