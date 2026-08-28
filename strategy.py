@@ -20,7 +20,7 @@ class StrategyManager:
     - Correções: _check_pending_bets retorna tupla; differ gerado apenas por sequência;
       paridade recalculada a cada tick (sem prender recomendação);
       latência usa _ping_ms em tempo real;
-      get_differ_signal() expõe sinal ativo de forma pública.
+      _analyze_digit_sequence escolhe o dígito mais ausente.
     """
 
     def __init__(self, client, analyzer):
@@ -75,7 +75,7 @@ class StrategyManager:
         self.MIN_SCORE_PARITY = 65.0
         self.MIN_SCORE_DIFFER = 65.0
         self.LATENCY_LIMIT_MS = 150.0
-        self.MARTINGALE_AMOUNT_THRESHOLD = 1.0   # não usado para filtro de latência agora, mantido para compatibilidade
+        self.MARTINGALE_AMOUNT_THRESHOLD = 1.0
         self.DIFFER_SHORT_ABSENCE_THRESHOLD = 8
 
     # -----------------------------------------------------------------
@@ -193,7 +193,6 @@ class StrategyManager:
 
                 self.refresh_signals()
                 self._maybe_generate_signals()
-                # DIFFER é gerado somente por sequência curta, não no _maybe_generate_signals
                 self._maybe_generate_sequence_differ()
         except Exception as e:
             logger.error(f"Erro em on_tick: {e}")
@@ -236,6 +235,7 @@ class StrategyManager:
             if not isinstance(recent, list) or len(recent) < 10:
                 return None
 
+            candidates = []
             for digit in range(10):
                 last_idx = -1
                 for i, d in enumerate(reversed(recent)):
@@ -244,16 +244,18 @@ class StrategyManager:
                         break
                 ticks_absent = last_idx if last_idx != -1 else len(recent)
 
-                if ticks_absent >= self.DIFFER_SHORT_ABSENCE_THRESHOLD:
-                    # Verificar cluster recente
-                    if recent[-5:].count(digit) >= 2:
-                        continue
-                    return {
-                        'digit': digit,
-                        'ticks_absent': ticks_absent,
-                        'reason': f"Dígito {digit} ausente há {ticks_absent} ticks (sequência curta)"
-                    }
-            return None
+                if ticks_absent >= self.DIFFER_SHORT_ABSENCE_THRESHOLD and recent[-5:].count(digit) < 2:
+                    candidates.append((digit, ticks_absent))
+
+            if not candidates:
+                return None
+
+            digit, ticks_absent = max(candidates, key=lambda c: c[1])  # o mais ausente
+            return {
+                'digit': digit,
+                'ticks_absent': ticks_absent,
+                'reason': f"Dígito {digit} ausente há {ticks_absent} ticks (sequência curta)"
+            }
         except Exception as e:
             logger.error(f"Erro em _analyze_digit_sequence: {e}")
             return None
@@ -454,11 +456,6 @@ class StrategyManager:
             return False, "Erro interno ao agendar DIFFER"
 
     def _check_pending_bets(self):
-        """
-        Verifica quais apostas agendadas venceram no tick atual.
-        Retorna (parity_ready: bool, differ_ready: bool).
-        Não limpa os slots; a limpeza é feita pelo chamador após execução.
-        """
         parity_ready = False
         differ_ready = False
         try:
@@ -492,7 +489,6 @@ class StrategyManager:
             self._last_execution_error = None
 
     def get_differ_signal(self):
-        """Retorna (available, digit) do sinal DIFFER ativo."""
         return self._peek_differ()
 
     # -----------------------------------------------------------------
@@ -624,7 +620,7 @@ class StrategyManager:
     # Métodos de entrada para MATCHES e ZSCORE
     # -----------------------------------------------------------------
     def evaluate_differ(self):
-        return None, "DIFFER agora usa get_differ_signal() — não schedule_differ_bet manual"
+        return None, "DIFFER agora usa get_differ_signal()"
 
     def _generate_differ_signal(self):
         return None, "DIFFER agora usa sequência de ausência"
@@ -893,10 +889,6 @@ class StrategyManager:
     # Avaliação de probabilidade estatística
     # -----------------------------------------------------------------
     def evaluate_probability(self, digit, strategy_type, amount):
-        """
-        Avalia se a entrada é estatisticamente favorável.
-        Retorna (score: float, approved: bool, reason: str)
-        """
         try:
             if not self.analyzer:
                 return 0.0, False, "Analisador indisponível"
@@ -945,7 +937,6 @@ class StrategyManager:
             score = balance_score + seq_bonus - seq_penalty
             score = max(0, min(100, score))
 
-            # Latência em tempo real (ping atual, não histórico de trade)
             raw_ping = getattr(self.client, '_ping_ms', 0)
             streaming_ok = getattr(self.client, 'streaming', False)
             last_tick_time = getattr(self.client, '_last_tick_time', 0)
@@ -988,7 +979,6 @@ class StrategyManager:
             score = z_score_component + absence_component - freq_penalty
             score = max(0, min(100, score))
 
-            # Latência em tempo real (ping atual, não histórico de trade)
             raw_ping = getattr(self.client, '_ping_ms', 0)
             streaming_ok = getattr(self.client, 'streaming', False)
             last_tick_time = getattr(self.client, '_last_tick_time', 0)
