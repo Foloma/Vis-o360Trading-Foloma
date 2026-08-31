@@ -1,5 +1,4 @@
 from collections import deque
-from decimal import Decimal, InvalidOperation
 import time
 import logging
 import threading
@@ -40,6 +39,10 @@ class DigitAnalyzer:
         self._last_seen = {i: 0 for i in range(10)}
         self._current_time = time.time()
 
+        # PRECISÃO DE CASAS DECIMAIS (confirmar por símbolo)
+        # R_100/R_75/R_50 usam 2 casas decimais normalmente.
+        self.price_precision = 2
+
         self.last_analysis = {
             'streak': 0, 'streak_parity': '---',
             'recommended_action': None, 'confidence': 0,
@@ -62,19 +65,15 @@ class DigitAnalyzer:
         }
 
     def _extract_last_digit(self, price):
+        """
+        Extrai o último dígito do preço SEM normalizar nem remover zeros.
+        Usa formatação com precisão fixa para preservar zeros à direita.
+        """
         try:
-            s = str(Decimal(str(price)).normalize())
-            if 'E' in s or 'e' in s:
-                s = f"{float(price):.6f}".rstrip('0')
-            for ch in reversed(s):
-                if ch.isdigit():
-                    return int(ch)
-            return 0
+            s = f"{float(price):.{self.price_precision}f}"
+            return int(s[-1])
         except Exception:
-            try:
-                return int(f"{float(price):.3f}"[-1])
-            except:
-                return 0
+            return 0
 
     def _calculate_entropy(self, digits):
         if not digits or len(digits) < 2:
