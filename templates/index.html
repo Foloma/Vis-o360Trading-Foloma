@@ -43,6 +43,8 @@
     button:active { transform: scale(.97); }
     .btn-buy { background: var(--accent); color: #000; }
     .btn-sell { background: var(--danger); }
+    .btn-odd { background: #ffffff; color: #000; }
+    .btn-even { background: var(--accent); color: #000; }
     .status { display: flex; justify-content: space-between; align-items: center; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); display: inline-block; margin-right: 4px; }
     .dot.on { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
@@ -172,7 +174,6 @@
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
-<!-- TOP BAR & MENU -->
 <div class="top-bar">
   <button class="menu-btn" onclick="toggleMenu()">☰</button>
   <div class="logo">FOLOMA VISÃO 360</div>
@@ -198,7 +199,7 @@
 <div class="overlay" id="overlay" onclick="toggleMenu()"></div>
 <div class="toast" id="toast"></div>
 
-<!-- GUIA MODAL -->
+<!-- ==================== GUIA MODAL ==================== -->
 <div id="guideModal" class="modal" style="display:none" onclick="if(event.target===this)closeGuide()">
   <div class="guide-modal" onclick="event.stopPropagation()">
     <button class="close-btn" onclick="closeGuide()">✕</button>
@@ -248,7 +249,7 @@
   </div>
 </div>
 
-<!-- CONTEÚDO PRINCIPAL -->
+<!-- ==================== CONTEÚDO PRINCIPAL ==================== -->
 <div class="container" id="mainContent" style="display:none">
   <div id="dashboard-section">
     <div class="card">
@@ -327,8 +328,8 @@
       <div class="freq-grid" id="freqGrid"></div>
       <div class="trade-row" style="margin-top:6px">
         <input type="number" id="amtDigit" value="0.35" step="0.01" min="0.35" max="100" onfocus="this.dataset.userEdited='true'" onchange="this.dataset.userEdited='true'">
-        <button class="btn-buy" id="btnOdd" onclick="tradeDigit('odd')" style="padding:10px 14px">ÍMPAR</button>
-        <button class="btn-sell" id="btnEven" onclick="tradeDigit('even')" style="padding:10px 14px">PAR</button>
+        <button class="btn-odd" id="btnOdd" onclick="tradeDigit('odd')" style="padding:10px 14px">ÍMPAR</button>
+        <button class="btn-even" id="btnEven" onclick="tradeDigit('even')" style="padding:10px 14px">PAR</button>
       </div>
       <div class="pending-indicator" id="parityPending">📅 Aposta agendada...</div>
       <div class="signal-ticks" id="parityTicks"></div>
@@ -533,6 +534,15 @@ function playBeep(){
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
         osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3);
     }catch(e){}
+}
+
+// NOVA FUNÇÃO: traduzir ação interna para etiqueta legível
+function labelEstrategia(action) {
+  if (action === 'CALL') return 'ÍMPAR (DIGITODD)';
+  if (action === 'PUT') return 'PAR (DIGITEVEN)';
+  if (action.startsWith('DIFFER')) return action;
+  if (action.startsWith('MATCH')) return action;
+  return action;
 }
 
 function openGuide(){ const el=$_('guideModal'); if(el){ el.style.display='flex'; document.body.classList.add('modal-open'); } }
@@ -872,7 +882,7 @@ async function updateAll(){
         const displayDigit = ltr.exit_digit !== undefined ? ltr.exit_digit : ltr.digit;
         _ultimoDigito = displayDigit;
         _ultimoParidade = (ltr.is_win ? 'GANHOU' : 'PERDEU');
-        const tipo = ltr.action.startsWith('DIFFER') ? 'DIFFER' : (ltr.action.startsWith('MATCH') ? 'MATCHES' : ltr.action);
+        const tipo = labelEstrategia(ltr.action);
         const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
         const digitInfo = ltr.exit_digit !== undefined ? ` | Dígito: ${ltr.exit_digit}` : '';
         const resultType = ltr.is_win ? 'win' : 'loss';
@@ -906,7 +916,7 @@ async function updateAll(){
                   <div>🎯 Tick entrada: <b>${ltr.entry_digit ?? '—'}</b></div>
                   <div>🏁 Tick saída: <b style="color:${resultColor}">${ltr.exit_digit ?? '—'}</b></div>
                   <div>⏱ Latência: <b>${ltr.latency_total_ms ? ltr.latency_total_ms+'ms' : '—'}</b></div>
-                  <div>📊 Estratégia: <b>${ltr.action ?? '—'}</b></div>
+                  <div>📊 Estratégia: <b>${labelEstrategia(ltr.action) ?? '—'}</b></div>
                   <div>💰 Resultado: <b style="color:${resultColor}">${ltr.is_win?'WIN':'LOSS'}</b></div>
                 </div>
                 <div style="margin-top:4px;color:var(--muted);font-size:9px">
@@ -1119,7 +1129,7 @@ function loadHistory(){
     if(sum) sum.innerHTML=`<div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:16px;font-weight:bold">${r.total_trades}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">HOJE</div><div style="font-size:16px;font-weight:bold">${r.trades_hoje}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">WINS</div><div style="font-size:16px;font-weight:bold;color:var(--accent)">${r.wins}</div></div><div style="background:#020617;padding:6px;border-radius:6px;text-align:center"><div style="font-size:9px;color:var(--muted)">LOSSES</div><div style="font-size:16px;font-weight:bold;color:var(--danger)">${r.losses}</div></div>`;
     const html=d.historico.map(t=>{
       const win=t.result==='win', lose=t.result==='loss', cor=win?'var(--accent)':lose?'var(--danger)':'#ffaa00', icon=win?'✅':lose?'❌':'⏳';
-      let actionLabel=t.action||''; if(t.is_digit){ actionLabel=(t.action==='BUY'||t.action==='CALL')?'ÍMPAR 🎲':'PAR 🎲'; }
+      let actionLabel=t.action||''; if(t.is_digit){ actionLabel=labelEstrategia(t.action); }
       const profitText=t.profit?`<div style="color:${t.profit>0?'var(--accent)':'var(--danger)'}">${t.profit>0?'+':''}$${t.profit.toFixed(2)}</div>`:'';
       return`<div style="padding:6px;background:#020617;border-radius:6px;margin-bottom:4px;font-size:11px"><div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">${t.time}</span><span style="font-weight:700;color:${cor}">${icon} ${t.result.toUpperCase()}</span></div><div>${actionLabel} ${t.symbol} $${t.amount.toFixed(2)}</div>${profitText}</div>`;
     }).join('');
