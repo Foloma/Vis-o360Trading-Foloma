@@ -32,6 +32,13 @@ class ForexSignals:
         self._active_since = {}
 
     # -----------------------------------------------------------------
+    # Auxiliar de limpeza de _active_since
+    # -----------------------------------------------------------------
+    def _clear_active_since(self, symbol):
+        """Remove todas as entradas de _active_since para um dado símbolo."""
+        self._active_since = {k: v for k, v in self._active_since.items() if k[0] != symbol}
+
+    # -----------------------------------------------------------------
     # Consulta do histórico persistente para o rastreamento
     # -----------------------------------------------------------------
     def _get_persisted_active_since(self, symbol, direction):
@@ -113,6 +120,7 @@ class ForexSignals:
         ema_h1 = self._indicators.ema(symbol, period=20, granularity=3600)
         price = self._data.get_latest_price(symbol)
         if ema_h1 is None or price is None:
+            self._clear_active_since(symbol)               # <-- CORREÇÃO
             return None, "H1 sem dados (EMA ou preço None)"
 
         # Margem de whipsaw 0.02%
@@ -121,6 +129,7 @@ class ForexSignals:
         elif price < ema_h1 * 0.9998:
             h1_bias = 'SELL'
         else:
+            self._clear_active_since(symbol)               # <-- CORREÇÃO
             motivo = f"H1 sem tendência clara (price={price:.5f}, ema_h1={ema_h1:.5f})"
             logger.info(f"🔍 DEBUG {symbol} MTF: {motivo}")
             return None, motivo
@@ -141,6 +150,7 @@ class ForexSignals:
                         f"(vela M15 fecha aos 900s)")
 
         if not ind_15.get('latest_price'):
+            self._clear_active_since(symbol)               # <-- CORREÇÃO (caso não tivesse sido considerado)
             return None, "M15 sem preço"
 
         direction, consensus, votes = self._ensemble.decide(ind_15)
@@ -148,6 +158,7 @@ class ForexSignals:
 
         # Filtro estrutural: só executar se M15 concordar com H1 (sem reversão nesta fase)
         if direction != h1_bias:
+            self._clear_active_since(symbol)               # <-- CORREÇÃO
             motivo = f"M15 ({direction}) discorda de H1 ({h1_bias})"
             logger.info(f"🔍 DEBUG {symbol} MTF: {motivo} — sem sinal")
             return None, motivo
@@ -164,11 +175,11 @@ class ForexSignals:
             # Tentar recuperar do histórico persistente
             persisted_since = self._get_persisted_active_since(symbol, direction)
             if persisted_since and (now - persisted_since) < 900:  # < 15 min
-                self._active_since = {k: v for k, v in self._active_since.items() if k[0] != symbol}
+                self._clear_active_since(symbol)
                 self._active_since[key] = persisted_since
             else:
                 # Sinal genuinamente novo
-                self._active_since = {k: v for k, v in self._active_since.items() if k[0] != symbol}
+                self._clear_active_since(symbol)
                 self._active_since[key] = now
 
         active_since = self._active_since[key]
@@ -187,13 +198,13 @@ class ForexSignals:
             votes_with_meta['_candle_maturity_seconds'] = seconds_into_candle
             votes_with_meta['_risk_penalties'] = risk_reasons
 
-            # NOVO: passar active_duration_seconds para o _log_signal
             self._log_signal(
                 symbol, direction, adjusted_confidence, votes_with_meta, ind_15,
                 source='ensemble', active_duration_seconds=active_duration_seconds
             )
 
-        reason_text = f"H1 define {h1_bias}, M15 confirma com {consensus}% de consenso"
+        # CORREÇÃO: usar adjusted_confidence no texto, não consensus
+        reason_text = f"H1 define {h1_bias}, M15 confirma com {adjusted_confidence}% de consenso"
         if risk_reasons:
             reason_text += f" — ajustado: {', '.join(risk_reasons)}"
 
