@@ -217,6 +217,7 @@
       <h3>🎲 Par/Ímpar — o que realmente acontece</h3>
       <p>O sistema observa o último dígito recebido e acende o botão correspondente (PAR ou ÍMPAR) apenas como indicação visual do estado atual.</p>
       <p><b>Importante:</b> após mais de 450 trades reais acumulados e um teste estatístico qui‑quadrado (1346 dígitos, p=0,29), <b>não foi encontrada nenhuma vantagem matemática</b> em relação a dígitos aleatórios. A probabilidade de acerto em cada aposta de paridade é de aproximadamente 50%, menos a margem da Deriv.</p>
+      <p><b>Porque não apostar "contra a sequência":</b> é tentador pensar que, depois de 3 ou 4 pares seguidos, o ímpar "está para sair" — mas cada dígito sintético é gerado de forma independente do anterior (um gerador de números aleatórios sem memória). A probabilidade do próximo dígito ser ímpar continua ~50% depois de 4 pares seguidos, exatamente igual a depois de 1 só. Esperar uma "correção" é a chamada <i>falácia do apostador</i> — um viés psicológico comum, não uma propriedade real do sistema.</p>
       <p>Opcionalmente podes usar esta funcionalidade como entretenimento ou para testar a plataforma, mas <b>não como estratégia de rendimento</b>.</p>
     </div>
     <div id="g2" style="margin-top:16px">
@@ -240,7 +241,7 @@
     <div id="g6" style="margin-top:16px">
       <h3>📲 Suporte e recursos</h3>
       <p><a href="https://track.deriv.com/_d7vlKgtFe-31hit6RV3zsGNd7ZgqdRLk/1/" target="_blank" style="color:var(--accent);font-weight:700">👉 Criar conta na Deriv</a></p>
-      <p><a href="https://chat.whatsapp.com/L8e0ituCsH68uIk3PMlQc9" target="_blank" style="color:var(--accent);font-weight:700">👉 Grupo de Suporte Foloma Visão 360</a></p>
+      <p><a href="https://chat.whatsapp.com/KnDd3aLvZ07CMAD5KtGKWk" target="_blank" style="color:var(--accent);font-weight:700">👉 Grupo de Suporte Foloma Visão 360</a></p>
     </div>
     <div id="g7" style="margin-top:16px">
       <h3>⚖️ Como Funciona Realmente</h3>
@@ -536,7 +537,6 @@ function playBeep(){
     }catch(e){}
 }
 
-// NOVA FUNÇÃO: traduzir ação interna para etiqueta legível
 function labelEstrategia(action) {
   if (action === 'CALL') return 'ÍMPAR (DIGITODD)';
   if (action === 'PUT') return 'PAR (DIGITEVEN)';
