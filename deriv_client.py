@@ -38,6 +38,9 @@ class DerivWebSocketClient:
         # FIX F11: lock único para proposta + trade
         self._proposal_lock = threading.RLock()
 
+        # Lock de escrita no socket
+        self._ws_send_lock = threading.Lock()
+
         self._req_lock = threading.Lock()
         self._digit_analyzer = None
         self._balance_subscribed = False
@@ -125,6 +128,18 @@ class DerivWebSocketClient:
 
     def _is_otp_ws(self):
         return self._ws_url and 'otp=' in self._ws_url
+
+    # -----------------------------------------------------------------
+    # Envio seguro e serializado (propaga exceções)
+    # -----------------------------------------------------------------
+    def _ws_send(self, payload_dict):
+        """Serializa o dicionário para JSON e envia com lock de escrita.
+        Não captura exceções; deixa que os chamadores tratem os erros."""
+        data = json.dumps(payload_dict)
+        with self._ws_send_lock:
+            if not self.ws:
+                raise ConnectionError("Tentativa de envio sem websocket ativo")
+            self.ws.send(data)
 
     # -----------------------------------------------------------------
     # FIX F13: get_last_tick_seconds_ago evita 999 nos primeiros 15s
@@ -258,12 +273,12 @@ class DerivWebSocketClient:
                 if now - trade.get('timestamp', now) > 45:
                     logger.info(f"🔍 Poller: a forçar verificação do contrato {cid}")
                     try:
-                        self.ws.send(json.dumps({
+                        self._ws_send({
                             "proposal_open_contract": 1,
                             "contract_id": cid,
                             "subscribe": 1,
                             "req_id": self._next_req()
-                        }))
+                        })
                     except Exception as e:
                         logger.error(f"Erro no poller para {cid}: {e}")
 
@@ -295,7 +310,7 @@ class DerivWebSocketClient:
         if len(self.user_token) < 10:
             logger.error(f"🚫 Token suspeito: '{self.user_token}'")
             return False
-        self.ws.send(json.dumps({"authorize": self.user_token, "req_id": self._next_req()}))
+        self._ws_send({"authorize": self.user_token, "req_id": self._next_req()})
         self._auth_time = time.time()
         logger.info("🔐 Pedido de autorização enviado")
         deadline = time.time() + timeout
@@ -332,7 +347,7 @@ class DerivWebSocketClient:
     def _close_connection(self):
         if self.ws:
             try:
-                self.ws.send(json.dumps({"forget_all": "ticks", "req_id": self._next_req()}))
+                self._ws_send({"forget_all": "ticks", "req_id": self._next_req()})
             except Exception:
                 pass
             try:
@@ -408,7 +423,7 @@ class DerivWebSocketClient:
                     continue
                 self._ping_sent_at = time.time()
                 self._ping_pending = True
-                self.ws.send(json.dumps({"ping": 1, "req_id": self._next_req()}))
+                self._ws_send({"ping": 1, "req_id": self._next_req()})
                 self._start_ping_timer()
                 consecutive_failures = 0
             except Exception as e:
@@ -481,7 +496,7 @@ class DerivWebSocketClient:
             try:
                 sub_id = self._tick_subscription_ids.pop(old_symbol, None)
                 if sub_id:
-                    self.ws.send(json.dumps({"forget": sub_id, "req_id": self._next_req()}))
+                    self._ws_send({"forget": sub_id, "req_id": self._next_req()})
                     self.subscribed_symbols.discard(old_symbol)
                     logger.info(f"🔕 Subscrição de {old_symbol} cancelada (id={sub_id})")
             except Exception as e:
@@ -495,7 +510,7 @@ class DerivWebSocketClient:
 
     def _subscribe_balance(self):
         try:
-            self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
+            self._ws_send({"balance": 1, "subscribe": 1, "req_id": self._next_req()})
             self._balance_subscribed = True
         except Exception as e:
             logger.error(f"Erro subs. saldo: {e}")
@@ -514,7 +529,7 @@ class DerivWebSocketClient:
             self._subscribe_balance()
         elif force:
             try:
-                self.ws.send(json.dumps({"balance": 1, "subscribe": 1, "req_id": self._next_req()}))
+                self._ws_send({"balance": 1, "subscribe": 1, "req_id": self._next_req()})
             except Exception as e:
                 logger.error(f"Erro ao pedir saldo: {e}")
 
@@ -524,7 +539,7 @@ class DerivWebSocketClient:
         if symbol in self.subscribed_symbols:
             return
         try:
-            self.ws.send(json.dumps({"ticks": symbol, "subscribe": 1, "req_id": self._next_req()}))
+            self._ws_send({"ticks": symbol, "subscribe": 1, "req_id": self._next_req()})
             self.subscribed_symbols.add(symbol)
             self.current_symbol = symbol
             logger.info(f"📊 Subscrição de ticks para {symbol} enviada")
@@ -650,7 +665,7 @@ class DerivWebSocketClient:
                     "symbol": self.current_symbol,
                     "req_id": req_id
                 }
-                self.ws.send(json.dumps(self._build_proposal(payload)))
+                self._ws_send(self._build_proposal(payload))
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro trade: {e}")
@@ -703,7 +718,7 @@ class DerivWebSocketClient:
                     "symbol": self.current_symbol,
                     "req_id": req_id
                 }
-                self.ws.send(json.dumps(self._build_proposal(payload)))
+                self._ws_send(self._build_proposal(payload))
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro DIGITDIFF: {e}")
@@ -756,7 +771,7 @@ class DerivWebSocketClient:
                     "symbol": self.current_symbol,
                     "req_id": req_id
                 }
-                self.ws.send(json.dumps(self._build_proposal(payload)))
+                self._ws_send(self._build_proposal(payload))
                 return True
             except Exception as e:
                 logger.error(f"❌ Erro DIGITMATCH: {e}")
@@ -825,7 +840,7 @@ class DerivWebSocketClient:
                     "symbol": symbol,
                     "req_id": req_id
                 }
-                self.ws.send(json.dumps(self._build_proposal(payload)))
+                self._ws_send(self._build_proposal(payload))
                 return True, None
             except Exception as e:
                 logger.error(f"❌ Erro ao enviar trade Forex: {e}")
@@ -859,7 +874,7 @@ class DerivWebSocketClient:
             self.pending_trade['status'] = 'buying'
             logger.info(f"📥 Proposta recebida: id={pid}, ask_price={ask}")
             try:
-                self.ws.send(json.dumps({"buy": pid, "price": ask, "req_id": self._next_req()}))
+                self._ws_send({"buy": pid, "price": ask, "req_id": self._next_req()})
                 logger.info(f"🛒 Buy enviado para proposta {pid}")
             except Exception as e:
                 logger.error(f"❌ Erro ao enviar buy: {e}")
@@ -943,10 +958,10 @@ class DerivWebSocketClient:
 
     def _subscribe_contract(self, cid):
         try:
-            self.ws.send(json.dumps({
+            self._ws_send({
                 "proposal_open_contract": 1, "contract_id": cid,
                 "subscribe": 1, "req_id": self._next_req()
-            }))
+            })
             logger.info(f"📎 Subscrição de contrato enviada: {cid}")
         except Exception as e:
             logger.error(f"Erro subs. contrato {cid}: {e}")
@@ -968,10 +983,10 @@ class DerivWebSocketClient:
         logger.info(f"🔄 Reassinar {len(trades_snapshot)} contrato(s)...")
         for cid in trades_snapshot.keys():
             try:
-                self.ws.send(json.dumps({
+                self._ws_send({
                     "proposal_open_contract": 1, "contract_id": cid,
                     "subscribe": 1, "req_id": self._next_req()
-                }))
+                })
             except Exception as e:
                 logger.error(f"Falha ao reassinar {cid}: {e}")
 
@@ -980,10 +995,7 @@ class DerivWebSocketClient:
             return None
         try:
             s = f"{float(value):.2f}"
-            for ch in reversed(s):
-                if ch.isdigit():
-                    return int(ch)
-            return None
+            return int(s[-1])
         except (ValueError, TypeError):
             return None
 
@@ -1103,11 +1115,11 @@ class DerivWebSocketClient:
             logger.warning("WebSocket não está conectado, ignora pedido de velas")
             return
         try:
-            self.ws.send(json.dumps({
+            self._ws_send({
                 "ticks_history": symbol, "style": "candles",
                 "granularity": granularity, "count": count,
                 "end": "latest", "req_id": self._next_req()
-            }))
+            })
         except Exception as e:
             logger.error(f"Erro ao pedir velas: {e}")
 
@@ -1192,10 +1204,10 @@ class DerivWebSocketClient:
             self._pending_contracts_for[req_id] = (event, holder)
 
         try:
-            self.ws.send(json.dumps({
+            self._ws_send({
                 "contracts_for": symbol,
                 "req_id": req_id
-            }))
+            })
         except Exception as e:
             logger.error(f"Erro ao pedir contracts_for {symbol}: {e}")
             with self._req_lock:
