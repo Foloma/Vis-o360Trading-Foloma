@@ -7,6 +7,10 @@ class ForexEnsemble:
     """
     Sistema de votação para sinais Forex.
     Agrega os votos de vários indicadores e retorna uma direção consensual.
+
+    NOTA: Os votos de tendência, MACD e momentum são de continuação,
+    enquanto Bollinger vota em reversão à média. Isto é intencional,
+    mas pode gerar divergências — o consenso decide.
     """
 
     def __init__(self, consensus_threshold=0.6):
