@@ -164,7 +164,7 @@ class ForexIndicators:
         return round(sum(dx_list[-period:]) / period, 2)
 
     def atr(self, symbol, period=14, granularity=900):
-        """ATR (Average True Range)."""
+        """ATR (Average True Range) — suavização de Wilder (consistente com ADX)."""
         candles = self._data.get_recent_candles(symbol, count=period + 10, granularity=granularity, only_closed=True)
         if not candles or len(candles) < period + 1:
             return None
@@ -175,12 +175,21 @@ class ForexIndicators:
         for i in range(1, len(candles)):
             tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
             tr_values.append(tr)
-        return sum(tr_values[-period:]) / period
+
+        if len(tr_values) < period:
+            return None
+
+        # Média inicial simples
+        atr = sum(tr_values[:period]) / period
+        # Aplicar suavização de Wilder nos TRs seguintes
+        for tr in tr_values[period:]:
+            atr = (atr * (period - 1) + tr) / period
+        return atr
 
     def momentum(self, symbol, period=10, granularity=900):
         """Momentum (diferença entre o fecho atual e o fecho de `period` velas atrás)."""
         candles = self._data.get_recent_candles(symbol, count=period + 5, granularity=granularity, only_closed=True)
-        if not candles or len(candles) < period:
+        if not candles or len(candles) < period + 1:   # <-- CORRIGIDO: era `period`
             return None
         return candles[-1]['close'] - candles[-period-1]['close']
 
