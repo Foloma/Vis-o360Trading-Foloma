@@ -35,7 +35,8 @@ class ForexScorer:
         breakdown = {k: 0 for k in self.weights}
 
         latest = ind.get('latest_price')
-        sma200 = ind.get('sma_200')
+        # CORREÇÃO: usar sma_100 (existente) em vez de sma_200 (não calculado)
+        sma200 = ind.get('sma_100')
         ema50 = ind.get('ema_50')
         rsi = ind.get('rsi_14')
         macd_line = ind.get('macd_line')
@@ -49,7 +50,7 @@ class ForexScorer:
         if latest is None:
             return 0, 'SEM_DADOS', breakdown
 
-        # --- 1. Tendência (SMA200 / EMA50) ---
+        # --- 1. Tendência (SMA100 / EMA50) ---
         # Só atribui direção se houver informação suficiente
         if sma200 is not None and ema50 is not None:
             if ema50 > sma200:
@@ -61,7 +62,7 @@ class ForexScorer:
             else:
                 breakdown['trend'] = 0  # empate, não define direção
         elif sma200 is not None:
-            # Fallback: usar preço vs SMA200 (metade dos pontos)
+            # Fallback: usar preço vs SMA100 (metade dos pontos)
             if latest > sma200:
                 breakdown['trend'] = self.weights['trend'] // 2
                 direction = 'BUY'
