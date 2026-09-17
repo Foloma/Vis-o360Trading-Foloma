@@ -9,6 +9,23 @@ from forex_scorer import ForexScorer
 logger = logging.getLogger(__name__)
 
 
+def _calc_pct_b(bollinger, price):
+    """
+    %B = (price - lower) / (upper - lower)
+    Valores típicos: 0 (na banda inferior) a 1 (na banda superior).
+    Fora de [0,1] = preço fora das bandas.
+    """
+    if not bollinger or price is None:
+        return None
+    upper, middle, lower = bollinger
+    if upper is None or lower is None:
+        return None
+    width = upper - lower
+    if width <= 0:
+        return None
+    return (price - lower) / width
+
+
 class ForexSignals:
     """
     Gera sinais de trading (compra/venda) para pares de Forex.
@@ -120,7 +137,7 @@ class ForexSignals:
         ema_h1 = self._indicators.ema(symbol, period=20, granularity=3600)
         price = self._data.get_latest_price(symbol)
         if ema_h1 is None or price is None:
-            self._clear_active_since(symbol)               # <-- CORREÇÃO
+            self._clear_active_since(symbol)
             return None, "H1 sem dados (EMA ou preço None)"
 
         # Margem de whipsaw 0.02%
@@ -129,7 +146,7 @@ class ForexSignals:
         elif price < ema_h1 * 0.9998:
             h1_bias = 'SELL'
         else:
-            self._clear_active_since(symbol)               # <-- CORREÇÃO
+            self._clear_active_since(symbol)
             motivo = f"H1 sem tendência clara (price={price:.5f}, ema_h1={ema_h1:.5f})"
             logger.info(f"🔍 DEBUG {symbol} MTF: {motivo}")
             return None, motivo
@@ -150,7 +167,7 @@ class ForexSignals:
                         f"(vela M15 fecha aos 900s)")
 
         if not ind_15.get('latest_price'):
-            self._clear_active_since(symbol)               # <-- CORREÇÃO (caso não tivesse sido considerado)
+            self._clear_active_since(symbol)
             return None, "M15 sem preço"
 
         direction, consensus, votes = self._ensemble.decide(ind_15)
@@ -158,7 +175,7 @@ class ForexSignals:
 
         # Filtro estrutural: só executar se M15 concordar com H1 (sem reversão nesta fase)
         if direction != h1_bias:
-            self._clear_active_since(symbol)               # <-- CORREÇÃO
+            self._clear_active_since(symbol)
             motivo = f"M15 ({direction}) discorda de H1 ({h1_bias})"
             logger.info(f"🔍 DEBUG {symbol} MTF: {motivo} — sem sinal")
             return None, motivo
@@ -184,7 +201,7 @@ class ForexSignals:
 
         active_since = self._active_since[key]
         active_duration_seconds = round(now - active_since)
-        is_new_signal = active_duration_seconds < 120  # considera "novo" se detetado há menos de 2 min
+        is_new_signal = active_duration_seconds < 120
 
         # --- Registo seletivo no log: só gravar se novo, ou a cada ~15 min de persistência ---
         should_log = is_new_signal or (active_duration_seconds % 900 < 90)
@@ -203,7 +220,6 @@ class ForexSignals:
                 source='ensemble', active_duration_seconds=active_duration_seconds
             )
 
-        # CORREÇÃO: usar adjusted_confidence no texto, não consensus
         reason_text = f"H1 define {h1_bias}, M15 confirma com {adjusted_confidence}% de consenso"
         if risk_reasons:
             reason_text += f" — ajustado: {', '.join(risk_reasons)}"
@@ -271,11 +287,36 @@ class ForexSignals:
         return None
 
     # -----------------------------------------------------------------
-    # Registo de sinal para tracking de performance
+    # Registo de sinal (com logging estendido para investigação de edge)
     # -----------------------------------------------------------------
     def _log_signal(self, symbol, direction, confidence, votes, indicators, source='ensemble', active_duration_seconds=None):
         try:
             import sqlite3, json, os
+
+            # ---- Extensão: capturar valores brutos para investigação de edge ----
+            # Adicionados ao breakdown_json sem alterar a estrutura existente.
+            # Estes campos só são gravados quando source='ensemble' (sinais que decidem trades).
+            if source == 'ensemble' and indicators:
+                bollinger = indicators.get('bollinger')
+                price = indicators.get('latest_price')
+                ema50 = indicators.get('ema_50')
+
+                ema_dist_pct = None
+                if ema50 and price and ema50 != 0:
+                    ema_dist_pct = (price - ema50) / ema50 * 100
+
+                votes = dict(votes)  # não mutar o dicionário do chamador
+                votes['_raw_indicators'] = {
+                    'rsi_14': indicators.get('rsi_14'),
+                    'adx_14': indicators.get('adx_14'),
+                    'atr_14': indicators.get('atr_14'),
+                    'pct_b': _calc_pct_b(bollinger, price),
+                    'ema_dist_pct': ema_dist_pct,
+                    'momentum_10': indicators.get('momentum_10'),
+                    'macd_line': indicators.get('macd_line'),
+                    'signal_line': indicators.get('signal_line'),
+                }
+
             db_path = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
             conn = sqlite3.connect(db_path, timeout=10)
             conn.execute(
