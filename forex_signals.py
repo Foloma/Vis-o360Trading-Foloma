@@ -8,7 +8,6 @@ from forex_scorer import ForexScorer
 
 logger = logging.getLogger(__name__)
 
-# Limiar mínimo de confiança para expor um sinal ao utilizador na UI.
 MIN_UI_CONFIDENCE = int(os.environ.get('MIN_UI_CONFIDENCE', '80'))
 
 
@@ -32,22 +31,13 @@ class ForexSignals:
     Deduplicação de log do ensemble (10.1, 11.1):
       _active_since[(symbol, direction)] → timestamp de início do sinal
       _last_logged[(symbol, direction, active_since)] → último active_duration_seconds gravado
-      Regra de gravação:
-        - Se é a primeira vez que este sinal é registado (last_logged_secs < 0),
-          grava imediatamente. Isto inclui sinais recuperados após restart.
-        - Caso contrário, só grava se passaram >= 900s desde o último registo.
-      Evita a duplicação por `% 900 < 90` e o buraco em restart.
 
     Throttling das fontes secundárias (10.2, 11.2):
       _should_log_secondary(symbol, source, cond_key) bloqueia logs repetidos
       da mesma condição estrutural durante 900s.
-      cond_key é apenas a direção ('BUY'/'SELL'), sem o score — caso contrário
-      a oscilação do score a cada ciclo gerava uma chave nova e nunca travava.
 
     NOTA (12.1): _clear_active_since NÃO limpa _last_secondary_log.
-      Os dois mecanismos são independentes: o throttle das fontes secundárias
-      gere-se pelo seu próprio intervalo de 900s, independentemente do estado
-      do ensemble.
+      Os dois mecanismos são independentes.
 
     Filtro de UI:
       get_all_signals() só devolve sinais com confidence >= MIN_UI_CONFIDENCE.
@@ -66,23 +56,16 @@ class ForexSignals:
         self._active_since = {}
         self._last_logged = {}
 
-        # Throttling para fontes secundárias
-        # Chave: (symbol, source, direction) → timestamp do último log
         self._last_secondary_log = {}
         self._secondary_log_interval = 900
 
-    # -----------------------------------------------------------------
-    # Limpeza de estado por símbolo
-    # -----------------------------------------------------------------
     def _clear_active_since(self, symbol):
         """
         Limpa o estado do ensemble para um símbolo.
-        NOTA (12.1): NÃO limpa _last_secondary_log — esse throttle é independente
-        e gere-se pelo seu próprio intervalo de 900s, não pelo estado do ensemble.
+        NOTA (12.1): NÃO limpa _last_secondary_log — esse throttle é independente.
         """
         self._active_since = {k: v for k, v in self._active_since.items() if k[0] != symbol}
         self._last_logged = {k: v for k, v in self._last_logged.items() if k[0] != symbol}
-        # _last_secondary_log NÃO é limpo aqui intencionalmente (fix 12.1)
 
     def _should_log_secondary(self, symbol, source, direction):
         """Throttle por (symbol, source, direction). Máximo 1 log/900s."""
@@ -94,9 +77,6 @@ class ForexSignals:
             return True
         return False
 
-    # -----------------------------------------------------------------
-    # Histórico persistente
-    # -----------------------------------------------------------------
     def _get_persisted_active_since(self, symbol, direction):
         try:
             import sqlite3
@@ -113,9 +93,6 @@ class ForexSignals:
             logger.error(f"Erro ao consultar histórico de persistência: {e}")
             return None
 
-    # -----------------------------------------------------------------
-    # Scorer legacy
-    # -----------------------------------------------------------------
     def get_signal(self, symbol):
         ind = self._indicators.get_all_indicators(symbol, use_candles=True)
         if not ind.get('latest_price'):
@@ -134,7 +111,6 @@ class ForexSignals:
             reason_parts.append("MACD confirma")
         reason = f"Score {total}/100: " + ", ".join(reason_parts) if reason_parts else f"Score {total}/100"
 
-        # Throttle por direção (sem o score, que oscila) - fix 11.2
         if self._should_log_secondary(symbol, 'scorer_legacy', direction):
             self._log_signal(symbol, direction, total, breakdown, ind, source='scorer_legacy')
 
@@ -147,9 +123,6 @@ class ForexSignals:
             'type': 'scoring'
         }
 
-    # -----------------------------------------------------------------
-    # Sinal multi-timeframe
-    # -----------------------------------------------------------------
     def get_signal_multi_timeframe(self, symbol):
         ema_h1 = self._indicators.ema(symbol, period=20, granularity=3600)
         price = self._data.get_latest_price(symbol)
@@ -181,7 +154,6 @@ class ForexSignals:
 
         adjusted_confidence, risk_reasons = self._risk.evaluate(ind_15, consensus)
 
-        # --- Rastreamento de persistência ---
         key = (symbol, direction)
         now = time.time()
 
@@ -198,7 +170,6 @@ class ForexSignals:
         active_duration_seconds = round(now - active_since)
         is_new_signal = active_duration_seconds < 120
 
-        # --- Deduplicação (11.1: primeiro log independe de is_new_signal) ---
         log_key = (symbol, direction, active_since)
         last_logged_secs = self._last_logged.get(log_key, -1)
 
@@ -246,9 +217,6 @@ class ForexSignals:
             'is_new_signal': is_new_signal,
         }, None
 
-    # -----------------------------------------------------------------
-    # Liquidação
-    # -----------------------------------------------------------------
     def get_liquidation_signal(self, symbol, granularity=900):
         ind = self._indicators.get_all_indicators(symbol, use_candles=True, granularity=granularity)
         if not ind['latest_price'] or not ind['bollinger']:
@@ -266,7 +234,6 @@ class ForexSignals:
 
                 if dist_lower < -0.05 and rsi < 20:
                     confidence = min(90, 50 + int(abs(dist_lower) * 100))
-                    # Throttle por direção (fix 11.2)
                     if self._should_log_secondary(symbol, 'liquidation', 'BUY'):
                         self._log_signal(symbol, 'BUY', confidence, {}, ind, source='liquidation')
                     return {
@@ -280,7 +247,6 @@ class ForexSignals:
 
                 if dist_upper > 0.05 and rsi > 80:
                     confidence = min(90, 50 + int(dist_upper * 100))
-                    # Throttle por direção (fix 11.2)
                     if self._should_log_secondary(symbol, 'liquidation', 'SELL'):
                         self._log_signal(symbol, 'SELL', confidence, {}, ind, source='liquidation')
                     return {
@@ -293,9 +259,6 @@ class ForexSignals:
                     }
         return None
 
-    # -----------------------------------------------------------------
-    # Gravação de sinal
-    # -----------------------------------------------------------------
     def _log_signal(self, symbol, direction, confidence, votes, indicators, source='ensemble', active_duration_seconds=None):
         try:
             import sqlite3, json, os
@@ -335,11 +298,7 @@ class ForexSignals:
         except Exception as e:
             logger.error(f"Erro ao registar sinal no log: {e}")
 
-    # -----------------------------------------------------------------
-    # Sinal bloqueado pelo MTF
-    # -----------------------------------------------------------------
     def _log_blocked_by_mtf(self, symbol, scorer_direction, scorer_total, mtf_reason, ind):
-        # Throttle por direção (fix 11.2)
         if not self._should_log_secondary(symbol, 'blocked_by_mtf', scorer_direction):
             return
         try:
@@ -359,9 +318,6 @@ class ForexSignals:
         except Exception as e:
             logger.error(f"Erro ao registar sinal bloqueado: {e}")
 
-    # -----------------------------------------------------------------
-    # Todos os sinais
-    # -----------------------------------------------------------------
     def get_all_signals(self):
         from forex_data import FOREX_SYMBOLS
 
