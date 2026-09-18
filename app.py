@@ -43,7 +43,8 @@ def send_reset_email(email, reset_token):
             logger.error(f"Falha ao enviar email para {email}: {e}")
             return False
     else:
-        logger.info(f"EMAIL NÃO CONFIGURADO – link de recuperação para {email}: {reset_url}")
+        # FIX 14.2: NUNCA imprimir o URL de reset no log.
+        logger.warning(f"EMAIL NÃO CONFIGURADO – pedido de reset de senha para {email} foi ignorado.")
         return False
 
 # ==================== ENCRIPTAÇÃO DE TOKENS ====================
@@ -132,13 +133,11 @@ def init_db():
         actual_profit REAL
     )''')
 
-    # NOVA COLUNA: duração ativa em segundos (para sinais Forex)
     try:
         c.execute("ALTER TABLE forex_signal_log ADD COLUMN active_duration_seconds INTEGER")
     except sqlite3.OperationalError:
         pass
 
-    # NOVA TABELA: registo contínuo de dígitos para análise de dependência serial
     c.execute('''CREATE TABLE IF NOT EXISTS digit_stream_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         symbol TEXT,
@@ -169,43 +168,14 @@ init_db()
 
 OAUTH_STATE_TTL = 900
 
-# ==================== NOVA FUNÇÃO: avaliação automática de sinais Forex ====================
-def evaluate_pending_forex_signals():
-    try:
-        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-        cutoff = time.time() - 900
-        rows = conn.execute(
-            "SELECT id, symbol, direction, price_at_signal FROM forex_signal_log "
-            "WHERE evaluated=0 AND timestamp < ?", (cutoff,)
-        ).fetchall()
-        if not rows:
-            conn.close()
-            return
+# ==================== CACHE DE SINAIS FOREX (fix 15.2) ====================
+# Cache em memória partilhada por worker. Populada pelo loop de background,
+# lida pela rota /api/forex/signals. Impede o recálculo por utilizador/pedido.
+_forex_signals_cache = {'signals': [], 'timestamp': 0}
+_forex_signals_cache_lock = threading.Lock()
 
-        forex_mgr = None
-        with sessions_lock:
-            for uid, sess in sessions.items():
-                fm = sess.get('forex_data')
-                if fm:
-                    forex_mgr = fm
-                    break
-
-        for sid, symbol, direction, price_then in rows:
-            price_now = None
-            if forex_mgr:
-                price_now = forex_mgr.get_latest_price(symbol)
-            if price_now is None:
-                continue
-            moved_up = price_now > price_then
-            outcome = 'win' if (direction == 'BUY') == moved_up else 'loss'
-            conn.execute(
-                "UPDATE forex_signal_log SET evaluated=1, outcome=?, price_after=?, evaluated_at=? WHERE id=?",
-                (outcome, price_now, time.time(), sid)
-            )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Erro ao avaliar sinais Forex pendentes: {e}")
+# ==================== AVALIAÇÃO DE SINAIS FOREX ====================
+# FIX P0: evaluate_pending_forex_signals() foi REMOVIDA. Avaliação delegada ao fix_outcome.py.
 
 def _cleanup_loop():
     while True:
@@ -229,7 +199,7 @@ def _cleanup_loop():
                         to_remove.append(uid)
                 for uid in to_remove:
                     sessions.pop(uid, None)
-            evaluate_pending_forex_signals()
+            logger.info("Limpeza periódica concluída. Avaliação de sinais Forex delegada ao cron externo.")
         except Exception as e:
             logger.error(f"Erro na limpeza periódica: {e}")
 
@@ -255,18 +225,26 @@ def _refresh_forex_candles_loop():
 
 threading.Thread(target=_refresh_forex_candles_loop, daemon=True).start()
 
-# ==================== NOVA THREAD: geração contínua de sinais Forex ====================
+# ==================== THREAD: geração contínua de sinais Forex ====================
+# FIX P0 (14.1): geração apenas UMA vez por ciclo (primeira sessão autorizada).
+# FIX P0 (15.2): resultado é guardado em cache partilhada, em vez de recalculado por rota.
 def _generate_forex_signals_loop():
     while True:
         time.sleep(90)
         try:
+            forex_signals = None
             with sessions_lock:
-                sessions_snapshot = list(sessions.items())
-            for uid, sess in sessions_snapshot:
-                forex_signals = sess.get('forex_signals')
-                client = sess.get('client')
-                if forex_signals and client and client.authorized:
-                    forex_signals.get_all_signals()
+                for sess in sessions.values():
+                    client = sess.get('client')
+                    if client and client.authorized:
+                        forex_signals = sess.get('forex_signals')
+                        break
+
+            if forex_signals:
+                signals = forex_signals.get_all_signals()
+                with _forex_signals_cache_lock:
+                    _forex_signals_cache['signals'] = signals
+                    _forex_signals_cache['timestamp'] = time.time()
         except Exception as e:
             logger.error(f"Erro no loop de geração de sinais Forex: {e}")
 
@@ -1295,7 +1273,6 @@ def debug():
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
 
-# ==================== NOVA ROTA: DEBUG DE DÍGITOS ====================
 @app.route('/api/debug/digits')
 @require_admin
 def debug_digits():
@@ -1766,11 +1743,11 @@ def credit_referral_commission(user_email, amount):
 @app.route('/api/forex/signals')
 @require_auth
 def forex_signals():
-    sess = get_session(session['user_id'])
-    if not sess or not sess.get('forex_signals'):
-        return jsonify({'error': 'Módulo Forex indisponível'}), 503
-    signals = sess['forex_signals'].get_all_signals()
-    return jsonify({'signals': signals})
+    # FIX 15.2: Lê da cache partilhada em vez de recalcular por utilizador.
+    with _forex_signals_cache_lock:
+        signals = list(_forex_signals_cache.get('signals', []))
+        cache_age = time.time() - _forex_signals_cache.get('timestamp', 0)
+    return jsonify({'signals': signals, 'cache_age_seconds': round(cache_age, 1)})
 
 @app.route('/api/forex/status')
 @require_auth
