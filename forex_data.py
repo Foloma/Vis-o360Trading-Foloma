@@ -29,16 +29,18 @@ class ForexDataManager:
     Gere os dados de Forex recebidos via WebSocket da Deriv.
     Mantém um buffer de ticks para cada par e disponibiliza
     funções de acesso para o cálculo de indicadores.
-    Suporta múltiplas granularidades (M1, M5, M15).
+    Suporta múltiplas granularidades (M1, M5, M15, M30, H1).
     """
 
     def __init__(self):
         self._ticks = {sym: deque(maxlen=MAX_TICKS_PER_SYMBOL) for sym in FOREX_SYMBOLS}
         self._candles = {
             sym: {
-                60: deque(maxlen=300),   # M1
-                300: deque(maxlen=300),  # M5
-                900: deque(maxlen=300)   # M15
+                60: deque(maxlen=300),    # M1
+                300: deque(maxlen=300),   # M5
+                900: deque(maxlen=300),   # M15
+                1800: deque(maxlen=300),  # M30
+                3600: deque(maxlen=300)   # H1
             } for sym in FOREX_SYMBOLS
         }
         self._lock = threading.RLock()
@@ -192,8 +194,9 @@ class ForexDataManager:
             if ticks:
                 return ticks[-1]['price']
 
-            # 2. Fallback: último fecho das velas M1 → M5 → M15
-            for granularity in [60, 300, 900]:
+            # 2. Fallback: último fecho das velas M1 → M5 → M15 → M30 → H1
+            # FIX: incluir 1800 (M30) e 3600 (H1) no fallback
+            for granularity in [60, 300, 900, 1800, 3600]:
                 candles = self._candles.get(symbol, {}).get(granularity, [])
                 if candles:
                     return candles[-1]['close']
@@ -205,6 +208,9 @@ class ForexDataManager:
         Pede velas (candles) à Deriv para um par Forex.
         Regista o req_id para associar a resposta futura.
         """
+        # FIX: limpar pedidos órfãos antes de registar um novo
+        self._cleanup_orphaned_requests()
+
         symbol = self._normalize_symbol(symbol)
         if symbol not in FOREX_SYMBOLS:
             logger.error(f"Símbolo Forex inválido: {symbol}")
@@ -258,7 +264,9 @@ class ForexDataManager:
                         'tick_count': len(self._ticks[sym]),
                         'candles_m1': len(self._candles[sym].get(60, [])),
                         'candles_m5': len(self._candles[sym].get(300, [])),
-                        'candles_m15': len(self._candles[sym].get(900, []))
+                        'candles_m15': len(self._candles[sym].get(900, [])),
+                        'candles_m30': len(self._candles[sym].get(1800, [])),
+                        'candles_h1': len(self._candles[sym].get(3600, []))
                     }
                     for sym, name in FOREX_SYMBOLS.items()
                 }
