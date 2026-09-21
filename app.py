@@ -215,16 +215,25 @@ def _refresh_forex_candles_loop():
             for uid, sess in sessions_snapshot:
                 forex_mgr = sess.get('forex_data')
                 client = sess.get('client')
-                if forex_mgr and client and client.authorized:
-                    for symbol in FOREX_SYMBOLS:
-                        forex_mgr.request_candles(symbol, granularity=900, count=250)
-                        forex_mgr.request_candles(symbol, granularity=1800, count=100)
-                        forex_mgr.request_candles(symbol, granularity=3600, count=30)
+                if not (forex_mgr and client and client.authorized):
+                    continue
+
+                # Forçar subscrição de ticks Forex se ainda não foi feita nesta sessão
+                missing_symbols = [s for s in FOREX_SYMBOLS if s not in client.subscribed_symbols]
+                if missing_symbols:
+                    logger.info(f"🔁 Refresco: a forçar subscrição de {len(missing_symbols)} símbolos Forex ausentes")
+                    forex_mgr.subscribe_all()
+
+                # Pedir velas com pausa entre pedidos e count adequado
+                for symbol in FOREX_SYMBOLS:
+                    forex_mgr.request_candles(symbol, granularity=900, count=250)
+                    time.sleep(0.15)
+                    forex_mgr.request_candles(symbol, granularity=3600, count=200)
+                    time.sleep(0.15)
         except Exception as e:
             logger.error(f"Erro no refresco periódico de candles Forex: {e}")
 
 threading.Thread(target=_refresh_forex_candles_loop, daemon=True).start()
-
 # ==================== THREAD: geração contínua de sinais Forex ====================
 # FIX P0 (14.1): geração apenas UMA vez por ciclo (primeira sessão autorizada).
 # FIX P0 (15.2): resultado é guardado em cache partilhada, em vez de recalculado por rota.
