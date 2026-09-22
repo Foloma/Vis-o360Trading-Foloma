@@ -2121,12 +2121,17 @@ def withdraw():
     try:
         d = request.json
         amt = float(d.get('amount', 0))
-        ...
-        return jsonify({'status': 'pending', ...})
+        if amt <= 0:
+            return jsonify({'error': 'Valor inválido'}), 400
+        sess = get_session(session['user_id'])
+        if not sess or not sess['client'].authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        if amt > sess['client'].balance:
+            return jsonify({'error': 'Saldo insuficiente'}), 400
+        return jsonify({'status': 'pending', ...})   ← AQUI ESTÁ O ERRO
     except Exception:
         logger.exception("Erro levantamento")
         return jsonify({'error': 'Erro interno'}), 500
-
 # <<<<<<<<<< AQUI ADICIONAS O BLOCO NOVO >>>>>>>>>>
 @app.route('/api/forex/signals/recent', methods=['GET'])
 @require_auth
@@ -2172,13 +2177,70 @@ def forex_signals_recent():
             'confidence': confidence,
             'price_at_signal': price,
             'timestamp': ts,
+@app.route('/api/payment/withdraw', methods=['POST'])
+@require_auth
+def withdraw():
+    try:
+        d = request.json
+        amt = float(d.get('amount', 0))
+        if amt <= 0:
+            return jsonify({'error': 'Valor inválido'}), 400
+        sess = get_session(session['user_id'])
+        if not sess or not sess['client'].authorized:
+            return jsonify({'error': 'Não conectado'}), 400
+        if amt > sess['client'].balance:
+            return jsonify({'error': 'Saldo insuficiente'}), 400
+        return jsonify({'status': 'pending', 'message': f'Saque ${amt} solicitado.', 'amount': amt})
+    except Exception:
+        logger.exception("Erro levantamento")
+        return jsonify({'error': 'Erro interno'}), 500
+
+
+@app.route('/api/forex/signals/recent', methods=['GET'])
+@require_auth
+def forex_signals_recent():
+    """Lê da DB os sinais ensemble com confidence >= 80 das últimas 24h."""
+    try:
+        hours = int(request.args.get('hours', 24))
+    except (ValueError, TypeError):
+        hours = 24
+    hours = max(1, min(hours, 168))
+    try:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+        cutoff = time.time() - (hours * 3600)
+        rows = conn.execute(
+            "SELECT id, symbol, direction, confidence, price_at_signal, timestamp, "
+            "suggested_duration_minutes, active_duration_seconds "
+            "FROM forex_signal_log "
+            "WHERE strategy_used='ensemble' AND confidence >= 80 AND timestamp >= ? "
+            "ORDER BY timestamp DESC LIMIT 100",
+            (cutoff,)
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao ler sinais recentes: {e}")
+        return jsonify({'error': 'Erro ao consultar histórico'}), 500
+    now = time.time()
+    signals = []
+    for row in rows:
+        id_, symbol, direction, confidence, price, ts, duration, active_secs = row
+        age_seconds = int(now - ts)
+        age_minutes = age_seconds // 60
+        suggested_min = duration or 15
+        is_operable = age_minutes < suggested_min
+        signals.append({
+            'id': id_,
+            'symbol': symbol,
+            'direction': direction,
+            'confidence': confidence,
+            'price_at_signal': price,
+            'timestamp': ts,
             'age_minutes': age_minutes,
             'suggested_duration_minutes': suggested_min,
             'active_duration_seconds': active_secs,
             'is_operable': is_operable,
             'status': 'operável' if is_operable else 'histórico/referência',
         })
-
     operable_count = sum(1 for s in signals if s['is_operable'])
     return jsonify({
         'signals': signals,
