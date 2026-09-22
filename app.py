@@ -2177,6 +2177,7 @@ def forex_signals_recent():
             'confidence': confidence,
             'price_at_signal': price,
             'timestamp': ts,
+            
 @app.route('/api/payment/withdraw', methods=['POST'])
 @require_auth
 def withdraw():
@@ -2244,6 +2245,7 @@ def forex_signals_recent():
     operable_count = sum(1 for s in signals if s['is_operable'])
     return jsonify({
         'signals': signals,
+        
         'total': len(signals),
         'operable_count': operable_count,
         'hours_window': hours,
