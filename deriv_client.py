@@ -1007,12 +1007,13 @@ class DerivWebSocketClient:
         logger.info(f"📦 POC recebido: contract_id={cid}, is_sold=True")
 
         bp = float(c.get('buy_price', 0) or 0)
-        sp = float(c.get('sell_price', 0) or 0)
 
-        if sp is None:
+        raw_sp = c.get('sell_price')
+        if raw_sp is None:
             self._null_sell_price_contracts.add(cid)
             logger.warning(f"⚠️ POC ignorado: sell_price ausente para {cid} — a aguardar próximo POC")
             return
+        sp = float(raw_sp)
 
         if cid in self._null_sell_price_contracts:
             self._null_sell_price_contracts.discard(cid)
