@@ -43,7 +43,6 @@ def send_reset_email(email, reset_token):
             logger.error(f"Falha ao enviar email para {email}: {e}")
             return False
     else:
-        # FIX 14.2: NUNCA imprimir o URL de reset no log.
         logger.warning(f"EMAIL NÃO CONFIGURADO – pedido de reset de senha para {email} foi ignorado.")
         return False
 
@@ -113,39 +112,20 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS oauth_states (
         state_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, account_type TEXT DEFAULT 'demo',
         created_at REAL NOT NULL, used INTEGER DEFAULT 0, code_verifier TEXT)''')
-
     c.execute('''CREATE TABLE IF NOT EXISTS forex_signal_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT,
-        direction TEXT,
-        signal_type TEXT,
-        strategy_used TEXT,
-        confidence INTEGER,
-        breakdown_json TEXT,
-        suggested_duration_minutes INTEGER,
-        price_at_signal REAL,
-        timestamp REAL,
-        evaluated INTEGER DEFAULT 0,
-        outcome TEXT,
-        price_after REAL,
-        evaluated_at REAL,
-        was_executed INTEGER DEFAULT 0,
-        actual_profit REAL
-    )''')
-
+        symbol TEXT, direction TEXT, signal_type TEXT, strategy_used TEXT,
+        confidence INTEGER, breakdown_json TEXT, suggested_duration_minutes INTEGER,
+        price_at_signal REAL, timestamp REAL, evaluated INTEGER DEFAULT 0,
+        outcome TEXT, price_after REAL, evaluated_at REAL,
+        was_executed INTEGER DEFAULT 0, actual_profit REAL)''')
     try:
         c.execute("ALTER TABLE forex_signal_log ADD COLUMN active_duration_seconds INTEGER")
     except sqlite3.OperationalError:
         pass
-
     c.execute('''CREATE TABLE IF NOT EXISTS digit_stream_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT,
-        digit INTEGER,
-        tick_count INTEGER,
-        timestamp REAL
-    )''')
-
+        id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, digit INTEGER,
+        tick_count INTEGER, timestamp REAL)''')
     try:
         c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
     except sqlite3.OperationalError:
@@ -169,14 +149,10 @@ init_db()
 OAUTH_STATE_TTL = 900
 
 # ==================== CACHE DE SINAIS FOREX (fix 15.2) ====================
-# Cache em memória partilhada por worker. Populada pelo loop de background,
-# lida pela rota /api/forex/signals. Impede o recálculo por utilizador/pedido.
 _forex_signals_cache = {'signals': [], 'timestamp': 0}
 _forex_signals_cache_lock = threading.Lock()
 
-# ==================== AVALIAÇÃO DE SINAIS FOREX ====================
-# FIX P0: evaluate_pending_forex_signals() foi REMOVIDA. Avaliação delegada ao fix_outcome.py.
-
+# ==================== LIMPEZA PERIÓDICA ====================
 def _cleanup_loop():
     while True:
         time.sleep(3600)
@@ -199,13 +175,13 @@ def _cleanup_loop():
                         to_remove.append(uid)
                 for uid in to_remove:
                     sessions.pop(uid, None)
-            logger.info("Limpeza periódica concluída. Avaliação de sinais Forex delegada ao cron externo.")
+            logger.info("Limpeza periódica concluída.")
         except Exception as e:
             logger.error(f"Erro na limpeza periódica: {e}")
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
-# ==================== THREAD: refresco periódico de candles (intervalo 120s) ====================
+# ==================== REFRESCO DE CANDLES FOREX (120s) ====================
 def _refresh_forex_candles_loop():
     while True:
         time.sleep(120)
@@ -217,14 +193,10 @@ def _refresh_forex_candles_loop():
                 client = sess.get('client')
                 if not (forex_mgr and client and client.authorized):
                     continue
-
-                # Forçar subscrição de ticks Forex se ainda não foi feita nesta sessão
                 missing_symbols = [s for s in FOREX_SYMBOLS if s not in client.subscribed_symbols]
                 if missing_symbols:
                     logger.info(f"🔁 Refresco: a forçar subscrição de {len(missing_symbols)} símbolos Forex ausentes")
                     forex_mgr.subscribe_all()
-
-                # Pedir velas com pausa entre pedidos e count adequado
                 for symbol in FOREX_SYMBOLS:
                     forex_mgr.request_candles(symbol, granularity=900, count=250)
                     time.sleep(0.15)
@@ -234,9 +206,8 @@ def _refresh_forex_candles_loop():
             logger.error(f"Erro no refresco periódico de candles Forex: {e}")
 
 threading.Thread(target=_refresh_forex_candles_loop, daemon=True).start()
-# ==================== THREAD: geração contínua de sinais Forex ====================
-# FIX P0 (14.1): geração apenas UMA vez por ciclo (primeira sessão autorizada).
-# FIX P0 (15.2): resultado é guardado em cache partilhada, em vez de recalculado por rota.
+
+# ==================== GERAÇÃO DE SINAIS FOREX (singleton) ====================
 def _generate_forex_signals_loop():
     while True:
         time.sleep(90)
@@ -248,7 +219,6 @@ def _generate_forex_signals_loop():
                     if client and client.authorized:
                         forex_signals = sess.get('forex_signals')
                         break
-
             if forex_signals:
                 signals = forex_signals.get_all_signals()
                 with _forex_signals_cache_lock:
@@ -259,6 +229,7 @@ def _generate_forex_signals_loop():
 
 threading.Thread(target=_generate_forex_signals_loop, daemon=True).start()
 
+# ==================== CONFIGURAÇÃO DE MARKUP ====================
 def load_markup_from_db():
     try:
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
@@ -272,6 +243,7 @@ def load_markup_from_db():
 
 load_markup_from_db()
 
+# ==================== MIGRAÇÃO DE JSON ====================
 def migrate_from_json():
     json_path = os.path.join(DATA_PATH, 'users.json')
     if not os.path.exists(json_path):
@@ -429,7 +401,7 @@ class AuthService:
                 conn.close()
         return user
 
-# ==================== GESTOR DE SESSÃO WEBSOCKET ====================
+# ==================== GESTOR DE SESSÃO ====================
 sessions = {}
 sessions_lock = threading.RLock()
 connecting_lock = threading.Lock()
@@ -582,14 +554,12 @@ def _update_session_goals(sess, profit):
         return
     sg = sess['session_goals']
     sg['session_pnl'] += profit
-
     if sg.get('profit_target', 0) > 0 and sg['session_pnl'] >= sg['profit_target']:
         sg['goals_reached'] = True
         sg['goal_type'] = 'profit'
         sg['message'] = f"🎯 Meta de lucro atingida: +${sg['session_pnl']:.2f}"
         logger.info(f"Meta de lucro atingida para sessão: {sg['message']}")
         return
-
     if sg.get('stop_loss', 0) > 0 and sg['session_pnl'] <= -sg['stop_loss']:
         sg['goals_reached'] = True
         sg['goal_type'] = 'loss'
@@ -651,13 +621,8 @@ def create_session(user_id, user, force=False, ws_url_override=None):
 
         new_sess = {}
         new_sess['session_goals'] = {
-            'entry_amount': 0.0,
-            'profit_target': 0.0,
-            'stop_loss': 0.0,
-            'session_pnl': 0.0,
-            'goals_reached': False,
-            'goal_type': None,
-            'message': ''
+            'entry_amount': 0.0, 'profit_target': 0.0, 'stop_loss': 0.0,
+            'session_pnl': 0.0, 'goals_reached': False, 'goal_type': None, 'message': ''
         }
 
         session_ref = {'sess': new_sess}
@@ -685,7 +650,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 if strategy.is_global_stop:
                     bot.reset_martingale()
                     _save_martingale_state(user_id, bot)
-
                 _update_session_goals(session_ref['sess'], profit)
             except Exception as e:
                 logger.error(f"Callback de trade falhou: {e}")
@@ -696,7 +660,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 strategy.on_tick(tick)
                 pending_parity, pending_differ = strategy.get_pending_bets()
                 parity_ready, differ_ready = strategy._check_pending_bets()
-
                 if parity_ready and pending_parity:
                     direction = pending_parity['direction']
                     amt = pending_parity['amount']
@@ -709,7 +672,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                         credit_referral_commission(user_email, amt)
                     with strategy._lock:
                         strategy._pending_parity_bet = None
-
                 if differ_ready and pending_differ:
                     digit = pending_differ['digit']
                     amt = pending_differ['amount']
@@ -721,7 +683,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                         credit_referral_commission(user_email, amt)
                     with strategy._lock:
                         strategy._pending_differ_bet = None
-
             if os.environ.get('ENABLE_DIGIT_STREAM_LOG', 'false').lower() == 'true':
                 try:
                     current_digit = analyzer.get_current_digit()
@@ -735,7 +696,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                         conn.close()
                 except Exception as e:
                     logger.error(f"Erro ao registar digit_stream_log: {e}")
-
             forex_mgr.on_tick(tick)
 
         client.on_tick_callback = tick_callback
@@ -840,7 +800,7 @@ def get_session(user_id):
     with sessions_lock:
         return sessions.get(user_id)
 
-# ==================== INICIALIZAÇÃO DO FLASK ====================
+# ==================== FLASK ====================
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
@@ -1154,7 +1114,7 @@ def switch_account():
         sess['client'].currency = currency
         sess['trading_bot'].balance = balance
         sess['trading_bot'].currency = currency
-    return jsonify({'status': 'connecting', 'message': f'Conta {acc_type} ativada. A aguardar conexão...', 'account_type': acc_type})
+    return jsonify({'status': 'connecting', 'message': f'Conta {acc_type} ativada.', 'account_type': acc_type})
 
 @app.route('/api/session-goals', methods=['POST'])
 @require_auth
@@ -1166,22 +1126,14 @@ def set_session_goals():
         stop_loss = float(d.get('stop_loss', 0))
     except (ValueError, TypeError):
         return jsonify({'error': 'Valores inválidos'}), 400
-
     if entry <= 0 or profit_target < 0 or stop_loss < 0:
-        return jsonify({'error': 'Valores devem ser positivos (meta/stop podem ser 0 para desativar)'}), 400
-
+        return jsonify({'error': 'Valores devem ser positivos'}), 400
     sess = get_session(session['user_id'])
     if not sess:
         return jsonify({'error': 'Sessão não encontrada'}), 400
-
     sess['session_goals'] = {
-        'entry_amount': entry,
-        'profit_target': profit_target,
-        'stop_loss': stop_loss,
-        'session_pnl': 0.0,
-        'goals_reached': False,
-        'goal_type': None,
-        'message': ''
+        'entry_amount': entry, 'profit_target': profit_target, 'stop_loss': stop_loss,
+        'session_pnl': 0.0, 'goals_reached': False, 'goal_type': None, 'message': ''
     }
     logger.info(f"Metas de sessão configuradas: entrada={entry}, meta={profit_target}, stop={stop_loss}")
     return jsonify({'status': 'ok', 'session_goals': sess['session_goals']})
@@ -1291,7 +1243,6 @@ def debug_digits():
     analyzer = sess['digit_analyzer']
     return jsonify({'digits': analyzer.get_recent_digits()})
 
-# ==================== OAUTH PKCE + OTP ====================
 @app.route('/api/auth/deriv_oauth_url')
 @require_auth
 def deriv_oauth_url():
@@ -1407,7 +1358,6 @@ def oauth_callback():
 <html><head><meta charset="utf-8"><title>OAuth</title></head>
 <body><script>localStorage.setItem('oauth_result','connected');localStorage.setItem('oauth_ts',Date.now().toString());window.close();</script></body></html>""")
 
-# ==================== VALIDAÇÃO DE AMOUNT ====================
 def _validate_amount(amount):
     try:
         amt = float(amount)
@@ -1417,7 +1367,6 @@ def _validate_amount(amount):
         return None, 'Valor entre 0.35 e 100'
     return amt, None
 
-# ==================== TRADING SINTÉTICOS ====================
 @app.route('/api/trade/digit', methods=['POST'])
 @require_auth
 @limit_if_available("20 per minute")
@@ -1430,7 +1379,7 @@ def trade_digit():
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
     if bot.stop_loss_active:
-        return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+        return jsonify({'error': '🛑 Stop-loss activo.'}), 400
     strategy = sess.get('strategy')
     if not strategy:
         return jsonify({'error': 'Estratégia indisponível'}), 400
@@ -1439,27 +1388,21 @@ def trade_digit():
         return jsonify({'error': 'Trade pendente, aguarde'}), 400
     if client.active_trades:
         return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
-
     analyzer = sess['digit_analyzer']
     current_digit = analyzer.get_current_digit()
-
     direction = request.json.get('direction')
     if direction not in ('odd', 'even'):
         return jsonify({'error': 'Direção inválida'}), 400
-
     amt, err = _validate_amount(request.json.get('amount', 0.35))
     if err:
         return jsonify({'error': err}), 400
-
     bot._last_click_tick = current_digit
-
     ok, msg = strategy.schedule_parity_bet(direction, amt)
     if not ok:
         return jsonify({'error': msg}), 400
-
     return jsonify({
         'status': 'ok',
-        'message': f'📅 Aposta {direction} agendada para o tick {strategy.analyzer.get_tick_count() + strategy.analyzer.get_ticks_remaining()}',
+        'message': f'📅 Aposta {direction} agendada',
         'digit_used': current_digit,
         'direction': direction
     })
@@ -1476,7 +1419,7 @@ def trade_differ():
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
     if bot.stop_loss_active:
-        return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+        return jsonify({'error': '🛑 Stop-loss activo.'}), 400
     strategy = sess.get('strategy')
     if not strategy:
         return jsonify({'error': 'Estratégia indisponível'}), 400
@@ -1485,23 +1428,17 @@ def trade_differ():
         return jsonify({'error': 'Trade pendente, aguarde'}), 400
     if client.active_trades:
         return jsonify({'error': 'Contrato ativo, aguarde resultado'}), 400
-
     analyzer = sess['digit_analyzer']
-
     differ_available, differ_digit = strategy._peek_differ()
     if not differ_available or differ_digit is None:
         return jsonify({'error': 'Nenhum sinal DIFFER disponível no momento'}), 400
-
     amt, err = _validate_amount(request.json.get('amount', 0.35))
     if err:
         return jsonify({'error': err}), 400
-
     bot._last_click_tick = analyzer.get_current_digit()
-
     ok, msg = strategy.schedule_differ_bet(differ_digit, amt)
     if not ok:
         return jsonify({'error': msg}), 400
-
     return jsonify({
         'status': 'ok',
         'message': f'📅 Aposta DIFFER no dígito {differ_digit} agendada',
@@ -1521,7 +1458,7 @@ def trade_matches():
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
     if bot.stop_loss_active:
-        return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+        return jsonify({'error': '🛑 Stop-loss activo.'}), 400
     strategy = sess.get('strategy')
     if not strategy or strategy._trade_locked:
         return jsonify({'error': 'Trade em curso — aguarde'}), 400
@@ -1539,7 +1476,7 @@ def trade_matches():
     analyzer = sess['digit_analyzer']
     tr = analyzer.get_ticks_remaining()
     if tr < 3:
-        return jsonify({'error': f'⏳ Fim do ciclo ({tr} ticks). Aguarde o próximo.'}), 400
+        return jsonify({'error': f'⏳ Fim do ciclo ({tr} ticks). Aguarde.'}), 400
     sess['trading_bot']._last_click_tick = analyzer.get_current_digit()
     ok = sess['client'].place_matches_trade(digit, amt)
     if ok:
@@ -1560,7 +1497,7 @@ def trade_zscore():
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
     if bot.stop_loss_active:
-        return jsonify({'error': '🛑 Stop-loss activo. Limite diário atingido.'}), 400
+        return jsonify({'error': '🛑 Stop-loss activo.'}), 400
     strategy = sess.get('strategy')
     if not strategy or strategy._trade_locked:
         return jsonify({'error': 'Trade em curso — aguarde'}), 400
@@ -1578,7 +1515,7 @@ def trade_zscore():
     analyzer = sess['digit_analyzer']
     tr = analyzer.get_ticks_remaining()
     if tr < 3:
-        return jsonify({'error': f'⏳ Fim do ciclo ({tr} ticks). Aguarde o próximo.'}), 400
+        return jsonify({'error': f'⏳ Fim do ciclo ({tr} ticks). Aguarde.'}), 400
     sess['trading_bot']._last_click_tick = analyzer.get_current_digit()
     if action == 'DIFFER':
         ok = sess['client'].place_differ_trade(digit, amt)
@@ -1670,7 +1607,7 @@ def martingale_apply():
     bot = sess['trading_bot']
     strategy = sess.get('strategy') or getattr(bot, 'strategy', None)
     if strategy and strategy.is_global_stop:
-        return jsonify({'error': '🛑 STOP GLOBAL ativo. Aguarde 3 minutos antes de aplicar Martingale.'}), 400
+        return jsonify({'error': '🛑 STOP GLOBAL ativo.'}), 400
     ok, res = bot.apply_martingale_after_loss(la, user_max_steps=user_max)
     if ok:
         _save_martingale_state(session['user_id'], bot)
@@ -1752,11 +1689,49 @@ def credit_referral_commission(user_email, amount):
 @app.route('/api/forex/signals')
 @require_auth
 def forex_signals():
-    # FIX 15.2: Lê da cache partilhada em vez de recalcular por utilizador.
     with _forex_signals_cache_lock:
         signals = list(_forex_signals_cache.get('signals', []))
         cache_age = time.time() - _forex_signals_cache.get('timestamp', 0)
     return jsonify({'signals': signals, 'cache_age_seconds': round(cache_age, 1)})
+
+@app.route('/api/forex/signals/recent', methods=['GET'])
+@require_auth
+def forex_signals_recent():
+    try:
+        hours = int(request.args.get('hours', 24))
+    except (ValueError, TypeError):
+        hours = 24
+    hours = max(1, min(hours, 168))
+    try:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+        cutoff = time.time() - (hours * 3600)
+        rows = conn.execute(
+            "SELECT id, symbol, direction, confidence, price_at_signal, timestamp, suggested_duration_minutes, active_duration_seconds FROM forex_signal_log WHERE strategy_used='ensemble' AND confidence >= 80 AND timestamp >= ? ORDER BY timestamp DESC LIMIT 100",
+            (cutoff,)
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao ler sinais recentes: {e}")
+        return jsonify({'error': 'Erro ao consultar histórico'}), 500
+    now = time.time()
+    signals = []
+    for row in rows:
+        id_, symbol, direction, confidence, price, ts, duration, active_secs = row
+        age_minutes = int((now - ts) // 60)
+        suggested_min = duration or 15
+        is_operable = age_minutes < suggested_min
+        signals.append({
+            'id': id_, 'symbol': symbol, 'direction': direction, 'confidence': confidence,
+            'price_at_signal': price, 'timestamp': ts, 'age_minutes': age_minutes,
+            'suggested_duration_minutes': suggested_min, 'active_duration_seconds': active_secs,
+            'is_operable': is_operable,
+            'status': 'operavel' if is_operable else 'historico',
+        })
+    operable_count = sum(1 for s in signals if s['is_operable'])
+    return jsonify({
+        'signals': signals, 'total': len(signals), 'operable_count': operable_count,
+        'hours_window': hours, 'server_time': now,
+    })
 
 @app.route('/api/forex/status')
 @require_auth
@@ -1808,36 +1783,25 @@ def forex_contracts_for(symbol):
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado à Deriv'}), 400
-
     client = sess['client']
     durations = client.request_contracts_for(symbol)
     if durations is None:
-        return jsonify({'error': 'Não foi possível obter as durações para este símbolo'}), 503
-
+        return jsonify({'error': 'Não foi possível obter as durações'}), 503
     result = {}
     for ctype, limits in durations.items():
         min_s = _duration_str_to_seconds(limits.get('min'))
         max_s = _duration_str_to_seconds(limits.get('max'))
         if min_s is None or max_s is None:
             continue
-
         min_m = max(1, -(-min_s // 60))
         max_m = max_s // 60
         if max_m < min_m:
             continue
-
         values = list(range(min_m, min(max_m, 60) + 1))
         for extra in (90, 120, 240, 480, 1440):
             if min_m <= extra <= max_m and extra not in values:
                 values.append(extra)
-
-        result[ctype] = {
-            'unit': 'm',
-            'min': limits['min'],
-            'max': limits['max'],
-            'allowed_values': values
-        }
-
+        result[ctype] = {'unit': 'm', 'min': limits['min'], 'max': limits['max'], 'allowed_values': values}
     return jsonify({'symbol': symbol, 'durations': result})
 
 @app.route('/api/forex/trade', methods=['POST'])
@@ -1847,7 +1811,6 @@ def forex_trade():
     d = request.json
     symbol = d.get('symbol', '').strip()
     direction = d.get('direction', '').strip().upper()
-
     amount_raw = d.get('amount')
     if amount_raw is None:
         return jsonify({'error': 'Valor da aposta em falta'}), 400
@@ -1855,25 +1818,21 @@ def forex_trade():
         amount = float(amount_raw)
     except (TypeError, ValueError):
         return jsonify({'error': 'Valor da aposta inválido'}), 400
-
     duration_raw = d.get('duration', 1)
     try:
         duration = int(duration_raw)
     except (TypeError, ValueError):
         duration = 1
-
     if direction not in ('BUY', 'SELL'):
         return jsonify({'error': 'Direção inválida. Use BUY ou SELL.'}), 400
     if amount < 0.35 or amount > 100:
         return jsonify({'error': 'Valor entre 0.35 e 100'}), 400
-
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado à Deriv'}), 400
     block_msg = _session_goals_block(sess)
     if block_msg:
         return jsonify({'error': block_msg}), 400
-
     client = sess['client']
     if client.pending_trade is not None:
         status = client.get_pending_trade_status()
@@ -1881,18 +1840,14 @@ def forex_trade():
             client.pending_trade = None
         else:
             return jsonify({'error': 'Já existe um trade pendente'}), 400
-
     from forex_data import FOREX_SYMBOLS
     if symbol not in FOREX_SYMBOLS:
         return jsonify({'error': f'Símbolo inválido. Use: {list(FOREX_SYMBOLS.keys())}'}), 400
-
     if client.balance and client.balance < amount:
         return jsonify({'error': 'Saldo insuficiente'}), 400
-
     ok, msg = client.place_forex_trade(symbol, direction, amount, duration)
     if not ok:
         return jsonify({'error': msg or 'Falha ao enviar ordem'}), 400
-
     deadline = time.time() + 5
     while time.time() < deadline:
         status = client.get_pending_trade_status()
@@ -1904,7 +1859,6 @@ def forex_trade():
             client.pending_trade = None
             return jsonify({'error': f'Proposta rejeitada: {err_msg}'}), 400
         time.sleep(0.2)
-
     return jsonify({'error': 'Proposta demorou muito. Verifique o estado na Deriv.'}), 500
 
 @app.route('/api/forex/assertividade')
@@ -1920,10 +1874,8 @@ def forex_assertividade():
     q += " ORDER BY id DESC LIMIT 50"
     rows = conn.execute(q, params).fetchall()
     conn.close()
-
     if len(rows) < 15:
         return jsonify({'assertividade': None, 'amostra': len(rows), 'message': 'Amostra insuficiente (mínimo 15)'})
-
     wins = sum(1 for r in rows if r[0] == 'win')
     return jsonify({'assertividade': round(wins / len(rows) * 100, 1), 'amostra': len(rows)})
 
@@ -2128,130 +2080,10 @@ def withdraw():
             return jsonify({'error': 'Não conectado'}), 400
         if amt > sess['client'].balance:
             return jsonify({'error': 'Saldo insuficiente'}), 400
-        return jsonify({'status': 'pending', ...})   ← AQUI ESTÁ O ERRO
-    except Exception:
-        logger.exception("Erro levantamento")
-        return jsonify({'error': 'Erro interno'}), 500
-# <<<<<<<<<< AQUI ADICIONAS O BLOCO NOVO >>>>>>>>>>
-@app.route('/api/forex/signals/recent', methods=['GET'])
-@require_auth
-def forex_signals_recent():
-    """
-    Lê da DB os sinais ensemble com confidence >= 80 das últimas 24h.
-    Marca cada sinal como operável ou histórico conforme a idade.
-    """
-    try:
-        hours = int(request.args.get('hours', 24))
-    except (ValueError, TypeError):
-        hours = 24
-    hours = max(1, min(hours, 168))
-
-    try:
-        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-        cutoff = time.time() - (hours * 3600)
-        rows = conn.execute(
-            "SELECT id, symbol, direction, confidence, price_at_signal, timestamp, "
-            "suggested_duration_minutes, active_duration_seconds "
-            "FROM forex_signal_log "
-            "WHERE strategy_used='ensemble' AND confidence >= 80 AND timestamp >= ? "
-            "ORDER BY timestamp DESC LIMIT 100",
-            (cutoff,)
-        ).fetchall()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Erro ao ler sinais recentes: {e}")
-        return jsonify({'error': 'Erro ao consultar histórico'}), 500
-
-    now = time.time()
-    signals = []
-    for row in rows:
-        id_, symbol, direction, confidence, price, ts, duration, active_secs = row
-        age_seconds = int(now - ts)
-        age_minutes = age_seconds // 60
-        suggested_min = duration or 15
-        is_operable = age_minutes < suggested_min
-        signals.append({
-            'id': id_,
-            'symbol': symbol,
-            'direction': direction,
-            'confidence': confidence,
-            'price_at_signal': price,
-            'timestamp': ts,
-            
-@app.route('/api/payment/withdraw', methods=['POST'])
-@require_auth
-def withdraw():
-    try:
-        d = request.json
-        amt = float(d.get('amount', 0))
-        if amt <= 0:
-            return jsonify({'error': 'Valor inválido'}), 400
-        sess = get_session(session['user_id'])
-        if not sess or not sess['client'].authorized:
-            return jsonify({'error': 'Não conectado'}), 400
-        if amt > sess['client'].balance:
-            return jsonify({'error': 'Saldo insuficiente'}), 400
         return jsonify({'status': 'pending', 'message': f'Saque ${amt} solicitado.', 'amount': amt})
     except Exception:
         logger.exception("Erro levantamento")
         return jsonify({'error': 'Erro interno'}), 500
-
-
-@app.route('/api/forex/signals/recent', methods=['GET'])
-@require_auth
-def forex_signals_recent():
-    """Lê da DB os sinais ensemble com confidence >= 80 das últimas 24h."""
-    try:
-        hours = int(request.args.get('hours', 24))
-    except (ValueError, TypeError):
-        hours = 24
-    hours = max(1, min(hours, 168))
-    try:
-        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-        cutoff = time.time() - (hours * 3600)
-        rows = conn.execute(
-            "SELECT id, symbol, direction, confidence, price_at_signal, timestamp, "
-            "suggested_duration_minutes, active_duration_seconds "
-            "FROM forex_signal_log "
-            "WHERE strategy_used='ensemble' AND confidence >= 80 AND timestamp >= ? "
-            "ORDER BY timestamp DESC LIMIT 100",
-            (cutoff,)
-        ).fetchall()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Erro ao ler sinais recentes: {e}")
-        return jsonify({'error': 'Erro ao consultar histórico'}), 500
-    now = time.time()
-    signals = []
-    for row in rows:
-        id_, symbol, direction, confidence, price, ts, duration, active_secs = row
-        age_seconds = int(now - ts)
-        age_minutes = age_seconds // 60
-        suggested_min = duration or 15
-        is_operable = age_minutes < suggested_min
-        signals.append({
-            'id': id_,
-            'symbol': symbol,
-            'direction': direction,
-            'confidence': confidence,
-            'price_at_signal': price,
-            'timestamp': ts,
-            'age_minutes': age_minutes,
-            'suggested_duration_minutes': suggested_min,
-            'active_duration_seconds': active_secs,
-            'is_operable': is_operable,
-            'status': 'operável' if is_operable else 'histórico/referência',
-        })
-    operable_count = sum(1 for s in signals if s['is_operable'])
-    return jsonify({
-        'signals': signals,
-        
-        'total': len(signals),
-        'operable_count': operable_count,
-        'hours_window': hours,
-        'server_time': now,
-    })
-# <<<<<<<<<< FIM DO BLOCO NOVO >>>>>>>>>>
 
 # ==================== INICIALIZAÇÃO ====================
 if __name__ == '__main__':
