@@ -148,9 +148,54 @@ init_db()
 
 OAUTH_STATE_TTL = 900
 
-# ==================== CACHE DE SINAIS FOREX (fix 15.2) ====================
+# ==================== CACHE DE SINAIS FOREX ====================
 _forex_signals_cache = {'signals': [], 'timestamp': 0}
 _forex_signals_cache_lock = threading.Lock()
+
+# ==================== NOTIFICAÇÕES TELEGRAM ====================
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+_telegram_notified = {}
+_telegram_lock = threading.Lock()
+
+def send_telegram(text):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = json.dumps({'chat_id': TELEGRAM_CHAT_ID, 'text': text, 'parse_mode': 'HTML'}).encode('utf-8')
+        req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status == 200
+    except Exception as e:
+        logger.error(f"Erro Telegram: {e}")
+        return False
+
+def notify_signals(signals):
+    now = time.time()
+    with _telegram_lock:
+        for s in signals:
+            if s.get('confidence', 0) < 80:
+                continue
+            age = s.get('active_duration_seconds', 9999)
+            if age > 600:
+                continue
+            bucket = int(s.get('active_since', now) // 900)
+            key = (s['symbol'], s['direction'], bucket)
+            if key in _telegram_notified and now - _telegram_notified[key] < 3600:
+                continue
+            emoji = '🟢' if s['direction'] == 'BUY' else '🔴'
+            age_min = age // 60
+            text = (
+                f"{emoji} <b>Sinal Fresco — FOLOMA</b>\n\n"
+                f"Par: <b>{s['symbol']}</b>\n"
+                f"Direção: <b>{s['direction']}</b>\n"
+                f"Confiança: <b>{s['confidence']}%</b>\n"
+                f"Idade: {age_min} min\n\n"
+                f"Executa em conta demo:\nhttps://sao360-jf.onrender.com"
+            )
+            if send_telegram(text):
+                _telegram_notified[key] = now
 
 # ==================== LIMPEZA PERIÓDICA ====================
 def _cleanup_loop():
@@ -224,6 +269,10 @@ def _generate_forex_signals_loop():
                 with _forex_signals_cache_lock:
                     _forex_signals_cache['signals'] = signals
                     _forex_signals_cache['timestamp'] = time.time()
+                try:
+                    notify_signals(signals)
+                except Exception as e:
+                    logger.error(f"Erro ao notificar Telegram: {e}")
         except Exception as e:
             logger.error(f"Erro no loop de geração de sinais Forex: {e}")
 
@@ -1692,7 +1741,15 @@ def forex_signals():
     with _forex_signals_cache_lock:
         signals = list(_forex_signals_cache.get('signals', []))
         cache_age = time.time() - _forex_signals_cache.get('timestamp', 0)
-    return jsonify({'signals': signals, 'cache_age_seconds': round(cache_age, 1)})
+    enriched = []
+    for s in signals:
+        s_copy = dict(s)
+        age_secs = int(s_copy.get('active_duration_seconds') or 0)
+        age_min = age_secs // 60
+        s_copy['age_minutes'] = age_min
+        s_copy['is_operable'] = age_min < 15
+        enriched.append(s_copy)
+    return jsonify({'signals': enriched, 'cache_age_seconds': round(cache_age, 1)})
 
 @app.route('/api/forex/signals/recent', methods=['GET'])
 @require_auth
