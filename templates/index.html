@@ -132,6 +132,7 @@
     .forex-signal-card { background: #020617; border-radius: 8px; padding: 10px; margin-bottom: 6px; border-left: 3px solid var(--accent); }
     .forex-signal-card.sell { border-left-color: var(--danger); }
     .forex-signal-card.liquidation { border-left-color: var(--purple); }
+    .forex-signal-card.expired { border-left-color: var(--muted) !important; opacity: 0.55; }
     .forex-pair { font-weight: 700; font-size: 13px; }
     .forex-direction { font-size: 12px; font-weight: 700; }
     .forex-direction.buy { color: var(--accent); }
@@ -366,8 +367,13 @@
   <!-- Forex Section -->
   <div id="forex-section" class="hidden">
     <div class="card">
-      <div class="card-title">💱 SINAIS FOREX <span style="font-size:9px;color:var(--accent)">Ensemble</span></div>
+      <div class="card-title">💱 SINAIS FOREX ATIVOS <span style="font-size:9px;color:var(--accent)">Ensemble</span></div>
       <div id="forexSignalsContainer"><p style="text-align:center;color:var(--muted);font-size:11px">A carregar sinais...</p></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📜 SINAIS RECENTES (24h) <button class="bmr" style="font-size:9px;padding:2px 6px" onclick="loadForexRecent()">🔄</button></div>
+      <div style="font-size:9px;color:var(--muted);margin-bottom:6px">Histórico de sinais ≥80% das últimas 24 horas</div>
+      <div id="forexRecentContainer"><p style="text-align:center;color:var(--muted);font-size:11px">A carregar histórico...</p></div>
     </div>
     <div class="card">
       <div class="card-title">📈 GRÁFICO FOREX</div>
@@ -1292,6 +1298,7 @@ function showSec(s){
     _forexSectionVisible = true;
     initForexChart(); 
     loadForexSignals(); 
+    loadForexRecent();
     loadForexCandles();
     loadForexDurations();
   } else {
@@ -1410,6 +1417,45 @@ async function loadForexSignals() {
         });
         container.innerHTML = html;
     } catch (e) { container.innerHTML = '<p style="color:var(--danger);text-align:center">Erro ao carregar sinais</p>'; }
+}
+
+async function loadForexRecent() {
+    const container = $_('forexRecentContainer');
+    if (!container) return;
+    try {
+        const r = await fetch('/api/forex/signals/recent');
+        const d = await r.json();
+        if (d.error) { container.innerHTML = `<p style="color:var(--danger);text-align:center">${d.error}</p>`; return; }
+        if (!d.signals || d.signals.length === 0) {
+            container.innerHTML = '<p style="text-align:center;color:var(--muted);font-size:11px">Nenhum sinal ≥80% nas últimas 24h.</p>';
+            return;
+        }
+        let html = '';
+        d.signals.forEach(s => {
+            const dirClass = s.direction === 'BUY' ? 'buy' : 'sell';
+            const dirLabel = s.direction === 'BUY' ? 'COMPRA' : 'VENDA';
+            const isOp = s.is_operable;
+            const expiredMin = Math.max(0, s.age_minutes - (s.suggested_duration_minutes || 15));
+            const badge = isOp ? `🟢 Operável (${s.age_minutes}min)` : `⏱ Expirado há ${expiredMin}min`;
+            const badgeColor = isOp ? 'var(--accent)' : 'var(--muted)';
+            const amount = _suggestedAmount || 1;
+            const duration = s.suggested_duration_minutes || 15;
+            let buttonHTML = '';
+            if (isOp) {
+                buttonHTML = `<button onclick="executarTradeForex('${s.symbol}','${s.direction}',${amount},${duration})" style="margin-top:6px;padding:4px 12px;background:var(--accent);color:#000;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer">EXECUTAR (${s.confidence}%)</button>`;
+            }
+            html += `<div class="forex-signal-card ${dirClass==='sell'?'sell':''} ${isOp?'':'expired'}">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <span class="forex-pair">${s.symbol}</span>
+                    <span class="forex-direction ${dirClass}">${dirLabel}</span>
+                    <span class="forex-confidence">${s.confidence}%</span>
+                </div>
+                <div style="font-size:9px;color:${badgeColor};margin-top:2px;font-weight:600">${badge}</div>
+                ${buttonHTML}
+            </div>`;
+        });
+        container.innerHTML = html;
+    } catch (e) { container.innerHTML = '<p style="color:var(--danger);text-align:center">Erro ao carregar histórico</p>'; }
 }
 
 function initForexChart(){
