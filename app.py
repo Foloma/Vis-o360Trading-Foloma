@@ -1763,8 +1763,7 @@ def forex_signals_recent():
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         cutoff = time.time() - (hours * 3600)
         rows = conn.execute(
-            "SELECT id, symbol, direction, confidence, price_at_signal, timestamp, suggested_duration_minutes, active_duration_seconds FROM forex_signal_log WHERE strategy_used='ensemble' AND confidence >= 80 AND timestamp >= ? ORDER BY timestamp DESC LIMIT 100",
-            (cutoff,)
+            "SELECT MIN(id) as id, symbol, direction, MAX(confidence) as confidence, MIN(price_at_signal) as price_at_signal, MIN(timestamp) as timestamp, MAX(suggested_duration_minutes) as suggested_duration_minutes, MIN(active_duration_seconds) as active_duration_seconds FROM forex_signal_log WHERE strategy_used='ensemble' AND confidence >= 80 AND timestamp >= ? GROUP BY symbol, direction ORDER BY timestamp DESC LIMIT 50",            (cutoff,)
         ).fetchall()
         conn.close()
     except Exception as e:
