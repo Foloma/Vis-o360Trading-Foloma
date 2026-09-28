@@ -177,21 +177,18 @@ def notify_signals(signals):
         for s in signals:
             if s.get('confidence', 0) < 80:
                 continue
-            age = s.get('active_duration_seconds', 9999)
-            if age > 600:
-                continue
-            bucket = int(s.get('active_since', now) // 900)
-            key = (s['symbol'], s['direction'], bucket)
+            active_since = s.get('active_since', 0)
+            key = (s['symbol'], s['direction'], active_since)
             if key in _telegram_notified and now - _telegram_notified[key] < 3600:
                 continue
             emoji = '🟢' if s['direction'] == 'BUY' else '🔴'
-            age_min = age // 60
+            age_min = (s.get('active_duration_seconds', 0) or 0) // 60
             text = (
                 f"{emoji} <b>Sinal Fresco — FOLOMA</b>\n\n"
                 f"Par: <b>{s['symbol']}</b>\n"
                 f"Direção: <b>{s['direction']}</b>\n"
                 f"Confiança: <b>{s['confidence']}%</b>\n"
-                f"Idade: {age_min} min\n\n"
+                f"Ativo há: {age_min} min\n\n"
                 f"Executa em conta demo:\nhttps://sao360-jf.onrender.com"
             )
             if send_telegram(text):
