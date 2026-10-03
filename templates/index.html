@@ -885,8 +885,10 @@ async function updateAll(){
         _differScheduled = false;
         clearTimeout(_tradeSubmittedTimer);
         clearTimeout(_tradePendingTimer);
+        // P0.4: NÃO atualizar _ultimoDigito com o dígito do resultado.
+        // _ultimoDigito deve refletir sempre o último tick do mercado,
+        // não o resultado do trade anterior. Bug antigo removido.
         const displayDigit = ltr.exit_digit !== undefined ? ltr.exit_digit : ltr.digit;
-        _ultimoDigito = displayDigit;
         _ultimoParidade = (ltr.is_win ? 'GANHOU' : 'PERDEU');
         const tipo = labelEstrategia(ltr.action);
         const latencyInfo = _lastTradeLatency > 0 ? ` (${_lastTradeLatency}ms)` : '';
@@ -1602,7 +1604,7 @@ function executarTradeManual() {
         return;
     }
     if (isNaN(duration) || duration < 1) {
-        toast('Seleccione uma duração válida', 'warning');
+        toast('Selecione uma duração válida', 'warning');
         return;
     }
     const symbol = FOREX_SYMBOL_MAP[pair] || pair;
