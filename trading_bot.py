@@ -13,7 +13,13 @@ class TradingBot:
     Versão focada exclusivamente em DÍGITOS.
     O sinal agora é orquestrado pelo StrategyManager (módulo strategy.py),
     mas o bot mantém a gestão de trades, estatísticas e risco.
+
+    FIX: stats['wins'], stats['losses'], stats['profit_loss'] passam a ser
+    contadores acumulados (nunca recalculados a partir do deque). O deque
+    serve apenas de janela histórica para a UI — o deque tem maxlen=100, e
+    recalcular a partir dele corrompia o win_rate ao fim de 100 trades.
     """
+
     def __init__(self):
         self.client = None
         self.current_price = 0
@@ -58,7 +64,6 @@ class TradingBot:
 
         self.last_trade_result = None
 
-        # Atributos para auditoria de sincronização
         self._last_click_time = None
         self._last_click_tick = None
 
@@ -112,17 +117,12 @@ class TradingBot:
                 return True
         return False
 
-    # ============================================================
-    # CORRIGIDO: ignora ticks de Forex, processa apenas sintéticos
-    # ============================================================
     def on_tick(self, tick):
         symbol = tick.get('symbol', '')
-        
-        # Ticks de Forex são processados pelo ForexDataManager, não pelo bot
+
         if symbol.startswith('frx'):
             return
-        
-        # Para sintéticos, filtrar por símbolo
+
         if symbol != self.current_symbol:
             return
 
@@ -276,24 +276,24 @@ class TradingBot:
         self.update_stats()
 
     def update_stats(self):
+        """
+        FIX: wins/losses/profit_loss são contadores acumulados — nunca
+        recalculados a partir do deque (que tem maxlen=100). O deque é
+        apenas para histórico/UI. Recalcular a partir dele corrompia o
+        win_rate após 100 trades.
+        """
         with self._state_lock:
-            wins = losses = profit_loss = 0
-            for trade in self.trades:
-                if trade.get('result') == 'win':
-                    wins += 1
-                    profit_loss += trade.get('profit', 0)
-                elif trade.get('result') == 'loss':
-                    losses += 1
-                    profit_loss -= trade.get('amount', 0)
-            self.stats['wins'] = wins
-            self.stats['losses'] = losses
-            self.stats['win_rate'] = (wins / self.stats['total']) * 100 if self.stats['total'] > 0 else 0
-            self.stats['profit_loss'] = profit_loss
-            self.stats['total_return'] = (profit_loss / self.stats['total_invested']) * 100 if self.stats['total_invested'] > 0 else 0
+            total = self.stats['total']
+            wins = self.stats['wins']
+            losses = self.stats['losses']
+            invested = self.stats['total_invested']
+            pl = self.stats['profit_loss']
+
+            self.stats['win_rate'] = (wins / total) * 100 if total > 0 else 0
+            self.stats['total_return'] = (pl / invested) * 100 if invested > 0 else 0
 
     def check_pending_trades(self):
-        """Verifica trades pendentes e marca como expirados se ultrapassarem o timeout.
-        CORRIGIDO: verifica novamente o estado dentro do lock antes de sobrescrever."""
+        """Verifica trades pendentes e marca como expirados se ultrapassarem o timeout."""
         now = datetime.now()
         updated = False
         for trade in list(self.trades):
@@ -303,7 +303,6 @@ class TradingBot:
                 timeout = 15 if is_digit else 60
                 if elapsed > timeout:
                     with self._state_lock:
-                        # Verificar novamente DENTRO do lock se ainda é 'pending'
                         if trade.get('result') != 'pending':
                             logger.info(f"Trade {trade.get('contract_id')} já resolvido como '{trade.get('result')}' — a ignorar expiração")
                             continue
@@ -350,22 +349,29 @@ class TradingBot:
                         return
 
             with self._state_lock:
-                if target_trade.get('result') == 'expired':
-                    logger.info(f"🔄 Trade {contract_id} foi expirado mas o POC chegou — a aplicar resultado real")
-                    self.daily_stats['losses'] -= 1
-                    self.daily_stats['profit_loss'] += target_trade.get('amount', 0)
-                    self.stats['expired_trades'] -= 1
-                    self.daily_stats['expired_trades'] -= 1
+                was_expired = target_trade.get('result') == 'expired'
 
                 if target_trade.get('result') not in ('pending', 'expired'):
                     logger.warning(f"Trade {contract_id} já tem resultado '{target_trade.get('result')}'. Ignorando.")
                     return
+
+                if was_expired:
+                    logger.info(f"🔄 Trade {contract_id} foi expirado mas o POC chegou — a aplicar resultado real")
+                    # Reverter efeitos da expiração nos contadores acumulados
+                    self.daily_stats['losses'] -= 1
+                    self.daily_stats['profit_loss'] += target_trade.get('amount', 0)
+                    self.stats['expired_trades'] -= 1
+                    self.daily_stats['expired_trades'] -= 1
+                    # Nota: stats['losses'] nunca foi incrementado em expiração,
+                    # portanto não é preciso corrigir aqui. Só daily_stats o foi.
 
                 if is_win:
                     target_trade['result'] = 'win'
                     target_trade['profit'] = profit
                     self.daily_stats['wins'] += 1
                     self.daily_stats['profit_loss'] += profit
+                    self.stats['wins'] += 1
+                    self.stats['profit_loss'] += profit
                     self.consecutive_wins += 1
                     self.consecutive_losses = 0
                     logger.info(f"✅ GANHO! +${profit:.2f} | Vitórias consecutivas: {self.consecutive_wins}")
@@ -376,13 +382,14 @@ class TradingBot:
                     target_trade['profit'] = 0
                     self.daily_stats['losses'] += 1
                     self.daily_stats['profit_loss'] -= loss
+                    self.stats['losses'] += 1
+                    self.stats['profit_loss'] -= loss
                     self.consecutive_losses += 1
                     self.consecutive_wins = 0
                     logger.info(f"❌ PERDA! -${loss:.2f} | Contrato: {contract_id} | Ação: {target_trade.get('action')} | Perdas consecutivas: {self.consecutive_losses}")
 
                 self._daily_stats_dirty = True
 
-                # Calcular latência total entre clique e entrada
                 click_time = self._last_click_time
                 entry_time = result.get('entry_tick_time')
                 latency_total_ms = None
