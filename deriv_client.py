@@ -9,6 +9,14 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+# P0.1 — pips por símbolo (nº de decimais reais antes do último dígito)
+SYMBOL_PIPS = {
+    'R_10': 3, 'R_25': 3, 'R_50': 4, 'R_75': 4, 'R_100': 2,
+    'R_10_1s': 3, 'R_25_1s': 3, 'R_50_1s': 4, 'R_75_1s': 4, 'R_100_1s': 2,
+    '1HZ10V': 3, '1HZ25V': 3, '1HZ50V': 4, '1HZ75V': 4, '1HZ100V': 2,
+}
+
+
 class DerivWebSocketClient:
     ST_DISCONNECTED = 'DISCONNECTED'
     ST_CONNECTING   = 'CONNECTING'
@@ -34,13 +42,8 @@ class DerivWebSocketClient:
         self._active_trades_lock = threading.RLock()
         self.pending_trade = None
         self.pending_trade_time = 0
-
-        # FIX F11: lock único para proposta + trade
         self._proposal_lock = threading.RLock()
-
-        # Lock de escrita no socket
         self._ws_send_lock = threading.Lock()
-
         self._req_lock = threading.Lock()
         self._digit_analyzer = None
         self._balance_subscribed = False
@@ -60,18 +63,14 @@ class DerivWebSocketClient:
         self._watchdog_thread = None
         self._ws_thread = None
         self._poller_thread = None
-
         self.loginid = None
         self._connecting = False
         self._connect_lock = threading.Lock()
         self.auth_error = None
         self._had_gap = False
         self._first_connect = True
-
-        # FIX F10: cache de velas por símbolo
         self._candles_cache = {}
         self._candles_cache_lock = threading.Lock()
-
         self._last_reconnect_time = 0
         self._ping_ms = 0
         self._last_valid_ping_ms = 0
@@ -80,35 +79,28 @@ class DerivWebSocketClient:
         self._ping_pending = False
         self._ping_timer = None
         self._ping_failures = 0
-
         self._consecutive_failures = 0
         self._max_failures = 5
         self._cooldown_until = 0
         self._token_permanently_invalid = False
-
         self.last_trade_latency_ms = 0
-
         self._ws_url = None
         self._otp_refresh_callback = None
         self._balance_refresh_callback = None
-
         self._last_buy_time = None
         self._last_buy_contract_id = None
         self._null_sell_price_contracts = set()
-
         self._tick_subscription_ids = {}
-
-        # cache de contracts_for
         self._contracts_for_cache = {}
         self._contracts_for_lock = threading.Lock()
         self._pending_contracts_for = {}
 
-    def set_digit_analyzer(self, a): 
+    def set_digit_analyzer(self, a):
         self._digit_analyzer = a
 
     def set_trading_bot(self, b):
         self.trading_bot = b
-        if b: 
+        if b:
             b.balance, b.currency, b.client = self.balance, self.currency, self
 
     def set_user_token(self, t):
@@ -129,21 +121,13 @@ class DerivWebSocketClient:
     def _is_otp_ws(self):
         return self._ws_url and 'otp=' in self._ws_url
 
-    # -----------------------------------------------------------------
-    # Envio seguro e serializado (propaga exceções)
-    # -----------------------------------------------------------------
     def _ws_send(self, payload_dict):
-        """Serializa o dicionário para JSON e envia com lock de escrita.
-        Não captura exceções; deixa que os chamadores tratem os erros."""
         data = json.dumps(payload_dict)
         with self._ws_send_lock:
             if not self.ws:
                 raise ConnectionError("Tentativa de envio sem websocket ativo")
             self.ws.send(data)
 
-    # -----------------------------------------------------------------
-    # FIX F13: get_last_tick_seconds_ago evita 999 nos primeiros 15s
-    # -----------------------------------------------------------------
     def get_last_tick_seconds_ago(self):
         if self._last_tick_time is None:
             if self._auth_time and (time.time() - self._auth_time) < 15:
@@ -257,9 +241,6 @@ class DerivWebSocketClient:
             self._poller_thread.join(timeout=2)
         self._poller_thread = None
 
-    # -----------------------------------------------------------------
-    # FIX F14: poller intervalo 15s e timeout 45s
-    # -----------------------------------------------------------------
     def _poller_loop(self):
         while not self._poller_stop.wait(timeout=15):
             if self._stop_event.is_set() or not self.authorized:
@@ -502,7 +483,6 @@ class DerivWebSocketClient:
             except Exception as e:
                 logger.error(f"Erro ao cancelar subscrição de {old_symbol}: {e}")
         self.subscribed_symbols.discard(old_symbol)
-
         self.current_symbol = symbol
         if self.authorized:
             self._subscribe_ticks(symbol)
@@ -554,17 +534,14 @@ class DerivWebSocketClient:
         symbol = tick.get('symbol', self.current_symbol)
         if sub_id and symbol not in self._tick_subscription_ids:
             self._tick_subscription_ids[symbol] = sub_id
-
         if self.on_tick_callback:
             self.on_tick_callback({
                 'symbol':    symbol,
                 'price':     float(tick.get('quote', 0)),
                 'timestamp': tick.get('epoch', time.time())
             })
-
         if symbol != self.current_symbol:
             return
-
         if not self.streaming:
             self.streaming = True
             self.state = self.ST_STREAMING
@@ -577,9 +554,6 @@ class DerivWebSocketClient:
             self._req_counter += 1
             return self._req_counter
 
-    # -----------------------------------------------------------------
-    # FIX F15: _pre_trade_check tolerância de reconexão 3s
-    # -----------------------------------------------------------------
     def _pre_trade_check(self):
         if time.time() - self._last_reconnect_time < 3:
             return False, "Reconexão recente"
@@ -609,22 +583,16 @@ class DerivWebSocketClient:
             base_payload['underlying_symbol'] = symbol
         return base_payload
 
-    # -----------------------------------------------------------------
-    # Métodos de trade DIGIT
-    # -----------------------------------------------------------------
     def place_trade(self, contract_type, amount, is_digit=False):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
-
         with self._proposal_lock:
             ok, err = self._pre_trade_check()
             if not ok:
                 logger.warning(f"🚫 Trade bloqueado: {err}")
                 return False
-
             self._last_trade_time = time.time()
-
             if is_digit:
                 duration = self.config.DIGIT_CONTRACT_DURATION
                 duration_unit = 't'
@@ -633,37 +601,22 @@ class DerivWebSocketClient:
                 duration = self.config.CONTRACT_DURATION
                 duration_unit = self.config.CONTRACT_DURATION_UNIT
                 contract_type_full = 'CALL' if contract_type == 'CALL' else 'PUT'
-
             req_id = self._next_req()
-
-            # F6: registar o dígito/contador no momento do clique
             click_tick = self._digit_analyzer.get_current_digit() if self._digit_analyzer else None
             click_count = self._digit_analyzer.get_tick_count() if self._digit_analyzer else None
-
             self.pending_trade = {
-                'amount': amount,
-                'contract_type': contract_type,
-                'is_digit': is_digit,
-                'timestamp': time.time(),
-                'status': 'waiting_proposal',
-                'req_id': req_id,
-                'click_tick': click_tick,
-                'click_count': click_count,
+                'amount': amount, 'contract_type': contract_type, 'is_digit': is_digit,
+                'timestamp': time.time(), 'status': 'waiting_proposal', 'req_id': req_id,
+                'click_tick': click_tick, 'click_count': click_count,
             }
             self.pending_trade_time = time.time()
-
             logger.info(f"📤 Enviando proposta: {contract_type_full}, amount={amount}, symbol={self.current_symbol}")
             try:
                 payload = {
-                    "proposal": 1,
-                    "amount": amount,
-                    "basis": "stake",
-                    "contract_type": contract_type_full,
-                    "currency": self.currency,
-                    "duration": duration,
-                    "duration_unit": duration_unit,
-                    "symbol": self.current_symbol,
-                    "req_id": req_id
+                    "proposal": 1, "amount": amount, "basis": "stake",
+                    "contract_type": contract_type_full, "currency": self.currency,
+                    "duration": duration, "duration_unit": duration_unit,
+                    "symbol": self.current_symbol, "req_id": req_id
                 }
                 self._ws_send(self._build_proposal(payload))
                 return True
@@ -676,47 +629,31 @@ class DerivWebSocketClient:
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
-
         with self._proposal_lock:
             ok, err = self._pre_trade_check()
             if not ok:
                 logger.warning(f"🚫 Trade bloqueado: {err}")
                 return False
-
             self._last_trade_time = time.time()
             duration = self.config.DIGIT_CONTRACT_DURATION
             duration_unit = 't'
             req_id = self._next_req()
-
             click_tick = self._digit_analyzer.get_current_digit() if self._digit_analyzer else None
             click_count = self._digit_analyzer.get_tick_count() if self._digit_analyzer else None
-
             self.pending_trade = {
-                'amount': amount,
-                'contract_type': f'DIFFER_{digit}',
-                'is_digit': True,
-                'is_differ': True,
-                'digit_barrier': digit,
-                'timestamp': time.time(),
-                'status': 'waiting_proposal',
-                'req_id': req_id,
-                'click_tick': click_tick,
-                'click_count': click_count,
+                'amount': amount, 'contract_type': f'DIFFER_{digit}', 'is_digit': True,
+                'is_differ': True, 'digit_barrier': digit, 'timestamp': time.time(),
+                'status': 'waiting_proposal', 'req_id': req_id,
+                'click_tick': click_tick, 'click_count': click_count,
             }
             self.pending_trade_time = time.time()
             logger.info(f"📤 Enviando DIGITDIFF: barreira={digit}, amount={amount}")
             try:
                 payload = {
-                    "proposal": 1,
-                    "amount": amount,
-                    "basis": "stake",
-                    "contract_type": "DIGITDIFF",
-                    "currency": self.currency,
-                    "duration": duration,
-                    "duration_unit": duration_unit,
-                    "barrier": digit,
-                    "symbol": self.current_symbol,
-                    "req_id": req_id
+                    "proposal": 1, "amount": amount, "basis": "stake",
+                    "contract_type": "DIGITDIFF", "currency": self.currency,
+                    "duration": duration, "duration_unit": duration_unit,
+                    "barrier": digit, "symbol": self.current_symbol, "req_id": req_id
                 }
                 self._ws_send(self._build_proposal(payload))
                 return True
@@ -729,47 +666,31 @@ class DerivWebSocketClient:
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade bloqueado pelo stop‑loss diário")
             return False
-
         with self._proposal_lock:
             ok, err = self._pre_trade_check()
             if not ok:
                 logger.warning(f"🚫 Trade bloqueado: {err}")
                 return False
-
             self._last_trade_time = time.time()
             duration = self.config.DIGIT_CONTRACT_DURATION
             duration_unit = 't'
             req_id = self._next_req()
-
             click_tick = self._digit_analyzer.get_current_digit() if self._digit_analyzer else None
             click_count = self._digit_analyzer.get_tick_count() if self._digit_analyzer else None
-
             self.pending_trade = {
-                'amount': amount,
-                'contract_type': f'MATCH_{digit}',
-                'is_digit': True,
-                'is_matches': True,
-                'digit_barrier': digit,
-                'timestamp': time.time(),
-                'status': 'waiting_proposal',
-                'req_id': req_id,
-                'click_tick': click_tick,
-                'click_count': click_count,
+                'amount': amount, 'contract_type': f'MATCH_{digit}', 'is_digit': True,
+                'is_matches': True, 'digit_barrier': digit, 'timestamp': time.time(),
+                'status': 'waiting_proposal', 'req_id': req_id,
+                'click_tick': click_tick, 'click_count': click_count,
             }
             self.pending_trade_time = time.time()
             logger.info(f"📤 Enviando DIGITMATCH: dígito={digit}, amount={amount}")
             try:
                 payload = {
-                    "proposal": 1,
-                    "amount": amount,
-                    "basis": "stake",
-                    "contract_type": "DIGITMATCH",
-                    "currency": self.currency,
-                    "duration": duration,
-                    "duration_unit": duration_unit,
-                    "barrier": digit,
-                    "symbol": self.current_symbol,
-                    "req_id": req_id
+                    "proposal": 1, "amount": amount, "basis": "stake",
+                    "contract_type": "DIGITMATCH", "currency": self.currency,
+                    "duration": duration, "duration_unit": duration_unit,
+                    "barrier": digit, "symbol": self.current_symbol, "req_id": req_id
                 }
                 self._ws_send(self._build_proposal(payload))
                 return True
@@ -778,24 +699,18 @@ class DerivWebSocketClient:
                 self.pending_trade = None
                 return False
 
-    # ============================================================
-    # CORRIGIDO: place_forex_trade
-    # ============================================================
     def place_forex_trade(self, symbol, direction, amount, duration=1):
         if self.trading_bot and not self.trading_bot.check_risk_limits():
             logger.warning("🚫 Trade Forex bloqueado pelo stop‑loss diário")
             return False, "Stop-loss diário ativo"
-
         with self._proposal_lock:
             ok, err = self._pre_trade_check()
             if not ok:
                 logger.warning(f"🚫 Trade Forex bloqueado: {err}")
                 return False, err
-
             durations = self.request_contracts_for(symbol)
             contract_type = "CALL" if direction.upper() == "BUY" else "PUT"
             duration_unit = "m"
-
             if durations:
                 limits = durations.get(contract_type)
                 if limits:
@@ -811,34 +726,21 @@ class DerivWebSocketClient:
                         return False, f"Duração máxima para {symbol}: {limits.get('max')}"
             else:
                 logger.warning(f"⚠️ Duração não validada para {symbol} (contracts_for indisponível)")
-
             self._last_trade_time = time.time()
-
             req_id = self._next_req()
             self.pending_trade = {
-                'amount': amount,
-                'contract_type': contract_type,
-                'is_digit': False,
-                'is_forex': True,
-                'symbol': symbol,
-                'timestamp': time.time(),
-                'status': 'waiting_proposal',
-                'req_id': req_id
+                'amount': amount, 'contract_type': contract_type, 'is_digit': False,
+                'is_forex': True, 'symbol': symbol, 'timestamp': time.time(),
+                'status': 'waiting_proposal', 'req_id': req_id
             }
             self.pending_trade_time = time.time()
-
             logger.info(f"📤 Enviando proposta Forex: {contract_type} {symbol} amount={amount} duration={duration}{duration_unit}")
             try:
                 payload = {
-                    "proposal": 1,
-                    "amount": amount,
-                    "basis": "stake",
-                    "contract_type": contract_type,
-                    "currency": self.currency,
-                    "duration": duration,
-                    "duration_unit": duration_unit,
-                    "symbol": symbol,
-                    "req_id": req_id
+                    "proposal": 1, "amount": amount, "basis": "stake",
+                    "contract_type": contract_type, "currency": self.currency,
+                    "duration": duration, "duration_unit": duration_unit,
+                    "symbol": symbol, "req_id": req_id
                 }
                 self._ws_send(self._build_proposal(payload))
                 return True, None
@@ -904,12 +806,10 @@ class DerivWebSocketClient:
                 forex_symbol = self.pending_trade.get('symbol', self.current_symbol)
                 click_tick = self.pending_trade.get('click_tick')
                 click_count = self.pending_trade.get('click_count')
-
                 latency_ms = round((time.time() - trade_timestamp) * 1000)
                 logger.info(f"✅ Contrato comprado: cid={cid}, bp={bp}, action={action}, latency={latency_ms}ms")
                 if latency_ms > 300:
                     logger.warning(f"⚠️ Latência alta ({latency_ms}ms)")
-
                 if self._digit_analyzer:
                     entry_tick = self._digit_analyzer.get_current_digit()
                     entry_tick_count = self._digit_analyzer.get_tick_count()
@@ -921,22 +821,17 @@ class DerivWebSocketClient:
                     f"| tick_entrada={entry_tick} "
                     f"| tick_count_entrada={entry_tick_count}"
                 )
-
                 self.last_trade_latency_ms = latency_ms
-
                 self._last_buy_time = time.time()
                 self._last_buy_contract_id = cid
-
                 if self.trading_bot:
                     self.trading_bot.register_trade({
                         'contract_id': cid, 'symbol': forex_symbol if is_forex else self.current_symbol,
                         'action': action, 'amount': amt, 'price': bp,
                         'result': 'pending', 'is_digit': is_digit,
                         'is_differ': is_differ, 'is_matches': is_matches,
-                        'digit_barrier': digit_barrier,
-                        'is_forex': is_forex,
-                        'click_tick': click_tick,
-                        'click_count': click_count,
+                        'digit_barrier': digit_barrier, 'is_forex': is_forex,
+                        'click_tick': click_tick, 'click_count': click_count,
                     })
                 with self._active_trades_lock:
                     self.active_trades[cid] = {
@@ -946,8 +841,7 @@ class DerivWebSocketClient:
                         'is_matches': is_matches, 'digit_barrier': digit_barrier,
                         'symbol': forex_symbol if is_forex else self.current_symbol,
                         'is_forex': is_forex,
-                        'click_tick': click_tick,
-                        'click_count': click_count,
+                        'click_tick': click_tick, 'click_count': click_count,
                     }
                 try:
                     self._subscribe_contract(cid)
@@ -990,11 +884,15 @@ class DerivWebSocketClient:
             except Exception as e:
                 logger.error(f"Falha ao reassinar {cid}: {e}")
 
-    def _extract_last_digit(self, value):
+    def _extract_last_digit(self, value, symbol=None):
+        """P0.1: extrai último dígito respeitando o nº de decimais do símbolo.
+        Para R_100 usa 2 decimais; para R_50/R_75 usa 4; etc. Sem isto, o dígito
+        extraído de R_50/R_75 estava errado (cortava no 3º decimal)."""
         if value is None:
             return None
         try:
-            s = f"{float(value):.2f}"
+            decimals = SYMBOL_PIPS.get(symbol or self.current_symbol, 2)
+            s = f"{float(value):.{decimals}f}"
             return int(s[-1])
         except (ValueError, TypeError):
             return None
@@ -1031,10 +929,12 @@ class DerivWebSocketClient:
         entry_tick_time = c.get('entry_tick_time')
         exit_tick_time = c.get('exit_tick_time')
 
-        entry_digit = self._extract_last_digit(entry_spot)
-        exit_digit = self._extract_last_digit(exit_spot)
+        # P0.1: usar o símbolo do próprio contrato para escolher os decimais corretos
+        contract_symbol = c.get('underlying_symbol') or self.current_symbol
+        entry_digit = self._extract_last_digit(entry_spot, contract_symbol)
+        exit_digit = self._extract_last_digit(exit_spot, contract_symbol)
 
-        logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}, entry_digit={entry_digit}, exit_digit={exit_digit}")
+        logger.info(f"💰 POC: cid={cid}, bp={bp}, sp={sp}, profit={profit:.4f}, is_win={is_win}, symbol={contract_symbol}, entry_digit={entry_digit}, exit_digit={exit_digit}")
 
         with self._active_trades_lock:
             trade_info = self.active_trades.get(cid, {})
@@ -1107,9 +1007,6 @@ class DerivWebSocketClient:
         elif code == 'RateLimit':
             logger.warning("⏱️ Rate limit")
 
-    # -----------------------------------------------------------------
-    # FIX F12: request_candles verifica ws antes de enviar
-    # -----------------------------------------------------------------
     def request_candles(self, symbol=None, granularity=60, count=50):
         symbol = symbol or self.current_symbol
         if not self.ws or not self.connected:
@@ -1124,9 +1021,6 @@ class DerivWebSocketClient:
         except Exception as e:
             logger.error(f"Erro ao pedir velas: {e}")
 
-    # -----------------------------------------------------------------
-    # FIX F10: cache de velas por símbolo
-    # -----------------------------------------------------------------
     def _on_candles(self, data):
         candles = data.get('candles', [])
         if not candles:
@@ -1194,16 +1088,13 @@ class DerivWebSocketClient:
             cached = self._contracts_for_cache.get(symbol)
             if cached and (time.time() - cached['timestamp']) < 3600:
                 return cached['durations']
-
         if not self.ws or not self.authorized:
             return None
-
         req_id = self._next_req()
         event = threading.Event()
         holder = {'result': None}
         with self._req_lock:
             self._pending_contracts_for[req_id] = (event, holder)
-
         try:
             self._ws_send({
                 "contracts_for": symbol,
@@ -1214,15 +1105,12 @@ class DerivWebSocketClient:
             with self._req_lock:
                 self._pending_contracts_for.pop(req_id, None)
             return None
-
         got = event.wait(timeout=timeout)
         with self._req_lock:
             self._pending_contracts_for.pop(req_id, None)
-
         if not got:
             logger.warning(f"⏱️ Timeout contracts_for para {symbol}")
             return None
-
         return holder['result']
 
     def _on_contracts_for(self, data):
@@ -1233,13 +1121,11 @@ class DerivWebSocketClient:
         if not entry:
             return
         event, holder = entry
-
         if data.get('error'):
             logger.error(f"Erro contracts_for: {data['error']}")
             holder['result'] = None
             event.set()
             return
-
         cf = data.get('contracts_for', {})
         durations = {}
         seen_types = set()
@@ -1256,10 +1142,8 @@ class DerivWebSocketClient:
             min_dur, max_dur = c.get('min_contract_duration'), c.get('max_contract_duration')
             units = {u for u in (min_dur[-1] if min_dur else None, max_dur[-1] if max_dur else None) if u}
             durations[mapped] = {'min': min_dur, 'max': max_dur, 'allowed_units': units}
-
         if not durations:
             logger.warning(f"⚠️ contracts_for sem CALL/PUT reconhecidos. Tipos vistos: {seen_types}")
-
         symbol = data.get('echo_req', {}).get('contracts_for')
         if symbol:
             with self._contracts_for_lock:
@@ -1267,6 +1151,5 @@ class DerivWebSocketClient:
                     'durations': durations,
                     'timestamp': time.time()
                 }
-
         holder['result'] = durations
         event.set()
