@@ -21,6 +21,9 @@ class StrategyManager:
       paridade recalculada a cada tick (sem prender recomendação);
       latência usa _ping_ms em tempo real;
       _analyze_digit_sequence escolhe o dígito mais ausente.
+    - P1.1: _differ_sequence_used agora recebe .add() ao agendar DIFFER, e
+      _analyze_digit_sequence ignora dígitos já usados — evita apostar o mesmo
+      dígito em duplicado dentro da mesma janela.
     """
 
     def __init__(self, client, analyzer):
@@ -230,6 +233,7 @@ class StrategyManager:
             logger.error(f"Erro em _maybe_generate_sequence_differ: {e}")
 
     def _analyze_digit_sequence(self):
+        """P1.1: ignora dígitos já usados em _differ_sequence_used, para não repetir aposta."""
         try:
             recent = self.analyzer.get_recent_digits(20)
             if not isinstance(recent, list) or len(recent) < 10:
@@ -237,6 +241,10 @@ class StrategyManager:
 
             candidates = []
             for digit in range(10):
+                # P1.1: skip dígitos já usados na janela corrente
+                if digit in self._differ_sequence_used:
+                    continue
+
                 last_idx = -1
                 for i, d in enumerate(reversed(recent)):
                     if d == digit:
@@ -414,6 +422,7 @@ class StrategyManager:
             return False, "Erro interno ao agendar paridade"
 
     def schedule_differ_bet(self, digit, amount=0.35):
+        """P1.1: após agendar, adiciona o dígito ao set de usados — evita repetição."""
         try:
             with self._lock:
                 ok, reason = self._can_schedule()
@@ -428,6 +437,10 @@ class StrategyManager:
                 if time.time() < self._differ_cooldown_until:
                     remaining = self._differ_cooldown_until - time.time()
                     return False, f"Pausa DIFFER {remaining:.0f}s restantes"
+
+                # P1.1: recusa explicitamente se o dígito já foi usado nesta janela
+                if digit in self._differ_sequence_used:
+                    return False, f"Dígito {digit} já apostado nesta janela"
 
                 score, approved, prob_reason = self.evaluate_probability(digit, 'differ', amount)
                 if not approved:
@@ -448,8 +461,11 @@ class StrategyManager:
                     'score': score,
                     'tick_origin': current_tick
                 }
+                # P1.1: marcar o dígito como usado (o set é limpo no win e em reset_sequence_state)
+                self._differ_sequence_used.add(digit)
                 logger.info(f"📅 Aposta DIFFER agendada: dígito {digit} no tick {target_tick} "
-                            f"(score {score:.1f}%, faltam {ticks_remaining} ticks)")
+                            f"(score {score:.1f}%, faltam {ticks_remaining} ticks) "
+                            f"| usados nesta janela: {sorted(self._differ_sequence_used)}")
                 return True, f"DIFFER {digit} agendado para o tick {target_tick} (score {score:.1f}%)"
         except Exception as e:
             logger.error(f"Erro em schedule_differ_bet: {e}")
