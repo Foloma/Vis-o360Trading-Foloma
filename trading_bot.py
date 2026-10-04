@@ -1,4 +1,6 @@
 import logging
+import os
+import sqlite3
 import time
 import threading
 from collections import deque
@@ -14,10 +16,11 @@ class TradingBot:
     O sinal agora é orquestrado pelo StrategyManager (módulo strategy.py),
     mas o bot mantém a gestão de trades, estatísticas e risco.
 
-    FIX: stats['wins'], stats['losses'], stats['profit_loss'] passam a ser
-    contadores acumulados (nunca recalculados a partir do deque). O deque
-    serve apenas de janela histórica para a UI — o deque tem maxlen=100, e
-    recalcular a partir dele corrompia o win_rate ao fim de 100 trades.
+    FIX stats: contadores acumulados (nunca recalculados a partir do deque).
+
+    COLETA PARALELA: grava cada slow_digit novo em digit_research_log.
+    Esta é uma coleta passiva — não altera nenhuma lógica de trading,
+    score, risk, martingale, Forex ou Parity/DIFFER.
     """
 
     def __init__(self):
@@ -66,6 +69,10 @@ class TradingBot:
 
         self._last_click_time = None
         self._last_click_tick = None
+
+        # ============ COLETA DE PESQUISA ============
+        self._db_path = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
+        self._last_research_slow_number = 0
 
     def start(self, client):
         self.client = client
@@ -130,6 +137,7 @@ class TradingBot:
 
         if self.digit_analyzer:
             self.digit_analyzer.add_tick(self.current_price)
+            self._maybe_record_slow_digit(symbol)
 
         if self.client:
             self.balance = self.client.balance
@@ -140,6 +148,37 @@ class TradingBot:
 
         self.check_risk_limits()
         self.check_take_profit()
+
+    def _maybe_record_slow_digit(self, symbol):
+        """
+        Coleta paralela — grava cada novo slow_digit em digit_research_log.
+        Só grava quando o slow_number avança (evita duplicação por callback).
+        Não interfere com trading, score, risk, martingale nem Forex.
+        Falha silenciosamente (log) para não interromper ticks.
+        """
+        try:
+            getter = getattr(self.digit_analyzer, 'get_last_slow_digit_info', None)
+            if not getter:
+                return
+            slow_digit, slow_number = getter()
+            if slow_digit is None or slow_number is None:
+                return
+            if slow_number <= self._last_research_slow_number:
+                return
+
+            conn = sqlite3.connect(self._db_path, timeout=5)
+            try:
+                conn.execute(
+                    "INSERT INTO digit_research_log (symbol, digit, slow_number, timestamp) "
+                    "VALUES (?, ?, ?, ?)",
+                    (symbol, int(slow_digit), int(slow_number), time.time())
+                )
+                conn.commit()
+                self._last_research_slow_number = slow_number
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Erro ao registrar digit_research_log: {e}")
 
     def get_status(self):
         self.check_pending_trades()
@@ -277,10 +316,7 @@ class TradingBot:
 
     def update_stats(self):
         """
-        FIX: wins/losses/profit_loss são contadores acumulados — nunca
-        recalculados a partir do deque (que tem maxlen=100). O deque é
-        apenas para histórico/UI. Recalcular a partir dele corrompia o
-        win_rate após 100 trades.
+        FIX: usa contadores acumulados — nunca recalcula a partir do deque.
         """
         with self._state_lock:
             total = self.stats['total']
@@ -293,7 +329,6 @@ class TradingBot:
             self.stats['total_return'] = (pl / invested) * 100 if invested > 0 else 0
 
     def check_pending_trades(self):
-        """Verifica trades pendentes e marca como expirados se ultrapassarem o timeout."""
         now = datetime.now()
         updated = False
         for trade in list(self.trades):
@@ -357,13 +392,10 @@ class TradingBot:
 
                 if was_expired:
                     logger.info(f"🔄 Trade {contract_id} foi expirado mas o POC chegou — a aplicar resultado real")
-                    # Reverter efeitos da expiração nos contadores acumulados
                     self.daily_stats['losses'] -= 1
                     self.daily_stats['profit_loss'] += target_trade.get('amount', 0)
                     self.stats['expired_trades'] -= 1
                     self.daily_stats['expired_trades'] -= 1
-                    # Nota: stats['losses'] nunca foi incrementado em expiração,
-                    # portanto não é preciso corrigir aqui. Só daily_stats o foi.
 
                 if is_win:
                     target_trade['result'] = 'win'
