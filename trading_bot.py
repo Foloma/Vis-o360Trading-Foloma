@@ -21,6 +21,8 @@ class TradingBot:
     COLETA PARALELA: grava cada slow_digit novo em digit_research_log.
     Esta é uma coleta passiva — não altera nenhuma lógica de trading,
     score, risk, martingale, Forex ou Parity/DIFFER.
+    Usa INSERT OR IGNORE + índice UNIQUE em (symbol, slow_number) para
+    resistir a execuções concorrentes sem poluir logs com exceções.
     """
 
     def __init__(self):
@@ -153,6 +155,8 @@ class TradingBot:
         """
         Coleta paralela — grava cada novo slow_digit em digit_research_log.
         Só grava quando o slow_number avança (evita duplicação por callback).
+        Usa INSERT OR IGNORE + índice UNIQUE (symbol, slow_number) para
+        resistir a execuções concorrentes sem poluir logs com exceções.
         Não interfere com trading, score, risk, martingale nem Forex.
         Falha silenciosamente (log) para não interromper ticks.
         """
@@ -169,7 +173,7 @@ class TradingBot:
             conn = sqlite3.connect(self._db_path, timeout=5)
             try:
                 conn.execute(
-                    "INSERT INTO digit_research_log (symbol, digit, slow_number, timestamp) "
+                    "INSERT OR IGNORE INTO digit_research_log (symbol, digit, slow_number, timestamp) "
                     "VALUES (?, ?, ?, ?)",
                     (symbol, int(slow_digit), int(slow_number), time.time())
                 )
