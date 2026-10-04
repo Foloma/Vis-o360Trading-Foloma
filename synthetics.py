@@ -11,6 +11,12 @@ class DigitAnalyzer:
     """
     Analisador de dígitos para contratos DIGITODD/DIGITEVEN, DIGITDIFF e DIGITMATCH.
     Inclui contagem de ausência para a estratégia Safe Flow.
+
+    COLETA DE PESQUISA:
+    _last_slow_digit / _last_slow_counter registam o último slow_digit emitido
+    (1 a cada TICKS_PER_DIGIT). O TradingBot consulta estes valores via
+    get_last_slow_digit_info() e grava em digit_research_log. Não altera
+    nenhuma lógica de análise, sinal, score ou risco.
     """
 
     TICKS_PER_DIGIT = 10
@@ -25,6 +31,8 @@ class DigitAnalyzer:
         self._tick_count       = 0
         self._ticks_in_cycle   = 0
         self._digit_counter    = 0
+        self._last_slow_digit  = None
+        self._last_slow_counter = 0
 
         self._lock = threading.RLock()
 
@@ -118,6 +126,9 @@ class DigitAnalyzer:
                 if self._ticks_in_cycle == 0:
                     self._digit_counter += 1
                     self.slow_digits.append(digit)
+                    # Coleta de pesquisa: registar último slow_digit emitido
+                    self._last_slow_digit = digit
+                    self._last_slow_counter = self._digit_counter
                     snap = list(self.slow_digits)
                     self.last_analysis['digit_counter'] = self._digit_counter
                     self._update_frequency(digit)
@@ -432,6 +443,11 @@ class DigitAnalyzer:
     def get_digit_counter(self):
         with self._lock:
             return self._digit_counter
+
+    def get_last_slow_digit_info(self):
+        """Coleta de pesquisa: devolve (último_slow_digit, slow_counter)."""
+        with self._lock:
+            return self._last_slow_digit, self._last_slow_counter
 
     # --- NOVOS MÉTODOS THREAD-SAFE ---
     def get_tick_count(self):
