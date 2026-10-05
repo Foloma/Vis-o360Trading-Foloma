@@ -14,8 +14,9 @@ rows = conn.execute(
 ).fetchall()
 conn.close()
 
-digits = [d for _, d in rows]
-sns = [s for s, _ in rows]
+# FIX: unpacking correto — antes estava invertido
+digits = [d for d, _ in rows]
+sns = [s for _, s in rows]
 n = len(digits)
 assert n >= 500, f"amostra insuficiente: {n}"
 
@@ -25,10 +26,12 @@ invalid = sum(1 for d in digits if d not in range(10))
 breakeven = 1 / (1 + PAYOUT_NET)
 
 def binom_z(w, n_, p0):
-    if n_ == 0: return 0.0, 1.0
+    if n_ == 0:
+        return 0.0, 1.0
     p = w / n_
     se = math.sqrt(p0 * (1 - p0) / n_)
-    if se == 0: return 0.0, 1.0
+    if se == 0:
+        return 0.0, 1.0
     z = (p - p0) / se
     return z, math.erfc(abs(z) / math.sqrt(2))
 
