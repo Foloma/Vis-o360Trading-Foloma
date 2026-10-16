@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Reconstrói outcomes dos 125 sinais OOS pós-17/09 via candles Deriv M15 (paginado)."""
 import os, sqlite3, json, time, csv
-import websocket
+from curl_cffi import requests as curl_requests
 
 DB = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
 OUT = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'forex_outcome_oos.csv')
-WS = "wss://ws.derivws.com/websockets/v3?app_id=1089"
+WS_URL = "wss://ws.derivws.com/websockets/v3?app_id=1089"
 CUTOFF_DATE = '2026-09-17'
-CUTOFF_EPOCH = int(time.mktime(time.strptime(CUTOFF_DATE, '%Y-%m-%d'))) # 17/09/2026 00:00:00 UTC
+CUTOFF_EPOCH = int(time.mktime(time.strptime(CUTOFF_DATE, '%Y-%m-%d')))
 
-
-def fetch_all(ws, sym):
-    """Faz chamadas paginadas até cobrir o CUTOFF_EPOCH."""
+def fetch_all(session, sym):
+    """Faz chamadas paginadas até cobrir o CUTOFF_EPOCH usando curl_cffi."""
     all_candles = {}
     end = "latest"
     attempts = 0
@@ -20,26 +19,31 @@ def fetch_all(ws, sym):
         if attempts > 20:
             print(f"  AVISO: {sym} atingiu limite de paginação.")
             break
-        ws.send(json.dumps({"ticks_history": sym, "style": "candles",
-                            "granularity": 900, "count": 3000, "end": end}))
-        r = json.loads(ws.recv())
-        if r.get('msg_type') == 'candles':
-            if 'error' in r:
-                raise RuntimeError(r['error'])
-            cs = r.get('candles', [])
-            if not cs:
-                break
-            for c in cs:
-                all_candles[c['epoch']] = c
-            oldest = min(c['epoch'] for c in cs)
-            print(f"  {sym}: +{len(cs)} velas (mais antiga: {time.strftime('%Y-%m-%d %H:%M', time.gmtime(oldest))})")
-            if oldest <= CUTOFF_EPOCH:
-                break
-            end = str(oldest - 1)
-        else:
-            break
-    return all_candles
-
+        payload = {"ticks_history": sym, "style": "candles",
+                   "granularity": 900, "count": 3000, "end": end}
+        response = session.ws_connect(WS_URL)
+        try:
+            response.send_str(json.dumps(payload))
+            while True:
+                msg = response.recv()
+                if msg:
+                    r = json.loads(msg)
+                    if r.get('msg_type') == 'candles':
+                        if 'error' in r:
+                            raise RuntimeError(r['error'])
+                        cs = r.get('candles', [])
+                        if not cs:
+                            return all_candles
+                        for c in cs:
+                            all_candles[c['epoch']] = c
+                        oldest = min(c['epoch'] for c in cs)
+                        print(f"  {sym}: +{len(cs)} velas (mais antiga: {time.strftime('%Y-%m-%d %H:%M', time.gmtime(oldest))})")
+                        if oldest <= CUTOFF_EPOCH:
+                            return all_candles
+                        end = str(oldest - 1)
+                        break
+        finally:
+            response.close()
 
 conn = sqlite3.connect(DB, timeout=10)
 rows = conn.execute(
@@ -50,14 +54,12 @@ rows = conn.execute(
 ).fetchall()
 print(f"Sinais pendentes: {len(rows)}")
 
-ws = websocket.create_connection(WS, timeout=30)
+session = curl_requests.Session(impersonate="chrome")
 cache = {}
-try:
-    for sym in sorted(set(r[1] for r in rows)):
-        cache[sym] = fetch_all(ws, sym)
-        print(f"  {sym}: TOTAL {len(cache[sym])} velas")
-finally:
-    ws.close()
+for sym in sorted(set(r[1] for r in rows)):
+    cache[sym] = fetch_all(session, sym)
+    print(f"  {sym}: TOTAL {len(cache[sym])} velas")
+session.close()
 
 updates = []
 for sid, sym, direction, ts, price_then, bj in rows:
