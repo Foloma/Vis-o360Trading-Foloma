@@ -5,7 +5,11 @@ import websocket
 
 DB = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
 OUT = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'forex_outcome_oos.csv')
-WS = "wss://ws.derivws.com/websockets/v3?app_id=1089"
+APP_ID = os.environ.get('DERIV_APP_ID', '33zLIDPPTQmUaFcSI9DJf')
+WS_ENDPOINTS = [
+    f"wss://ws.derivws.com/websockets/v3?app_id={APP_ID}",
+    f"wss://ws.binaryws.com/websockets/v3?app_id={APP_ID}",
+]
 CUTOFF = '2026-09-17'
 
 
@@ -20,6 +24,24 @@ def fetch(ws, sym, count=4000):
             return r.get('candles', [])
 
 
+def connect():
+    for url in WS_ENDPOINTS:
+        for attempt in range(3):
+            try:
+                print(f"  Tentativa {attempt+1} em {url[:70]}...")
+                ws = websocket.create_connection(
+                    url, timeout=30,
+                    origin="https://sao360-jf.onrender.com",
+                    header=["User-Agent: Mozilla/5.0 FOLOMA-OOS"],
+                )
+                print("  Ligado.")
+                return ws
+            except Exception as e:
+                print(f"  Falhou: {type(e).__name__}: {str(e)[:100]}")
+                time.sleep(2 * (attempt + 1))
+    return None
+
+
 conn = sqlite3.connect(DB, timeout=10)
 rows = conn.execute(
     "SELECT id, symbol, direction, timestamp, price_at_signal, breakdown_json "
@@ -29,7 +51,12 @@ rows = conn.execute(
 ).fetchall()
 print(f"Pendentes: {len(rows)}")
 
-ws = websocket.create_connection(WS, timeout=30)
+ws = connect()
+if not ws:
+    print("Sem ligacao. Abortar.")
+    conn.close()
+    raise SystemExit(1)
+
 cache = {}
 try:
     for sym in sorted(set(r[1] for r in rows)):
