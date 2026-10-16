@@ -1279,6 +1279,51 @@ def debug():
         'reconnect_count': getattr(c, '_reconnect_count', 0),
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
+    
+@app.route('/api/debug/dump_candles/<symbol>')
+@require_auth
+def debug_dump_candles(symbol):
+    sess = get_session(session['user_id'])
+    if not sess or not sess.get('client'):
+        return jsonify({'error': 'sem sessao'}), 400
+    client = sess['client']
+    if not client.authorized:
+        return jsonify({'error': 'cliente nao autorizado'}), 400
+
+    import threading as _th
+    event = _th.Event()
+    holder = {'candles': []}
+    req_id = client._next_req()
+
+    orig = client.on_candles_callback
+    def wrapper(candles, req_id_in=None):
+        if req_id_in == req_id and not event.is_set():
+            holder['candles'] = candles
+            event.set()
+        if orig:
+            try:
+                orig(candles, req_id=req_id_in)
+            except Exception:
+                pass
+    client.on_candles_callback = wrapper
+
+    try:
+        client._ws_send({
+            "ticks_history": symbol, "style": "candles",
+            "granularity": 900, "count": 3000, "end": "latest",
+            "req_id": req_id
+        })
+        if event.wait(timeout=30):
+            return jsonify({
+                'symbol': symbol,
+                'count': len(holder['candles']),
+                'candles': holder['candles']
+            })
+        return jsonify({'error': 'timeout', 'req_id': req_id}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        client.on_candles_callback = orig 
 
 @app.route('/api/debug/digits')
 @require_admin
