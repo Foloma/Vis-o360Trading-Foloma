@@ -172,6 +172,8 @@ def send_telegram(text):
         return False
 
 def notify_signals(signals):
+    """Notifica sinais frescos. CORREÇÃO 22.1: age_secs > 900 impede notificação de sinais expirados,
+    mas permite que sinais que cruzem os 80% após os 5 min ainda sejam notificados."""
     now = time.time()
     with _telegram_lock:
         for s in signals:
@@ -181,8 +183,12 @@ def notify_signals(signals):
             key = (s['symbol'], s['direction'], active_since)
             if key in _telegram_notified and now - _telegram_notified[key] < 3600:
                 continue
+            # CORREÇÃO 22.1: alinhar com janela de operabilidade (900s = 15 min), não 300s
+            age_secs = (s.get('active_duration_seconds', 0) or 0)
+            if age_secs > 900:
+                continue
             emoji = '🟢' if s['direction'] == 'BUY' else '🔴'
-            age_min = (s.get('active_duration_seconds', 0) or 0) // 60
+            age_min = age_secs // 60
             text = (
                 f"{emoji} <b>Sinal Fresco — FOLOMA</b>\n\n"
                 f"Par: <b>{s['symbol']}</b>\n"
@@ -206,17 +212,24 @@ def _cleanup_loop():
             conn.commit()
             conn.close()
             now = time.time()
+            # NOTA (14.4): on_disconnect() corre fora do lock para não bloquear a app
+            to_disconnect = []
             with sessions_lock:
                 to_remove = []
                 for uid, sess in sessions.items():
                     client = sess.get('client')
                     last_tick = getattr(client, '_last_tick_time', 0)
                     if last_tick and (now - last_tick) > 1800:
-                        sess['trading_bot'].on_disconnect()
-                        client._stop_event.set()
+                        to_disconnect.append(sess)
                         to_remove.append(uid)
                 for uid in to_remove:
                     sessions.pop(uid, None)
+            for sess in to_disconnect:
+                try:
+                    sess['trading_bot'].on_disconnect()
+                    sess['client']._stop_event.set()
+                except Exception:
+                    pass
             logger.info("Limpeza periódica concluída.")
         except Exception as e:
             logger.error(f"Erro na limpeza periódica: {e}")
@@ -1279,7 +1292,105 @@ def debug():
         'reconnect_count': getattr(c, '_reconnect_count', 0),
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
-    
+
+@app.route('/api/debug/evaluate_oos')
+@require_admin
+def debug_evaluate_oos():
+    """Reconstrói outcomes dos sinais OOS pós-17/09.
+    CORREÇÃO 23.2: alinhamento exato de 15 min (900s) após o timestamp do sinal."""
+    import json, time
+    sess = get_session(session['user_id'])
+    if not sess or not sess.get('client'):
+        return jsonify({'error': 'sem sessao'}), 400
+    client = sess['client']
+    if not client.authorized:
+        return jsonify({'error': 'cliente nao autorizado'}), 400
+
+    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+    rows = conn.execute(
+        "SELECT id, symbol, direction, timestamp, price_at_signal "
+        "FROM forex_signal_log WHERE strategy_used='ensemble' AND confidence >= 80 "
+        "AND evaluated=0 AND date(timestamp,'unixepoch') >= '2026-09-17'"
+    ).fetchall()
+
+    if not rows:
+        conn.close()
+        return jsonify({'msg': 'Nenhum sinal pendente para avaliar.'})
+
+    symbols = sorted(list(set(r[1] for r in rows)))
+    cache = {}
+    import threading as _th
+
+    for sym in symbols:
+        event = _th.Event()
+        holder = {'candles': []}
+        req_id = client._next_req()
+        orig = client.on_candles_callback
+
+        def wrapper(candles, req_id_in=None):
+            if req_id_in == req_id and not event.is_set():
+                holder['candles'] = candles
+                event.set()
+            if orig:
+                try:
+                    orig(candles, req_id=req_id_in)
+                except Exception:
+                    pass
+
+        client.on_candles_callback = wrapper
+        try:
+            client._ws_send({
+                "ticks_history": sym, "style": "candles",
+                "granularity": 900, "count": 3000, "end": "latest",
+                "req_id": req_id
+            })
+            if event.wait(timeout=30):
+                cache[sym] = {c['epoch']: c for c in holder['candles']}
+        except Exception as e:
+            logger.error(f"Erro ao buscar {sym}: {e}")
+        finally:
+            client.on_candles_callback = orig
+
+    updates = []
+    for sid, sym, direction, ts, price_then in rows:
+        cs = cache.get(sym, {})
+        if not cs or price_then is None:
+            updates.append((sid, 'nodata', None))
+            continue
+        # CORREÇÃO 23.2: alvo é exatamente 15 min (900s) após o timestamp do sinal,
+        # sem arredondamento para o limite da vela M15
+        target_ts = ts + 900
+        later = sorted(e for e in cs if e >= target_ts)
+        nc = cs[later[0]] if later else None
+        if not nc:
+            updates.append((sid, 'nodata', None))
+            continue
+        pa = nc['close']
+        up = pa > price_then
+        outcome = 'win' if ((direction == 'BUY') == up) else 'loss'
+        updates.append((sid, outcome, pa))
+
+    now = time.time()
+    for sid, o, pa in updates:
+        conn.execute(
+            "UPDATE forex_signal_log SET evaluated=1, outcome=?, price_after=?, "
+            "evaluated_at=? WHERE id=?",
+            (o, pa, now, sid)
+        )
+    conn.commit()
+    conn.close()
+
+    wins = sum(1 for _, o, _ in updates if o == 'win')
+    losses = sum(1 for _, o, _ in updates if o == 'loss')
+    nod = sum(1 for _, o, _ in updates if o == 'nodata')
+    return jsonify({
+        'total': len(updates),
+        'wins': wins,
+        'losses': losses,
+        'nodata': nod,
+        'win_rate': round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0
+    })
+
 @app.route('/api/debug/dump_candles/<symbol>')
 @require_auth
 def debug_dump_candles(symbol):
@@ -1796,6 +1907,8 @@ def forex_signals():
 @app.route('/api/forex/signals/recent', methods=['GET'])
 @require_auth
 def forex_signals_recent():
+    """CORREÇÃO 23.1: agrupamento em Python por proximidade temporal (~1000s), 
+    evitando fundir sinais distintos como acontecia com GROUP BY symbol, direction."""
     try:
         hours = int(request.args.get('hours', 24))
     except (ValueError, TypeError):
@@ -1805,26 +1918,52 @@ def forex_signals_recent():
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         cutoff = time.time() - (hours * 3600)
         rows = conn.execute(
-            "SELECT MIN(id) as id, symbol, direction, MAX(confidence) as confidence, MIN(price_at_signal) as price_at_signal, MIN(timestamp) as timestamp, MAX(suggested_duration_minutes) as suggested_duration_minutes, MIN(active_duration_seconds) as active_duration_seconds FROM forex_signal_log WHERE strategy_used='ensemble' AND confidence >= 80 AND timestamp >= ? GROUP BY symbol, direction ORDER BY timestamp DESC LIMIT 50",            (cutoff,)
+            "SELECT id, symbol, direction, confidence, price_at_signal, timestamp, "
+            "suggested_duration_minutes, active_duration_seconds "
+            "FROM forex_signal_log WHERE strategy_used='ensemble' AND confidence >= 80 AND timestamp >= ? "
+            "ORDER BY symbol, direction, timestamp", (cutoff,)
         ).fetchall()
         conn.close()
     except Exception as e:
         logger.error(f"Erro ao ler sinais recentes: {e}")
         return jsonify({'error': 'Erro ao consultar histórico'}), 500
+
+    # Agrupamento manual por proximidade temporal (não fundir sinais distintos)
+    grouped = []
+    last_key, last_ts = None, None
+    for id_, symbol, direction, confidence, price, ts, duration, active_secs in rows:
+        key = (symbol, direction)
+        # Novo sinal se mudar de par/direção OU se passaram >1000s desde o último
+        if key != last_key or (ts - last_ts) > 1000:
+            grouped.append({
+                'id': id_, 'symbol': symbol, 'direction': direction,
+                'confidence': confidence, 'price_at_signal': price, 'timestamp': ts,
+                'suggested_duration_minutes': duration, 'active_duration_seconds': active_secs
+            })
+        else:
+            # Mesmo sinal a persistir — atualiza a confiança para o valor mais recente
+            grouped[-1]['confidence'] = confidence
+        last_key, last_ts = key, ts
+
+    # Ordenar do mais recente para o mais antigo e limitar
+    grouped.sort(key=lambda g: g['timestamp'], reverse=True)
+    grouped = grouped[:50]
+
     now = time.time()
     signals = []
-    for row in rows:
-        id_, symbol, direction, confidence, price, ts, duration, active_secs = row
-        age_minutes = int((now - ts) // 60)
-        suggested_min = duration or 15
+    for g in grouped:
+        age_minutes = int((now - g['timestamp']) // 60)
+        suggested_min = g['suggested_duration_minutes'] or 15
         is_operable = age_minutes < suggested_min
         signals.append({
-            'id': id_, 'symbol': symbol, 'direction': direction, 'confidence': confidence,
-            'price_at_signal': price, 'timestamp': ts, 'age_minutes': age_minutes,
-            'suggested_duration_minutes': suggested_min, 'active_duration_seconds': active_secs,
+            'id': g['id'], 'symbol': g['symbol'], 'direction': g['direction'],
+            'confidence': g['confidence'], 'price_at_signal': g['price_at_signal'],
+            'timestamp': g['timestamp'], 'age_minutes': age_minutes,
+            'suggested_duration_minutes': suggested_min, 'active_duration_seconds': g['active_duration_seconds'],
             'is_operable': is_operable,
             'status': 'operavel' if is_operable else 'historico',
         })
+
     operable_count = sum(1 for s in signals if s['is_operable'])
     return jsonify({
         'signals': signals, 'total': len(signals), 'operable_count': operable_count,
