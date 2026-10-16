@@ -17,13 +17,27 @@ class StrategyManager:
     - Análise contínua de sequências para Differ (ausência curta).
     - Filtros de probabilidade estatística antes de agendar.
     - Versão robusta com proteções contra erros e validações.
-    - Correções: _check_pending_bets retorna tupla; differ gerado apenas por sequência;
-      paridade recalculada a cada tick (sem prender recomendação);
-      latência usa _ping_ms em tempo real;
-      _analyze_digit_sequence escolhe o dígito mais ausente.
+
+    Convenção de ordem de get_recent_digits():
+    Assume-se CRONOLÓGICA (mais antigo primeiro, mais recente em [-1]).
+    Confirmar em synthetics.py antes de produção.
+
+    Histórico de correções:
     - P1.1: _differ_sequence_used agora recebe .add() ao agendar DIFFER, e
-      _analyze_digit_sequence ignora dígitos já usados — evita apostar o mesmo
-      dígito em duplicado dentro da mesma janela.
+      _analyze_digit_sequence ignora dígitos já usados.
+    - Fix 1.1: reset_sequence_state limpa _pending_parity_bet/_pending_differ_bet.
+    - Fix 1.2: _differ_sequence_used passa a dict {digit: timestamp} com TTL,
+      evitando bloqueio indefinido do DIFFER.
+    - Fix 1.5: _differ_cooldown_until deixa de ser zerado no global stop.
+    - Briefing 16/10/2026:
+      * Paridade: bias ≥ 65% em 15 ticks + seq ≤ 2, bloqueio a partir de 4,
+        score mínimo 72.
+      * Differ: threshold 11, freq máx 12% em 25, zero aparições em 6 ticks,
+        ordenação por qualidade.
+      * Matches: threshold 38.
+      * Z-Score: |z| ≥ 1.85.
+      * Conflito Paridade/Differ: Differ tem prioridade no mesmo tick.
+      * Latência > 120ms exige score +10 acima do mínimo.
     """
 
     def __init__(self, client, analyzer):
@@ -39,7 +53,8 @@ class StrategyManager:
         self._consecutive_losses = 0
         self._global_stop_until = 0
         self._cooldown_until = 0
-        self._differ_sequence_used = set()
+        # Fix 1.2: dict {digit: timestamp} em vez de set, para permitir TTL
+        self._differ_sequence_used = {}
 
         self._consecutive_losses_differ = 0
         self._differ_cooldown_until = 0
@@ -67,7 +82,8 @@ class StrategyManager:
         self._trade_locked_at = 0
         self.TRADE_LOCK_TIMEOUT = 20
 
-        self.MATCHES_ABSENCE_THRESHOLD = 45
+        # Briefing 3.3: threshold reduzido de 45 para 38
+        self.MATCHES_ABSENCE_THRESHOLD = 38
         self.MARKET_SPIKE_THRESHOLD = 0.002
 
         self._pending_parity_bet = None
@@ -75,11 +91,29 @@ class StrategyManager:
 
         self._last_execution_error = None
 
-        self.MIN_SCORE_PARITY = 65.0
-        self.MIN_SCORE_DIFFER = 65.0
+        # Briefing 3.1/3.2: score mínimo sobe de 65 para 72
+        self.MIN_SCORE_PARITY = 72.0
+        self.MIN_SCORE_DIFFER = 72.0
         self.LATENCY_LIMIT_MS = 150.0
+        self.LATENCY_SOFT_LIMIT_MS = 120.0  # Briefing 4: latência soft
         self.MARTINGALE_AMOUNT_THRESHOLD = 1.0
-        self.DIFFER_SHORT_ABSENCE_THRESHOLD = 8
+        # Briefing 3.2: threshold de ausência sobe de 8 para 11
+        self.DIFFER_SHORT_ABSENCE_THRESHOLD = 11
+
+        # Briefing 3.1: filtros de paridade
+        self.PARITY_BIAS_THRESHOLD = 0.65
+        self.PARITY_MAX_SEQ = 2
+        self.PARITY_BLOCK_SEQ = 4
+
+        # Briefing 3.2: filtros adicionais de DIFFER
+        self.DIFFER_MAX_FREQ_25 = 0.12
+        self.DIFFER_NO_APPEARANCE_TICKS = 6
+
+        # Briefing 3.4: filtro mínimo de Z-Score
+        self.MIN_ABS_ZSCORE = 1.85
+
+        # Fix 1.2: TTL para _differ_sequence_used (20 minutos)
+        self.DIFFER_SEQUENCE_TTL = 1200
 
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
@@ -149,6 +183,18 @@ class StrategyManager:
             logger.error(f"Erro em _can_schedule: {e}")
             return False, "Erro na verificação de ciclo"
 
+    def _effective_latency(self):
+        """Devolve a latência efetiva em ms (0 se ping stale com streaming ativo)."""
+        try:
+            raw_ping = getattr(self.client, '_ping_ms', 0)
+            if raw_ping >= 9999 and getattr(self.client, 'streaming', False):
+                last_tick_time = getattr(self.client, '_last_tick_time', 0)
+                if last_tick_time and time.time() - last_tick_time < 10:
+                    return 0
+            return raw_ping
+        except Exception:
+            return 0
+
     def is_market_stable(self):
         try:
             if len(self._price_history) >= 5:
@@ -213,7 +259,7 @@ class StrategyManager:
             logger.error(f"Erro em refresh_signals: {e}")
 
     def _maybe_generate_sequence_differ(self):
-        """Gera sinal Differ se um dígito está ausente há poucos ticks (ex.: 8), sem cluster."""
+        """Gera sinal Differ se um dígito está ausente há poucos ticks, sem cluster."""
         try:
             with self._lock:
                 if self._trade_locked:
@@ -223,7 +269,7 @@ class StrategyManager:
                 if self.client and getattr(self.client, 'active_trades', None):
                     return
                 if self._active_signals.get('differ') and self._is_signal_still_valid(self._active_signals['differ']):
-                    return  # já existe sinal válido
+                    return
 
                 seq_signal = self._analyze_digit_sequence()
                 if seq_signal:
@@ -232,19 +278,52 @@ class StrategyManager:
         except Exception as e:
             logger.error(f"Erro em _maybe_generate_sequence_differ: {e}")
 
-    def _analyze_digit_sequence(self):
-        """P1.1: ignora dígitos já usados em _differ_sequence_used, para não repetir aposta."""
+    def _cleanup_used_differ_digits(self):
+        """Fix 1.2: remove entradas com TTL expirado de _differ_sequence_used."""
         try:
-            recent = self.analyzer.get_recent_digits(20)
-            if not isinstance(recent, list) or len(recent) < 10:
+            now = time.time()
+            expired = [d for d, t in self._differ_sequence_used.items()
+                       if now - t > self.DIFFER_SEQUENCE_TTL]
+            for d in expired:
+                del self._differ_sequence_used[d]
+            if expired:
+                logger.info(f"🧹 _differ_sequence_used: removidos {expired} (TTL expirado)")
+        except Exception as e:
+            logger.error(f"Erro em _cleanup_used_differ_digits: {e}")
+
+    def _analyze_digit_sequence(self):
+        """
+        Briefing 3.2: escolhe candidato por qualidade (ausência + baixa frequência).
+        Filtros: ausência ≥ 11, freq ≤ 12% em 25 ticks, zero aparições em 6 ticks.
+        Ignora dígitos já usados em _differ_sequence_used (com TTL — Fix 1.2).
+        Assume get_recent_digits() em ordem CRONOLÓGICA (recent[-1] = mais recente).
+        """
+        try:
+            # Fix 1.2: limpar entradas expiradas antes de filtrar
+            self._cleanup_used_differ_digits()
+
+            recent = self.analyzer.get_recent_digits(25)
+            if not isinstance(recent, list) or len(recent) < 15:
                 return None
+
+            last6 = recent[-self.DIFFER_NO_APPEARANCE_TICKS:]
 
             candidates = []
             for digit in range(10):
-                # P1.1: skip dígitos já usados na janela corrente
+                # P1.1 + Fix 1.2: skip dígitos já usados na janela
                 if digit in self._differ_sequence_used:
                     continue
 
+                # Briefing 3.2: zero aparições nos últimos 6 ticks
+                if digit in last6:
+                    continue
+
+                # Briefing 3.2: frequência máxima 12% nos últimos 25
+                freq25 = recent.count(digit) / len(recent)
+                if freq25 > self.DIFFER_MAX_FREQ_25:
+                    continue
+
+                # Ticks desde a última aparição (recent em ordem cronológica)
                 last_idx = -1
                 for i, d in enumerate(reversed(recent)):
                     if d == digit:
@@ -252,17 +331,19 @@ class StrategyManager:
                         break
                 ticks_absent = last_idx if last_idx != -1 else len(recent)
 
-                if ticks_absent >= self.DIFFER_SHORT_ABSENCE_THRESHOLD and recent[-5:].count(digit) < 2:
-                    candidates.append((digit, ticks_absent))
+                if ticks_absent >= self.DIFFER_SHORT_ABSENCE_THRESHOLD:
+                    # Briefing 3.2: qualidade = ausência + baixa frequência
+                    quality = ticks_absent * 2 + (self.DIFFER_MAX_FREQ_25 - freq25) * 100
+                    candidates.append((digit, ticks_absent, freq25, quality))
 
             if not candidates:
                 return None
 
-            digit, ticks_absent = max(candidates, key=lambda c: c[1])  # o mais ausente
+            digit, ticks_absent, freq25, _ = max(candidates, key=lambda c: c[3])
             return {
                 'digit': digit,
                 'ticks_absent': ticks_absent,
-                'reason': f"Dígito {digit} ausente há {ticks_absent} ticks (sequência curta)"
+                'reason': f"Dígito {digit} ausente há {ticks_absent}t (freq 25t={freq25:.0%})"
             }
         except Exception as e:
             logger.error(f"Erro em _analyze_digit_sequence: {e}")
@@ -279,7 +360,7 @@ class StrategyManager:
                 if self.client and getattr(self.client, 'active_trades', None):
                     return
 
-                # Paridade: recalcular sempre, a cada tick, sem depender de expiração
+                # Paridade: recalcular sempre, a cada tick
                 preview_func = getattr(self, '_preview_parity_signal', None)
                 if preview_func:
                     preview = preview_func()
@@ -288,7 +369,7 @@ class StrategyManager:
                                             preview.get('digits', []), preview['reason'],
                                             mode=preview.get('mode', 'parity'))
 
-                # Apenas matches e zscore são gerados no início do ciclo
+                # Matches e zscore só no início do ciclo
                 tpd = getattr(self.analyzer, 'TICKS_PER_DIGIT', 10)
                 tr = self.analyzer.get_ticks_remaining() if hasattr(self.analyzer, 'get_ticks_remaining') else 10
                 inicio_ciclo = tr >= tpd - 1
@@ -422,7 +503,7 @@ class StrategyManager:
             return False, "Erro interno ao agendar paridade"
 
     def schedule_differ_bet(self, digit, amount=0.35):
-        """P1.1: após agendar, adiciona o dígito ao set de usados — evita repetição."""
+        """P1.1 + Fix 1.2: após agendar, adiciona o dígito ao dict com timestamp."""
         try:
             with self._lock:
                 ok, reason = self._can_schedule()
@@ -438,7 +519,9 @@ class StrategyManager:
                     remaining = self._differ_cooldown_until - time.time()
                     return False, f"Pausa DIFFER {remaining:.0f}s restantes"
 
-                # P1.1: recusa explicitamente se o dígito já foi usado nesta janela
+                # Fix 1.2: limpar entradas expiradas antes de checar
+                self._cleanup_used_differ_digits()
+
                 if digit in self._differ_sequence_used:
                     return False, f"Dígito {digit} já apostado nesta janela"
 
@@ -461,17 +544,18 @@ class StrategyManager:
                     'score': score,
                     'tick_origin': current_tick
                 }
-                # P1.1: marcar o dígito como usado (o set é limpo no win e em reset_sequence_state)
-                self._differ_sequence_used.add(digit)
+                # Fix 1.2: timestamp para TTL
+                self._differ_sequence_used[digit] = time.time()
                 logger.info(f"📅 Aposta DIFFER agendada: dígito {digit} no tick {target_tick} "
                             f"(score {score:.1f}%, faltam {ticks_remaining} ticks) "
-                            f"| usados nesta janela: {sorted(self._differ_sequence_used)}")
+                            f"| usados: {sorted(self._differ_sequence_used.keys())}")
                 return True, f"DIFFER {digit} agendado para o tick {target_tick} (score {score:.1f}%)"
         except Exception as e:
             logger.error(f"Erro em schedule_differ_bet: {e}")
             return False, "Erro interno ao agendar DIFFER"
 
     def _check_pending_bets(self):
+        """Briefing 4: em conflito (paridade e differ prontos no mesmo tick), Differ tem prioridade."""
         parity_ready = False
         differ_ready = False
         try:
@@ -481,6 +565,12 @@ class StrategyManager:
                     parity_ready = True
                 if self._pending_differ_bet and current_tick >= self._pending_differ_bet['target_tick']:
                     differ_ready = True
+
+                # Briefing 4: conflito — Differ tem prioridade
+                if parity_ready and differ_ready:
+                    logger.info("⚖️ Conflito Paridade/Differ no mesmo tick — Differ tem prioridade, paridade cancelada")
+                    self._pending_parity_bet = None
+                    parity_ready = False
         except Exception as e:
             logger.error(f"Erro em _check_pending_bets: {e}")
         return parity_ready, differ_ready
@@ -524,15 +614,55 @@ class StrategyManager:
             return None
 
     def _preview_parity_signal(self):
+        """
+        Briefing 3.1: bias dos últimos 15 ticks.
+        Só gera sinal quando bias ≥ 65% ou ≤ 35% E sequência ≤ 2.
+        Bloqueia qualquer entrada com sequência ≥ 4.
+        Assume get_recent_digits() em ordem CRONOLÓGICA (recent[-1] = mais recente).
+        """
         try:
-            recent = self.analyzer.get_recent_digits(1)
-            if recent and isinstance(recent, list) and len(recent) > 0:
-                last = recent[0]
-                is_odd = last % 2 != 0
-                rec = 'even' if is_odd else 'odd'
-                return {'recommendation': rec, 'digits': [last],
-                        'reason': f"Último dígito {last} → apostar {rec}", 'mode': 'alternancia'}
-            return None
+            recent = self.analyzer.get_recent_digits(15)
+            if not isinstance(recent, list) or len(recent) < 15:
+                return None
+
+            window = recent[-15:]
+            last = window[-1]
+            last_parity = last % 2
+            odd_count = sum(1 for d in window if d % 2 != 0)
+            odd_pct = odd_count / len(window)
+
+            # Sequência de mesma paridade no fim
+            seq_len = 1
+            for d in reversed(window[:-1]):
+                if d % 2 == last_parity:
+                    seq_len += 1
+                else:
+                    break
+
+            # Briefing 3.1: bloqueio a partir de 4
+            if seq_len >= self.PARITY_BLOCK_SEQ:
+                return None
+            # Briefing 3.1: só gera com sequência ≤ 2
+            if seq_len > self.PARITY_MAX_SEQ:
+                return None
+
+            # Briefing 3.1: bias claro
+            bias_strength = max(odd_pct, 1 - odd_pct)
+            if bias_strength < self.PARITY_BIAS_THRESHOLD:
+                return None
+
+            # Aposta contra o bias (mean reversion)
+            if odd_pct >= self.PARITY_BIAS_THRESHOLD:
+                rec = 'even'
+            else:
+                rec = 'odd'
+
+            return {
+                'recommendation': rec,
+                'digits': [last],
+                'reason': f"Bias {odd_pct:.0%} ímpares em 15 → {rec} (seq={seq_len})",
+                'mode': 'bias'
+            }
         except Exception as e:
             logger.error(f"Erro em _preview_parity_signal: {e}")
             return None
@@ -556,21 +686,22 @@ class StrategyManager:
             return None
 
     def _preview_zscore_signal(self):
+        """Briefing 3.4: exige |z-score| ≥ 1.85."""
         try:
             if self._zscore_sequence_used or time.time() < self._zscore_cooldown_until:
                 return None
             z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
-            if z_diff is not None and digit_diff is not None:
+            if z_diff is not None and digit_diff is not None and abs(z_diff) >= self.MIN_ABS_ZSCORE:
                 return {'recommendation': digit_diff,
                         'action': 'DIFFER',
                         'digits': [],
-                        'reason': f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}",
+                        'reason': f"Z-Score +{z_diff:.2f} → DIFFER {digit_diff}",
                         'mode': 'zscore'}
-            if z_match is not None and digit_match is not None:
+            if z_match is not None and digit_match is not None and abs(z_match) >= self.MIN_ABS_ZSCORE:
                 return {'recommendation': digit_match,
                         'action': 'MATCHES',
                         'digits': [],
-                        'reason': f"Z‑Score {z_match:.2f} → MATCHES {digit_match}",
+                        'reason': f"Z-Score {z_match:.2f} → MATCHES {digit_match}",
                         'mode': 'zscore'}
             return None
         except Exception as e:
@@ -598,7 +729,7 @@ class StrategyManager:
             preview = self._preview_parity_signal()
             if preview:
                 return True, preview['recommendation'], preview['reason']
-            return False, None, "Nenhum dígito disponível"
+            return False, None, "Sem bias claro nos últimos 15 ticks"
         except Exception as e:
             logger.error(f"Erro em _peek_parity: {e}")
             return False, None, "Erro ao obter sinal de paridade"
@@ -627,7 +758,7 @@ class StrategyManager:
             preview = self._preview_zscore_signal()
             if preview:
                 return True, preview['action'], preview['recommendation'], preview['reason']
-            return False, None, None, "Nenhum sinal Z‑Score disponível"
+            return False, None, None, "Nenhum sinal Z-Score disponível (|z| < 1.85)"
         except Exception as e:
             logger.error(f"Erro em _peek_zscore: {e}")
             return False, None, None, "Erro ao obter sinal Z-Score"
@@ -649,10 +780,7 @@ class StrategyManager:
 
     def _can_martingale(self):
         try:
-            raw = getattr(self.client, '_ping_ms', 0)
-            ping = 0 if (raw >= 9999 and getattr(self.client, 'streaming', False)
-                         and getattr(self.client, '_last_tick_time', 0)
-                         and time.time() - self.client._last_tick_time < 10) else raw
+            ping = self._effective_latency()
             if ping >= 150:
                 return False
             stable, _ = self.is_market_stable()
@@ -710,6 +838,7 @@ class StrategyManager:
             return None, "Erro ao gerar sinal MATCHES"
 
     def evaluate_zscore(self):
+        """Briefing 3.4: exige |z| ≥ 1.85 (filtro aplicado em _generate_zscore_signal)."""
         try:
             with self._lock:
                 self._check_trade_lock_timeout()
@@ -719,24 +848,24 @@ class StrategyManager:
                 if self._trade_locked:
                     return None, None, "Trade em curso"
                 if self._zscore_sequence_used:
-                    return None, None, "Sinal Z‑Score já utilizado"
+                    return None, None, "Sinal Z-Score já utilizado"
                 if time.time() < self._zscore_cooldown_until:
                     remaining = self._zscore_cooldown_until - time.time()
-                    return None, None, f"Cooldown Z‑Score ({remaining:.0f}s)"
+                    return None, None, f"Cooldown Z-Score ({remaining:.0f}s)"
                 signal = self._active_signals.get('zscore')
                 if signal and self._is_signal_still_valid(signal):
                     preview = self._preview_zscore_signal()
                     if not preview:
                         self._active_signals['zscore'] = None
                         ticks_elapsed = self.analyzer.get_tick_count() - signal.get('tick_origin', 0)
-                        logger.info("⚠️ Sinal Z‑Score invalidado na execução — condição desapareceu")
+                        logger.info("⚠️ Sinal Z-Score invalidado na execução — condição desapareceu")
                         return None, None, f"Sinal expirou ({ticks_elapsed} ticks passados)"
                     self._zscore_sequence_used = True
                     self._zscore_cooldown_until = time.time() + 300
                     action = self._last_zscore_action
                     if not action:
-                        action = 'DIFFER' if signal['reason'].startswith('Z‑Score +') else 'MATCHES'
-                    logger.info(f"✅ Z‑Score executado: snapshot {signal['id']}, ação={action}")
+                        action = 'DIFFER' if signal['reason'].startswith('Z-Score +') else 'MATCHES'
+                    logger.info(f"✅ Z-Score executado: snapshot {signal['id']}, ação={action}")
                     return action, signal['recommendation'], signal['reason']
                 return self._generate_zscore_signal()
         except Exception as e:
@@ -744,25 +873,26 @@ class StrategyManager:
             return None, None, "Erro interno no Z-Score"
 
     def _generate_zscore_signal(self):
+        """Briefing 3.4: exige |z| ≥ 1.85."""
         try:
             z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
-            if z_diff is not None and digit_diff is not None:
+            if z_diff is not None and digit_diff is not None and abs(z_diff) >= self.MIN_ABS_ZSCORE:
                 self._last_zscore_action = 'Z_DIFFER'
                 self._last_zscore_digit = digit_diff
                 signal = self._create_signal('zscore', digit_diff, [],
-                                            f"Z‑Score +{z_diff:.2f} → DIFFER {digit_diff}",
+                                            f"Z-Score +{z_diff:.2f} → DIFFER {digit_diff}",
                                             mode='zscore')
-                logger.info(f"✅ Z‑Score SINAL GERADO: {signal['id'] if signal else 'erro'}")
+                logger.info(f"✅ Z-Score SINAL GERADO: {signal['id'] if signal else 'erro'}")
                 return 'DIFFER', digit_diff, signal['reason'] if signal else 'Sinal não criado'
-            if z_match is not None and digit_match is not None:
+            if z_match is not None and digit_match is not None and abs(z_match) >= self.MIN_ABS_ZSCORE:
                 self._last_zscore_action = 'Z_MATCH'
                 self._last_zscore_digit = digit_match
                 signal = self._create_signal('zscore', digit_match, [],
-                                            f"Z‑Score {z_match:.2f} → MATCHES {digit_match}",
+                                            f"Z-Score {z_match:.2f} → MATCHES {digit_match}",
                                             mode='zscore')
-                logger.info(f"✅ Z‑Score SINAL GERADO: {signal['id'] if signal else 'erro'}")
+                logger.info(f"✅ Z-Score SINAL GERADO: {signal['id'] if signal else 'erro'}")
                 return 'MATCHES', digit_match, signal['reason'] if signal else 'Sinal não criado'
-            return None, None, "Nenhum desvio estatístico significativo"
+            return None, None, f"Nenhum desvio |z| ≥ {self.MIN_ABS_ZSCORE}"
         except Exception as e:
             logger.error(f"Erro em _generate_zscore_signal: {e}")
             return None, None, "Erro ao gerar sinal Z-Score"
@@ -771,6 +901,10 @@ class StrategyManager:
         self._cooldown_until = time.time() + ticks
 
     def reset_sequence_state(self):
+        """
+        Fix 1.1: também limpa _pending_parity_bet e _pending_differ_bet para que
+        apostas agendadas não sobrevivam ao reset (evita execução durante stop global).
+        """
         try:
             with self._lock:
                 self._differ_sequence_used.clear()
@@ -781,6 +915,9 @@ class StrategyManager:
                 for key in self._active_signals:
                     self._active_signals[key] = None
                 self._trade_locked = False
+                # Fix 1.1
+                self._pending_parity_bet = None
+                self._pending_differ_bet = None
         except Exception as e:
             logger.error(f"Erro em reset_sequence_state: {e}")
 
@@ -804,7 +941,9 @@ class StrategyManager:
                         logger.warning("🛑 STOP GLOBAL: 3 perdas consecutivas — pausa 3 min")
                         self._consecutive_losses = 0
                         self._consecutive_losses_differ = 0
-                        self._differ_cooldown_until = 0
+                        # Fix 1.5: NÃO zerar _differ_cooldown_until (o cooldown
+                        # de differ deve sobreviver ao global stop, que é mais curto)
+                        # self._differ_cooldown_until = 0  <-- removido
                         self.reset_sequence_state()
                         return
 
@@ -926,53 +1065,81 @@ class StrategyManager:
             return 0.0, False, "Erro na avaliação de probabilidade"
 
     def _evaluate_parity(self, recent_digits, amount):
+        """
+        Briefing 3.1: bias em 15 ticks, seq ≤ 2, bloqueio a partir de 4,
+        score mínimo 72, penalização de latência > 120ms.
+        Assume recent_digits em ordem CRONOLÓGICA ([-1] = mais recente).
+        """
         try:
-            if not recent_digits:
-                return 0.0, False, "Sem dígitos recentes"
+            if not recent_digits or len(recent_digits) < 15:
+                return 0.0, False, "Dados insuficientes (mínimo 15 ticks)"
 
-            window = recent_digits[-20:]
+            window = recent_digits[-15:]
+            last = window[-1]
+            last_parity = last % 2
             odd_count = sum(1 for d in window if d % 2 != 0)
-            even_count = len(window) - odd_count
-            ratio = odd_count / len(window) if len(window) > 0 else 0.5
+            odd_pct = odd_count / len(window)
 
-            last_parity = recent_digits[-1] % 2
+            # Sequência de mesma paridade no fim
             seq_len = 1
-            for d in reversed(recent_digits[:-1]):
+            for d in reversed(window[:-1]):
                 if d % 2 == last_parity:
                     seq_len += 1
                 else:
                     break
 
-            if seq_len >= 6:
-                return 0.0, False, f"Sequência de {seq_len} { 'ímpares' if last_parity else 'pares' } – risco alto"
+            # Briefing 3.1: bloqueio a partir de 4
+            if seq_len >= self.PARITY_BLOCK_SEQ:
+                return 0.0, False, f"Sequência de {seq_len} {('ímpares' if last_parity else 'pares')} — bloqueado"
 
-            balance_score = 100 - abs(ratio - 0.5) * 200
-            seq_bonus = 20 if seq_len <= 2 else 0
-            seq_penalty = max(0, (seq_len - 3) * 10)
+            # Briefing 3.1: só gera sinal com seq ≤ 2
+            if seq_len > self.PARITY_MAX_SEQ:
+                return 0.0, False, f"Sequência de {seq_len} — demasiado longa"
 
-            score = balance_score + seq_bonus - seq_penalty
+            # Briefing 3.1: bias claro
+            bias_strength = max(odd_pct, 1 - odd_pct)
+            if bias_strength < self.PARITY_BIAS_THRESHOLD:
+                return 0.0, False, f"Sem bias claro ({odd_pct:.0%} ímpares)"
+
+            # Score: bias 0.65 → 72, bias 1.00 → 100
+            score = 72 + (bias_strength - self.PARITY_BIAS_THRESHOLD) * 80
             score = max(0, min(100, score))
 
-            raw_ping = getattr(self.client, '_ping_ms', 0)
-            streaming_ok = getattr(self.client, 'streaming', False)
-            last_tick_time = getattr(self.client, '_last_tick_time', 0)
-            if raw_ping >= 9999 and streaming_ok and last_tick_time and time.time() - last_tick_time < 10:
-                lat = 0
-            else:
-                lat = raw_ping
-
+            # Briefing 4: latência soft exige score +10
+            lat = self._effective_latency()
             if lat > self.LATENCY_LIMIT_MS:
-                return score, False, f"Latência alta ({lat}ms) – abortando para evitar bad fill"
+                return score, False, f"Latência alta ({lat}ms) — abortando"
 
-            approved = score >= self.MIN_SCORE_PARITY
-            reason = f"Score {score:.1f}% (balance={ratio:.2f}, seq={seq_len})" if approved else f"Score baixo {score:.1f}%"
+            effective_min = self.MIN_SCORE_PARITY
+            if lat > self.LATENCY_SOFT_LIMIT_MS:
+                effective_min = self.MIN_SCORE_PARITY + 10
+                logger.info(f"⚡ Latência {lat:.0f}ms > {self.LATENCY_SOFT_LIMIT_MS:.0f}ms — mínimo sobe para {effective_min}")
+
+            approved = score >= effective_min
+            reason = f"Score {score:.1f}% (bias {bias_strength:.0%}, seq={seq_len})" if approved else f"Score baixo {score:.1f}% < {effective_min}"
             return score, approved, reason
         except Exception as e:
             logger.error(f"Erro em _evaluate_parity: {e}")
             return 0.0, False, "Erro na avaliação de paridade"
 
     def _evaluate_differ(self, digit, recent_digits, amount):
+        """
+        Briefing 3.2: filtros reforçados de frequência, ausência e cluster.
+        Assume recent_digits em ordem CRONOLÓGICA ([-1] = mais recente).
+        """
         try:
+            # Filtro duro: zero aparições nos últimos 6
+            last6 = recent_digits[-self.DIFFER_NO_APPEARANCE_TICKS:]
+            if digit in last6:
+                return 0.0, False, f"Cluster recente: dígito {digit} nos últimos {self.DIFFER_NO_APPEARANCE_TICKS} ticks"
+
+            # Filtro duro: frequência máxima 12% em 25
+            window25 = recent_digits[-25:]
+            if len(window25) >= 15:
+                freq25 = window25.count(digit) / len(window25)
+                if freq25 > self.DIFFER_MAX_FREQ_25:
+                    return 0.0, False, f"Frequência recente alta ({freq25:.0%} em 25 ticks)"
+
             N = 50
             window = recent_digits[-N:]
             actual_n = len(window)
@@ -995,19 +1162,17 @@ class StrategyManager:
             score = z_score_component + absence_component - freq_penalty
             score = max(0, min(100, score))
 
-            raw_ping = getattr(self.client, '_ping_ms', 0)
-            streaming_ok = getattr(self.client, 'streaming', False)
-            last_tick_time = getattr(self.client, '_last_tick_time', 0)
-            if raw_ping >= 9999 and streaming_ok and last_tick_time and time.time() - last_tick_time < 10:
-                lat = 0
-            else:
-                lat = raw_ping
-
+            lat = self._effective_latency()
             if lat > self.LATENCY_LIMIT_MS:
-                return score, False, f"Latência alta ({lat}ms) – abortando"
+                return score, False, f"Latência alta ({lat}ms) — abortando"
 
-            approved = score >= self.MIN_SCORE_DIFFER
-            reason = f"Score {score:.1f}% (z={z_score:.2f}, ausência={ticks_since_last})" if approved else f"Score baixo {score:.1f}%"
+            effective_min = self.MIN_SCORE_DIFFER
+            if lat > self.LATENCY_SOFT_LIMIT_MS:
+                effective_min = self.MIN_SCORE_DIFFER + 10
+                logger.info(f"⚡ Latência {lat:.0f}ms > {self.LATENCY_SOFT_LIMIT_MS:.0f}ms — mínimo sobe para {effective_min}")
+
+            approved = score >= effective_min
+            reason = f"Score {score:.1f}% (z={z_score:.2f}, ausência={ticks_since_last})" if approved else f"Score baixo {score:.1f}% < {effective_min}"
             return score, approved, reason
         except Exception as e:
             logger.error(f"Erro em _evaluate_differ: {e}")
@@ -1023,6 +1188,7 @@ class StrategyManager:
             return 0.0
 
     def _ticks_since_last_appearance(self, digit, digit_list):
+        """Assume digit_list em ordem CRONOLÓGICA ([-1] = mais recente)."""
         try:
             for i, d in enumerate(reversed(digit_list)):
                 if d == digit:
