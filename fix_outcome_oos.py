@@ -1,45 +1,44 @@
 #!/usr/bin/env python3
-"""Reconstrói outcomes dos 125 sinais OOS pós-17/09 via candles Deriv M15."""
+"""Reconstrói outcomes dos 125 sinais OOS pós-17/09 via candles Deriv M15 (paginado)."""
 import os, sqlite3, json, time, csv
 import websocket
 
 DB = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
 OUT = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'forex_outcome_oos.csv')
-APP_ID = os.environ.get('DERIV_APP_ID', '33zLIDPPTQmUaFcSI9DJf')
-WS_ENDPOINTS = [
-    f"wss://ws.derivws.com/websockets/v3?app_id={APP_ID}",
-    f"wss://ws.binaryws.com/websockets/v3?app_id={APP_ID}",
-]
-CUTOFF = '2026-09-17'
+WS = "wss://ws.derivws.com/websockets/v3?app_id=1089"
+CUTOFF_DATE = '2026-09-17'
+CUTOFF_EPOCH = int(time.mktime(time.strptime(CUTOFF_DATE, '%Y-%m-%d'))) # 17/09/2026 00:00:00 UTC
 
 
-def fetch(ws, sym, count=4000):
-    ws.send(json.dumps({"ticks_history": sym, "style": "candles",
-                        "granularity": 900, "count": count, "end": "latest"}))
+def fetch_all(ws, sym):
+    """Faz chamadas paginadas até cobrir o CUTOFF_EPOCH."""
+    all_candles = {}
+    end = "latest"
+    attempts = 0
     while True:
+        attempts += 1
+        if attempts > 20:
+            print(f"  AVISO: {sym} atingiu limite de paginação.")
+            break
+        ws.send(json.dumps({"ticks_history": sym, "style": "candles",
+                            "granularity": 900, "count": 3000, "end": end}))
         r = json.loads(ws.recv())
         if r.get('msg_type') == 'candles':
             if 'error' in r:
                 raise RuntimeError(r['error'])
-            return r.get('candles', [])
-
-
-def connect():
-    for url in WS_ENDPOINTS:
-        for attempt in range(3):
-            try:
-                print(f"  Tentativa {attempt+1} em {url[:70]}...")
-                ws = websocket.create_connection(
-                    url, timeout=30,
-                    origin="https://sao360-jf.onrender.com",
-                    header=["User-Agent: Mozilla/5.0 FOLOMA-OOS"],
-                )
-                print("  Ligado.")
-                return ws
-            except Exception as e:
-                print(f"  Falhou: {type(e).__name__}: {str(e)[:100]}")
-                time.sleep(2 * (attempt + 1))
-    return None
+            cs = r.get('candles', [])
+            if not cs:
+                break
+            for c in cs:
+                all_candles[c['epoch']] = c
+            oldest = min(c['epoch'] for c in cs)
+            print(f"  {sym}: +{len(cs)} velas (mais antiga: {time.strftime('%Y-%m-%d %H:%M', time.gmtime(oldest))})")
+            if oldest <= CUTOFF_EPOCH:
+                break
+            end = str(oldest - 1)
+        else:
+            break
+    return all_candles
 
 
 conn = sqlite3.connect(DB, timeout=10)
@@ -47,22 +46,16 @@ rows = conn.execute(
     "SELECT id, symbol, direction, timestamp, price_at_signal, breakdown_json "
     "FROM forex_signal_log WHERE strategy_used='ensemble' AND confidence >= 80 "
     "AND date(timestamp,'unixepoch') >= ? ORDER BY timestamp",
-    (CUTOFF,)
+    (CUTOFF_DATE,)
 ).fetchall()
-print(f"Pendentes: {len(rows)}")
+print(f"Sinais pendentes: {len(rows)}")
 
-ws = connect()
-if not ws:
-    print("Sem ligacao. Abortar.")
-    conn.close()
-    raise SystemExit(1)
-
+ws = websocket.create_connection(WS, timeout=30)
 cache = {}
 try:
     for sym in sorted(set(r[1] for r in rows)):
-        cs = fetch(ws, sym)
-        cache[sym] = {c['epoch']: c for c in cs}
-        print(f"  {sym}: {len(cs)} candles")
+        cache[sym] = fetch_all(ws, sym)
+        print(f"  {sym}: TOTAL {len(cache[sym])} velas")
 finally:
     ws.close()
 
