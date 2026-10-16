@@ -11,14 +11,15 @@ CUTOFF_EPOCH = int(time.mktime(time.strptime(CUTOFF_DATE, '%Y-%m-%d')))
 
 
 async def fetch_all(session, sym):
-    """Faz chamadas paginadas até cobrir o CUTOFF_EPOCH usando AsyncSession."""
+    """Faz chamadas paginadas com retry e backoff exponencial."""
     all_candles = {}
     end = "latest"
     attempts = 0
+    max_attempts = 6
     while True:
         attempts += 1
-        if attempts > 20:
-            print(f"  AVISO: {sym} atingiu limite de paginação.")
+        if attempts > max_attempts:
+            print(f"  AVISO: {sym} falhou após {max_attempts} tentativas.")
             break
         payload = {"ticks_history": sym, "style": "candles",
                    "granularity": 900, "count": 3000, "end": end}
@@ -44,10 +45,9 @@ async def fetch_all(session, sym):
                             end = str(oldest - 1)
                             break
         except Exception as e:
-            print(f"  ERRO em {sym} (tentativa {attempts}): {e}")
-            if attempts >= 3:
-                raise
-            await asyncio.sleep(2)
+            wait = 2 ** attempts  # Backoff exponencial: 2, 4, 8, 16, 32, 64 segundos
+            print(f"  ERRO em {sym} (tentativa {attempts}/{max_attempts}): {e}. A aguardar {wait}s...")
+            await asyncio.sleep(wait)
     return all_candles
 
 
