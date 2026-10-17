@@ -1087,12 +1087,25 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   const btnOdd = $_('btnOdd'), btnEven = $_('btnEven'), parityReasonEl = $_('parityReason');
 
   if (strategy.parity_available) {
-    btnOdd.disabled = tradeLocked || _parityScheduled || ticksBlocked;
-    btnEven.disabled = tradeLocked || _parityScheduled || ticksBlocked;
+    const rec = strategy.parity_direction; // O backend envia 'odd' ou 'even'
+    
+    btnOdd.disabled = tradeLocked || _parityScheduled || ticksBlocked || (rec !== 'odd');
+    btnEven.disabled = tradeLocked || _parityScheduled || ticksBlocked || (rec !== 'even');
+    
+    if (rec === 'odd') {
+        btnOdd.style.boxShadow = '0 0 10px var(--white)';
+        btnEven.style.boxShadow = 'none';
+    } else if (rec === 'even') {
+        btnEven.style.boxShadow = '0 0 10px var(--accent)';
+        btnOdd.style.boxShadow = 'none';
+    }
+    
     parityReasonEl.textContent = '';
   } else {
     btnOdd.disabled = true;
     btnEven.disabled = true;
+    btnOdd.style.boxShadow = 'none';
+    btnEven.style.boxShadow = 'none';
     parityReasonEl.textContent = strategy.parity_reason || '';
   }
 
@@ -1607,7 +1620,6 @@ async function loadForexDurations() {
         });
         durSelect.innerHTML = html || '<option value="">Sem opções válidas</option>';
         
-        // CORREÇÃO 24.3: Tenta selecionar 15 min, se não existir, tenta 5, depois 1. Se nada, fica a primeira.
         if (callLimits.allowed_values.includes(15)) durSelect.value = '15';
         else if (callLimits.allowed_values.includes(5)) durSelect.value = '5';
         else if (callLimits.allowed_values.includes(1)) durSelect.value = '1';
@@ -1669,7 +1681,6 @@ async function tradeDifferWithRetry(displayedDigit, retried = false) {
     const r = await fetch('/api/trade/differ', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // CORREÇÃO 24.3: Envia o displayed_digit para o backend
       body: JSON.stringify({ amount: amt, displayed_digit: _ultimoDigito })
     });
     const d = await r.json();
