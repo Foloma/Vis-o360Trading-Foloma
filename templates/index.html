@@ -99,6 +99,7 @@
     .freq-item.least { border: 2px solid var(--accent); }
     .differ-btn { background: var(--accent); color: #000; width: 100%; margin-top: 6px; margin-bottom: 10px; padding: 12px; font-weight: bold; position: relative; z-index: 1; min-height: 48px; touch-action: manipulation; }
     .matches-btn { background: var(--purple); color: #fff; width: 100%; margin-top: 15px; padding: 12px; font-weight: bold; position: relative; z-index: 1; min-height: 48px; touch-action: manipulation; }
+    .zscore-btn { background: #f59e0b; color: #fff; width: 100%; margin-top: 6px; padding: 12px; font-weight: bold; position: relative; z-index: 1; min-height: 48px; touch-action: manipulation; }
     .trade-row { display: flex; gap: 8px; align-items: center; }
     .trade-row input { flex: 1; }
     .trade-row button { flex: 0; white-space: nowrap; padding: 8px 12px; touch-action: manipulation; }
@@ -158,7 +159,7 @@
     .session-goals-grid label { font-size: 9px; color: var(--muted); display: block; margin-bottom: 2px; }
     .session-goals-grid input { padding: 6px; font-size: 11px; }
     .session-goals-status { font-size: 10px; color: var(--muted); text-align: center; margin-top: 4px; }
-    .session-goals-alert { display: none; background: var(--danger); color: #fff; padding: 6px; border-radius: 6px; text-align: center; font-size: 11px; margin-top: 4px; }
+    .session-goals-alert { display: none; background: var(--warning); color: #000; padding: 6px; border-radius: 6px; text-align: center; font-size: 11px; margin-top: 4px; }
     .session-goals-alert.visible { display: block; }
 
     @keyframes pulse {
@@ -343,6 +344,9 @@
       <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (dígito mais frequente) — payout ~9x</button>
       <div class="signal-ticks" id="matchesTicks"></div>
       <div id="matchesReason" style="font-size:9px; color: var(--muted); text-align:center; margin-top:2px;"></div>
+      <button class="zscore-btn" id="btnZscore" onclick="tradeZscore()">📊 Z-SCORE</button>
+      <div class="signal-ticks" id="zscoreTicks"></div>
+      <div id="zscoreReason" class="block-reason"></div>
       <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
       <div class="ms">
         Martingale: <span id="mgtActDig">INATIVO</span> | Próx: <span id="mgtNxtDig">$0.35</span>
@@ -738,23 +742,23 @@ function updateSessionGoalsUI(sg) {
   const alertEl = $_('sessionGoalsAlert');
   if (!sg) return;
   if (sg.goals_reached) {
-    alertEl.textContent = sg.message || 'Metas atingidas';
+    alertEl.textContent = (sg.message || 'Metas atingidas') + ' (Aviso: Execução continua ativa)';
     alertEl.classList.add('visible');
     statusEl.textContent = '';
-    disableTradeButtons(true);
+    // disableTradeButtons(true); // REMOVIDO: Botões já não são bloqueados por metas
   } else {
     alertEl.classList.remove('visible');
     const pnl = sg.session_pnl || 0;
     const pnlClass = pnl >= 0 ? 'var(--accent)' : 'var(--danger)';
     statusEl.innerHTML = `P&L da sessão: <span style="color:${pnlClass}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span>`;
-    disableTradeButtons(false);
+    // disableTradeButtons(false); // REMOVIDO
   }
 }
 
 function disableTradeButtons(disable) {
-  const buttons = ['btnOdd', 'btnEven', 'btnDiffer', 'btnMatches'];
-  buttons.forEach(id => { const btn = $_(id); if (btn) btn.disabled = disable; });
-  document.querySelectorAll('#forex-section button').forEach(btn => { if (btn.textContent.includes('EXECUTAR')) btn.disabled = disable; });
+  // Função mantida por compatibilidade, mas já não desativa os botões por metas de sessão.
+  // Apenas os mecanismos técnicos (ex: fim do ciclo) bloqueiam os botões.
+  return;
 }
 
 async function saveSessionGoals() {
@@ -773,7 +777,7 @@ async function saveSessionGoals() {
     });
     const d = await r.json();
     if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
-    toast('✅ Metas de sessão aplicadas', 'win');
+    toast('✅ Metas de sessão guardadas (Aviso apenas)', 'win');
     if (entry > 0) {
       const amtInput = $_('amtDigit');
       if (amtInput) amtInput.value = entry.toFixed(2);
@@ -885,9 +889,7 @@ async function updateAll(){
         _differScheduled = false;
         clearTimeout(_tradeSubmittedTimer);
         clearTimeout(_tradePendingTimer);
-        // P0.4: NÃO atualizar _ultimoDigito com o dígito do resultado.
-        // _ultimoDigito deve refletir sempre o último tick do mercado,
-        // não o resultado do trade anterior. Bug antigo removido.
+        
         const displayDigit = ltr.exit_digit !== undefined ? ltr.exit_digit : ltr.digit;
         _ultimoParidade = (ltr.is_win ? 'GANHOU' : 'PERDEU');
         const tipo = labelEstrategia(ltr.action);
@@ -1032,9 +1034,8 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   if(!el) return;
   let html = '<div class="strategy-indicators">';
 
-  if(strategy.global_stop){
-    html += '<span class="strat-badge blocked">🛑 STOP GLOBAL</span>';
-  } else if(strategy.cooldown){
+  // Removido o bloqueio visual do STOP GLOBAL, pois foi desativado no backend.
+  if(strategy.cooldown){
     html += '<span class="strat-badge warning">⏳ COOLDOWN</span>';
   } else if(strategy.trade_locked){
     const lockSecs = strategy.trade_lock_seconds_remaining || 0;
@@ -1046,6 +1047,7 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   html += '<span class="strat-badge ' + (strategy.differ_available ? 'ready' : 'blocked') + '">DIFFER</span>';
   html += '<span class="strat-badge ' + (strategy.parity_available ? 'ready' : 'blocked') + '">PAR/ÍMPAR</span>';
   html += '<span class="strat-badge ' + (strategy.matches_available ? 'ready' : 'blocked') + '">MATCHES</span>';
+  html += '<span class="strat-badge ' + (strategy.zscore_available ? 'ready' : 'blocked') + '">Z-SCORE</span>';
   html += '</div>';
 
   if(strategy.consecutive_losses > 0){
@@ -1056,6 +1058,7 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   updateSignalTicks('parity', strategy.parity_ticks_left);
   updateSignalTicks('differ', strategy.differ_ticks_left);
   updateSignalTicks('matches', strategy.matches_ticks_left);
+  updateSignalTicks('zscore', strategy.zscore_ticks_left);
 
   if(!_prevDifferAvail && strategy.differ_available){ playBeep(); }
   if(!_prevParityAvail && strategy.parity_available){ playBeep(); }
@@ -1082,9 +1085,8 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   const btnOdd = $_('btnOdd'), btnEven = $_('btnEven'), parityReasonEl = $_('parityReason');
 
   if (strategy.parity_available) {
-    // Ambos os botões habilitados, restritos apenas por trade lock e aposta agendada
-    btnOdd.disabled = tradeLocked || _parityScheduled;
-    btnEven.disabled = tradeLocked || _parityScheduled;
+    btnOdd.disabled = tradeLocked || _parityScheduled || ticksBlocked;
+    btnEven.disabled = tradeLocked || _parityScheduled || ticksBlocked;
     parityReasonEl.textContent = '';
   } else {
     btnOdd.disabled = true;
@@ -1092,11 +1094,15 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
     parityReasonEl.textContent = strategy.parity_reason || '';
   }
 
-  $_( 'btnDiffer').disabled = !strategy.differ_available || tradeLocked || _differScheduled;
-  $_( 'btnMatches').disabled = !strategy.matches_available || tradeLocked;
+  $_( 'btnDiffer').disabled = !strategy.differ_available || tradeLocked || _differScheduled || ticksBlocked;
+  $_( 'btnMatches').disabled = !strategy.matches_available || tradeLocked || ticksBlocked;
+  $_( 'btnZscore').disabled = !strategy.zscore_available || tradeLocked || ticksBlocked;
 
   const matchesReasonEl=$_('matchesReason');
   if (matchesReasonEl) { matchesReasonEl.textContent = strategy.matches_reason || ''; }
+  
+  const zscoreReasonEl=$_('zscoreReason');
+  if (zscoreReasonEl) { zscoreReasonEl.textContent = strategy.zscore_reason || ''; }
 
   const btnDiffer=$_('btnDiffer');
   if (btnDiffer) {
@@ -1105,6 +1111,15 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
     } else {
       btnDiffer.textContent = '🎯 DIFFER (dígito menos frequente)';
     }
+  }
+  
+  const btnZscore=$_('btnZscore');
+  if (btnZscore) {
+      if (strategy.zscore_available) {
+          btnZscore.textContent = `📊 Z-SCORE → ${strategy.zscore_action || ''} ${strategy.zscore_digit !== null ? strategy.zscore_digit : ''}`;
+      } else {
+          btnZscore.textContent = '📊 Z-SCORE';
+      }
   }
 }
 
@@ -1361,6 +1376,7 @@ function updateCycleBlocker(ticksRemaining) {
     $_('btnEven').disabled = true;
     $_('btnDiffer').disabled = true;
     $_('btnMatches').disabled = true;
+    $_('btnZscore').disabled = true;
   } else {
     blocker.style.display = 'none';
     tradeRow.style.opacity = '1';
