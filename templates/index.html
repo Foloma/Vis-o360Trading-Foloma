@@ -118,7 +118,7 @@
     .tf-btn { padding: 3px 8px; background: #020617; border: 1px solid var(--border); color: var(--text); border-radius: 10px; font-size: 10px; cursor: pointer; touch-action: manipulation; }
     .tf-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
     button:disabled { opacity: 0.35; filter: grayscale(0.7); cursor: not-allowed; }
-    .strategy-indicators { display: flex; gap: 6px; margin-bottom: 6px; }
+    .strategy-indicators { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
     .strat-badge { font-size: 9px; padding: 3px 8px; border-radius: 12px; font-weight: 700; text-align: center; }
     .strat-badge.ready { background: var(--accent); color: #000; }
     .strat-badge.blocked { background: var(--danger); color: #fff; }
@@ -255,6 +255,12 @@
 <!-- ==================== CONTEÚDO PRINCIPAL ==================== -->
 <div class="container" id="mainContent" style="display:none">
   <div id="dashboard-section">
+    
+    <!-- Banner de Aviso de Stop Desativado -->
+    <div style="background:var(--danger);color:#fff;padding:6px;border-radius:6px;text-align:center;font-size:11px;margin-bottom:8px;font-weight:700;">
+      ⚠️ PROTEÇÕES DE STOP DESATIVADAS A PEDIDO DO UTILIZADOR
+    </div>
+
     <div class="card">
       <div class="card-title">📡 STATUS <span class="balance"><span id="bal">0.00</span> <span id="cur">USD</span></span></div>
       <div class="status" style="margin-bottom:6px">
@@ -275,7 +281,7 @@
     </div>
 
     <div class="card" id="sessionGoalsCard">
-      <div class="card-title">🎯 GESTÃO DE SESSÃO</div>
+      <div class="card-title">🎯 GESTÃO DE SESSÃO (APENAS AVISO)</div>
       <div class="session-goals-grid">
         <div><label>Valor de entrada</label><input type="number" id="goalEntry" value="0.35" step="0.01" min="0.35"></div>
         <div><label>Meta de lucro ($)</label><input type="number" id="goalProfit" value="10" step="0.5" min="0"></div>
@@ -745,19 +751,16 @@ function updateSessionGoalsUI(sg) {
     alertEl.textContent = (sg.message || 'Metas atingidas') + ' (Aviso: Execução continua ativa)';
     alertEl.classList.add('visible');
     statusEl.textContent = '';
-    // disableTradeButtons(true); // REMOVIDO: Botões já não são bloqueados por metas
   } else {
     alertEl.classList.remove('visible');
     const pnl = sg.session_pnl || 0;
     const pnlClass = pnl >= 0 ? 'var(--accent)' : 'var(--danger)';
     statusEl.innerHTML = `P&L da sessão: <span style="color:${pnlClass}">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</span>`;
-    // disableTradeButtons(false); // REMOVIDO
   }
 }
 
 function disableTradeButtons(disable) {
   // Função mantida por compatibilidade, mas já não desativa os botões por metas de sessão.
-  // Apenas os mecanismos técnicos (ex: fim do ciclo) bloqueiam os botões.
   return;
 }
 
@@ -777,7 +780,7 @@ async function saveSessionGoals() {
     });
     const d = await r.json();
     if (d.error) { toast('❌ ' + d.error, 'loss'); return; }
-    toast('✅ Metas de sessão guardadas (Aviso apenas)', 'win');
+    toast('✅ Metas guardadas (Aviso apenas)', 'win');
     if (entry > 0) {
       const amtInput = $_('amtDigit');
       if (amtInput) amtInput.value = entry.toFixed(2);
@@ -1034,7 +1037,6 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   if(!el) return;
   let html = '<div class="strategy-indicators">';
 
-  // Removido o bloqueio visual do STOP GLOBAL, pois foi desativado no backend.
   if(strategy.cooldown){
     html += '<span class="strat-badge warning">⏳ COOLDOWN</span>';
   } else if(strategy.trade_locked){
@@ -1604,7 +1606,13 @@ async function loadForexDurations() {
             html += `<option value="${v}">${v} ${unit}</option>`;
         });
         durSelect.innerHTML = html || '<option value="">Sem opções válidas</option>';
-        if (callLimits.allowed_values.includes(1)) durSelect.value = '1';
+        
+        // CORREÇÃO 24.3: Tenta selecionar 15 min, se não existir, tenta 5, depois 1. Se nada, fica a primeira.
+        if (callLimits.allowed_values.includes(15)) durSelect.value = '15';
+        else if (callLimits.allowed_values.includes(5)) durSelect.value = '5';
+        else if (callLimits.allowed_values.includes(1)) durSelect.value = '1';
+        else if (callLimits.allowed_values.length > 0) durSelect.value = callLimits.allowed_values[0].toString();
+
     } catch (e) {
         durSelect.innerHTML = '<option value="">Erro ao carregar</option>';
     }
@@ -1661,7 +1669,8 @@ async function tradeDifferWithRetry(displayedDigit, retried = false) {
     const r = await fetch('/api/trade/differ', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt })
+      // CORREÇÃO 24.3: Envia o displayed_digit para o backend
+      body: JSON.stringify({ amount: amt, displayed_digit: _ultimoDigito })
     });
     const d = await r.json();
     _tradeSubmitted = false;
