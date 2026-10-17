@@ -17,6 +17,10 @@ class DigitAnalyzer:
     (1 a cada TICKS_PER_DIGIT). O TradingBot consulta estes valores via
     get_last_slow_digit_info() e grava em digit_research_log. Não altera
     nenhuma lógica de análise, sinal, score ou risco.
+
+    CORREÇÃO Z-SCORE (16/10/2026):
+    O threshold de |z| desceu de 3.0 para 1.85 para alinhar com o StrategyManager,
+    permitindo que o filtro de Z-Score do briefing entre em ação.
     """
 
     TICKS_PER_DIGIT = 10
@@ -494,6 +498,11 @@ class DigitAnalyzer:
                 'current_streak':streak,'streak_parity':sp,'recent':snap[-20:]}
 
     def get_zscore_digit(self):
+        """
+        CORREÇÃO 16/10/2026: threshold |z| baixou de 3.0 para 1.85 para alinhar
+        com o filtro do StrategyManager. Z-scores entre 1.85 e 3.0 eram descartados
+        silenciosamente antes desta correção.
+        """
         with self._lock:
             window = list(self.slow_digits)[-100:]
             if len(window) < 100:
@@ -515,7 +524,8 @@ class DigitAnalyzer:
 
             max_z = max(z_scores.values())
             max_digit = max(z_scores, key=z_scores.get)
-            if max_z > 3.0:
+            # Threshold alterado para 1.85
+            if max_z > 1.85:
                 zscore_diff = max_z
                 diff_digit = max_digit
             else:
@@ -524,7 +534,8 @@ class DigitAnalyzer:
 
             min_z = min(z_scores.values())
             min_digit = min(z_scores, key=z_scores.get)
-            if min_z < -3.0:
+            # Threshold alterado para -1.85
+            if min_z < -1.85:
                 zscore_match = min_z
                 match_digit = min_digit
             else:
