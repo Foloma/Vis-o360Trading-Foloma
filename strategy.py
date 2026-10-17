@@ -16,6 +16,7 @@ class StrategyManager:
     - Stop Global e Stop-Loss desativados a pedido do utilizador (execução contínua).
     - FIX CRÍTICO: Paridade cancelada por conflito com Differ agora envia erro para a UI (evita bloqueio de botões).
     - REFATORAÇÃO: Lógica de bias da paridade unificada em _calculate_parity_bias().
+    - SEGURANÇA: Backend valida se a direção da paridade corresponde ao Bias calculado.
     - Briefing 16/10/2026: Novos filtros de seletividade (Paridade, Differ, Matches, Z-Score).
     """
 
@@ -366,7 +367,7 @@ class StrategyManager:
             return None
 
     # -----------------------------------------------------------------
-    # Lógica Unificada da Paridade (Ponto 4 do Claude)
+    # Lógica Unificada da Paridade
     # -----------------------------------------------------------------
     def _calculate_parity_bias(self, recent_digits):
         """Retorna (last_digit, seq_len, odd_pct) para ser usado pela UI e pela Execução."""
@@ -401,6 +402,15 @@ class StrategyManager:
 
                 last_digit = self.analyzer.get_current_digit()
                 if last_digit is None: return False, "Sem dígito atual"
+
+                # Validação de Segurança: Impede que o utilizador force o lado errado do bias
+                recent_digits = self.analyzer.get_recent_digits(15)
+                _, _, odd_pct = self._calculate_parity_bias(recent_digits)
+                
+                if odd_pct >= self.PARITY_BIAS_THRESHOLD and direction != 'even':
+                    return False, f"Bloqueado: O Bias é {odd_pct:.0%} Ímpar, a aposta recomendada é PAR."
+                elif odd_pct <= (1 - self.PARITY_BIAS_THRESHOLD) and direction != 'odd':
+                    return False, f"Bloqueado: O Bias é {(1-odd_pct):.0%} Par, a aposta recomendada é ÍMPAR."
 
                 score, approved, prob_reason = self.evaluate_probability(last_digit, 'parity', amount)
                 if not approved:
@@ -466,7 +476,7 @@ class StrategyManager:
                     logger.info("⚖️ Conflito Paridade/Differ no mesmo tick — Differ tem prioridade, paridade cancelada")
                     self._pending_parity_bet = None
                     parity_ready = False
-                    # FIX CRÍTICO (Claude 2): Envia erro para a UI destravar o botão
+                    # FIX CRÍTICO: Envia erro para a UI destravar o botão
                     self.set_execution_error("Paridade cancelada — Differ tinha prioridade no mesmo tick")
         except Exception as e:
             logger.error(f"Erro em _check_pending_bets: {e}")
@@ -508,7 +518,6 @@ class StrategyManager:
             if not isinstance(recent, list) or len(recent) < 15:
                 return None
 
-            # Usa a função unificada
             last, seq_len, odd_pct = self._calculate_parity_bias(recent)
             if last is None: return None
 
@@ -714,7 +723,6 @@ class StrategyManager:
                         self._consecutive_losses = 0
                         self._consecutive_losses_differ = 0
                         self.reset_sequence_state()
-                        # Não aplica return nem _global_stop_until
                     else:
                         if action_upper.startswith('DIFFER') or action_upper.startswith('Z_DIFFER'):
                             self._apply_cooldown(12)
@@ -829,7 +837,6 @@ class StrategyManager:
             if not recent_digits or len(recent_digits) < 15:
                 return 0.0, False, "Dados insuficientes"
 
-            # Usa a função unificada
             last, seq_len, odd_pct = self._calculate_parity_bias(recent_digits)
             if last is None: return 0.0, False, "Dados insuficientes"
 
