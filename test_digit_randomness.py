@@ -20,8 +20,8 @@ def main():
 
     conn = sqlite3.connect(DB_PATH)
     try:
-        # Usar a tabela correta que tem os dados dos teus 4000+ registos
-        cursor = conn.execute("SELECT symbol, slow_digit FROM digit_research_log ORDER BY symbol, timestamp")
+        # CORREÇÃO: A coluna correta é 'digit' em vez de 'slow_digit'
+        cursor = conn.execute("SELECT symbol, digit FROM digit_research_log ORDER BY symbol, timestamp")
         rows = cursor.fetchall()
     except Exception as e:
         print(f"Erro ao ler a base de dados: {e}")
@@ -33,7 +33,6 @@ def main():
         print("AVISO: digit_research_log está vazio.")
         return
 
-    # Agrupar por símbolo em Python puro
     data_by_symbol = {}
     for symbol, digit in rows:
         if digit is None: continue
@@ -51,8 +50,7 @@ def main():
         counts = Counter(digits)
         expected = n / 10.0
         chi2 = sum(((counts.get(d, 0) - expected) ** 2) / expected for d in range(10))
-        # Valor crítico para 9 graus de liberdade e p=0.05 é 16.92
-        is_sig = chi2 > 16.92
+        is_sig = chi2 > 16.92  # Crítico para 9 graus de liberdade, p=0.05
         print(f"  [1] Frequência: chi2={chi2:.2f} (crítico 16.92)"
               f"  {'-> DESVIO SIGNIFICATIVO' if is_sig else '-> consistente com uniforme'}")
         print(f"      Contagens: {[counts.get(d, 0) for d in range(10)]}")
