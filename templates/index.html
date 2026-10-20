@@ -162,12 +162,6 @@
     .session-goals-alert { display: none; background: var(--warning); color: #000; padding: 6px; border-radius: 6px; text-align: center; font-size: 11px; margin-top: 4px; }
     .session-goals-alert.visible { display: block; }
 
-    @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.05); background: #00ffcc; }
-        100% { transform: scale(1); }
-    }
-
     @media (max-width: 400px) {
       .differ-btn, .matches-btn, .zscore-btn { padding: 10px 8px; font-size: 12px; }
       .matches-btn { margin-top: 12px; }
@@ -344,15 +338,19 @@
       <div class="signal-ticks" id="parityTicks"></div>
       <div id="martingaleIndicator" style="font-size:10px;color:var(--warning);text-align:center;min-height:14px;margin-top:2px;"></div>
       <div class="block-reason" id="parityReason"></div>
-      <button class="differ-btn" id="btnDiffer" onclick="tradeDiffer()">🎯 DIFFER (dígito menos frequente)</button>
+      
+      <button class="differ-btn" id="btnDiffer" onclick="tradeDiffer()">🎯 DIFFER (Filtro de Seletividade)</button>
       <div class="pending-indicator" id="differPending">📅 Aposta DIFFER agendada...</div>
       <div class="signal-ticks" id="differTicks"></div>
-      <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (dígito mais frequente) — payout ~9x</button>
+      
+      <button class="matches-btn" id="btnMatches" onclick="tradeMatches()">🎯 MATCHES (Filtro de Seletividade) — payout ~9x</button>
       <div class="signal-ticks" id="matchesTicks"></div>
       <div id="matchesReason" style="font-size:9px; color: var(--muted); text-align:center; margin-top:2px;"></div>
-      <button class="zscore-btn" id="btnZscore" onclick="tradeZscore()">📊 Z-SCORE</button>
+      
+      <button class="zscore-btn" id="btnZscore" onclick="tradeZscore()">📊 Z-SCORE (Filtro de Seletividade)</button>
       <div class="signal-ticks" id="zscoreTicks"></div>
       <div id="zscoreReason" class="block-reason"></div>
+      
       <div id="digitBlockerMsg" style="color:#ffaa00;font-size:10px;text-align:center;margin-top:4px"></div>
       <div class="ms">
         Martingale: <span id="mgtActDig">INATIVO</span> | Próx: <span id="mgtNxtDig">$0.35</span>
@@ -760,7 +758,6 @@ function updateSessionGoalsUI(sg) {
 }
 
 function disableTradeButtons(disable) {
-  // Função mantida por compatibilidade, mas já não desativa os botões por metas de sessão.
   return;
 }
 
@@ -1087,7 +1084,7 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   const btnOdd = $_('btnOdd'), btnEven = $_('btnEven'), parityReasonEl = $_('parityReason');
 
   if (strategy.parity_available) {
-    const rec = strategy.parity_direction; // O backend envia 'odd' ou 'even'
+    const rec = strategy.parity_direction;
     
     btnOdd.disabled = tradeLocked || _parityScheduled || ticksBlocked || (rec !== 'odd');
     btnEven.disabled = tradeLocked || _parityScheduled || ticksBlocked || (rec !== 'even');
@@ -1119,12 +1116,13 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
   const zscoreReasonEl=$_('zscoreReason');
   if (zscoreReasonEl) { zscoreReasonEl.textContent = strategy.zscore_reason || ''; }
 
+  // Removida a linguagem de "Score" e substituída por "Filtro Ativo"
   const btnDiffer=$_('btnDiffer');
   if (btnDiffer) {
     if (strategy.differ_available && strategy.differ_digit !== undefined) {
-      btnDiffer.textContent = `🎯 DIFFER no dígito ${strategy.differ_digit}`;
+      btnDiffer.textContent = `🎯 DIFFER (Filtro Ativo: dígito ${strategy.differ_digit})`;
     } else {
-      btnDiffer.textContent = '🎯 DIFFER (dígito menos frequente)';
+      btnDiffer.textContent = '🎯 DIFFER (Aguardando filtro)';
     }
   }
   
@@ -1133,7 +1131,7 @@ function updateStrategyDisplay(strategy, ticksRemaining, bot, digits) {
       if (strategy.zscore_available) {
           btnZscore.textContent = `📊 Z-SCORE → ${strategy.zscore_action || ''} ${strategy.zscore_digit !== null ? strategy.zscore_digit : ''}`;
       } else {
-          btnZscore.textContent = '📊 Z-SCORE';
+          btnZscore.textContent = '📊 Z-SCORE (Aguardando filtro)';
       }
   }
 }
