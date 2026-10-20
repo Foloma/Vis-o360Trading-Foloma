@@ -172,8 +172,6 @@ def send_telegram(text):
         return False
 
 def notify_signals(signals):
-    """Notifica sinais frescos. CORREÇÃO 22.1: age_secs > 900 impede notificação de sinais expirados,
-    mas permite que sinais que cruzem os 80% após os 5 min ainda sejam notificados."""
     now = time.time()
     with _telegram_lock:
         for s in signals:
@@ -1198,8 +1196,7 @@ def set_session_goals():
     return jsonify({'status': 'ok', 'session_goals': sess['session_goals']})
 
 def _session_goals_block(sess):
-    if sess and sess.get('session_goals', {}).get('goals_reached'):
-        return sess['session_goals'].get('message', 'Sessão bloqueada por metas atingidas')
+    # BLOQUEIO DE METAS E STOP-LOSS DESATIVADO A PEDIDO DO UTILIZADOR
     return None
 
 @app.route('/api/status')
@@ -1357,8 +1354,7 @@ def debug_evaluate_oos():
         if not cs or price_then is None:
             updates.append((sid, 'nodata', None))
             continue
-        # CORREÇÃO 23.2: alvo é exatamente 15 min (900s) após o timestamp do sinal,
-        # sem arredondamento para o limite da vela M15
+        # CORREÇÃO 23.2: alvo é exatamente 15 min (900s) após o timestamp do sinal
         target_ts = ts + 900
         later = sorted(e for e in cs if e >= target_ts)
         nc = cs[later[0]] if later else None
@@ -1580,8 +1576,7 @@ def trade_digit():
     if block_msg:
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
-    if bot.stop_loss_active:
-        return jsonify({'error': '🛑 Stop-loss activo.'}), 400
+    # STOP-LOSS DESATIVADO: if bot.stop_loss_active: ...
     strategy = sess.get('strategy')
     if not strategy:
         return jsonify({'error': 'Estratégia indisponível'}), 400
@@ -1620,8 +1615,7 @@ def trade_differ():
     if block_msg:
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
-    if bot.stop_loss_active:
-        return jsonify({'error': '🛑 Stop-loss activo.'}), 400
+    # STOP-LOSS DESATIVADO: if bot.stop_loss_active: ...
     strategy = sess.get('strategy')
     if not strategy:
         return jsonify({'error': 'Estratégia indisponível'}), 400
@@ -1659,8 +1653,7 @@ def trade_matches():
     if block_msg:
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
-    if bot.stop_loss_active:
-        return jsonify({'error': '🛑 Stop-loss activo.'}), 400
+    # STOP-LOSS DESATIVADO: if bot.stop_loss_active: ...
     strategy = sess.get('strategy')
     if not strategy or strategy._trade_locked:
         return jsonify({'error': 'Trade em curso — aguarde'}), 400
@@ -1698,8 +1691,7 @@ def trade_zscore():
     if block_msg:
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
-    if bot.stop_loss_active:
-        return jsonify({'error': '🛑 Stop-loss activo.'}), 400
+    # STOP-LOSS DESATIVADO: if bot.stop_loss_active: ...
     strategy = sess.get('strategy')
     if not strategy or strategy._trade_locked:
         return jsonify({'error': 'Trade em curso — aguarde'}), 400
@@ -2067,9 +2059,7 @@ def forex_trade():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado à Deriv'}), 400
-    block_msg = _session_goals_block(sess)
-    if block_msg:
-        return jsonify({'error': block_msg}), 400
+    # BLOQUEIO DE METAS DESATIVADO: block_msg = _session_goals_block(sess) ...
     client = sess['client']
     if client.pending_trade is not None:
         status = client.get_pending_trade_status()
