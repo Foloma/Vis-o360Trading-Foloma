@@ -4,20 +4,20 @@ import time
 import uuid
 import threading
 import math
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
-
 
 class StrategyManager:
     """
     Implementa os módulos da Foloma Visão 360 com sincronização por snapshots.
     
     HISTÓRICO DE ALTERAÇÕES:
-    - Stop Global e Stop-Loss desativados a pedido do utilizador (execução contínua).
-    - FIX CRÍTICO: Paridade cancelada por conflito com Differ agora envia erro para a UI (evita bloqueio de botões).
-    - REFATORAÇÃO: Lógica de bias da paridade unificada em _calculate_parity_bias().
-    - SEGURANÇA: Backend valida se a direção da paridade corresponde ao Bias calculado.
-    - Briefing 16/10/2026: Novos filtros de seletividade (Paridade, Differ, Matches, Z-Score).
+    - Stop Global de 3 perdas e Stop-Loss de sessão desativados.
+    - FIX: Z-Score usa a chave 'action' no snapshot para consistência (DIFFER vs MATCHES).
+    - FIX: Texto do Z-Score usa sinal explícito (+/-).
+    - FIX: DIFFER remove o dígito de _differ_sequence_used se a aposta falhar/cancelar.
+    - NEW: Limite de perda diário (DAILY_LOSS_LIMIT) para contas reais.
     """
 
     def __init__(self, client, analyzer):
@@ -29,7 +29,6 @@ class StrategyManager:
         self._last_parity_action = None
         self._last_matches_digit = None
         self._last_zscore_digit = None
-        self._last_zscore_action = None
         self._consecutive_losses = 0
         self._global_stop_until = 0 # Mantido por compatibilidade, mas is_global_stop retorna False
         self._cooldown_until = 0
@@ -85,12 +84,16 @@ class StrategyManager:
         self.MIN_ABS_ZSCORE = 1.85
         self.DIFFER_SEQUENCE_TTL = 1200
 
+        # Limite de perda diário (por defeito apenas na conta real)
+        self.DAILY_LOSS_LIMIT = float(os.getenv('DAILY_LOSS_LIMIT', '50.0'))
+        self._daily_loss = 0.0
+        self._daily_loss_date = None
+
     # -----------------------------------------------------------------
     # Propriedades e verificações básicas
     # -----------------------------------------------------------------
     @property
     def is_global_stop(self):
-        # STOP GLOBAL DESATIVADO A PEDIDO DO UTILIZADOR
         return False
 
     @property
@@ -128,6 +131,17 @@ class StrategyManager:
             stable, reason = self.is_market_stable()
             if not stable:
                 return False, reason
+
+            # Verificação de Limite de Perda Diário
+            today = datetime.utcnow().date()
+            if self._daily_loss_date != today:
+                self._daily_loss = 0.0
+                self._daily_loss_date = today
+            
+            is_real = not getattr(self.client, 'loginid', 'VR').startswith('VR')
+            if is_real and self._daily_loss >= self.DAILY_LOSS_LIMIT:
+                return False, f"Limite de perda diário atingido (${self._daily_loss:.2f})"
+
             return True, "OK"
         except Exception as e:
             logger.error(f"Erro em can_trade: {e}")
@@ -300,7 +314,8 @@ class StrategyManager:
                         if preview_func:
                             preview = preview_func()
                             if preview:
-                                self._create_signal(strategy, preview['recommendation'], preview.get('digits', []), preview['reason'], mode=preview.get('mode', strategy))
+                                # FIX Z-Score: Passa a 'action' no preview
+                                self._create_signal(strategy, preview['recommendation'], preview.get('digits', []), preview['reason'], mode=preview.get('mode', strategy), action=preview.get('action'))
         except Exception as e:
             logger.error(f"Erro em _maybe_generate_signals: {e}")
 
@@ -346,13 +361,14 @@ class StrategyManager:
     # -----------------------------------------------------------------
     # Criação de snapshot de sinal
     # -----------------------------------------------------------------
-    def _create_signal(self, strategy, recommendation, digits, reason='', mode=''):
+    def _create_signal(self, strategy, recommendation, digits, reason='', mode='', action=None):
         try:
             current_tick = self.analyzer.get_tick_count()
             signal = {
                 'id': uuid.uuid4().hex[:8],
                 'strategy': strategy,
                 'mode': mode,
+                'action': action, # FIX: Guardar a ação explicitamente no snapshot
                 'digits': digits.copy() if isinstance(digits, list) else digits,
                 'recommendation': recommendation,
                 'reason': reason,
@@ -370,7 +386,6 @@ class StrategyManager:
     # Lógica Unificada da Paridade
     # -----------------------------------------------------------------
     def _calculate_parity_bias(self, recent_digits):
-        """Retorna (last_digit, seq_len, odd_pct) para ser usado pela UI e pela Execução."""
         if not recent_digits or len(recent_digits) < 15:
             return None, 0, 0.0
         
@@ -403,7 +418,6 @@ class StrategyManager:
                 last_digit = self.analyzer.get_current_digit()
                 if last_digit is None: return False, "Sem dígito atual"
 
-                # Validação de Segurança: Impede que o utilizador force o lado errado do bias
                 recent_digits = self.analyzer.get_recent_digits(15)
                 _, _, odd_pct = self._calculate_parity_bias(recent_digits)
                 
@@ -461,6 +475,16 @@ class StrategyManager:
             logger.error(f"Erro em schedule_differ_bet: {e}")
             return False, "Erro interno ao agendar DIFFER"
 
+    # FIX: Método para reverter o bloqueio do DIFFER se a aposta falhar
+    def rollback_differ_digit(self, digit):
+        try:
+            with self._lock:
+                if digit in self._differ_sequence_used:
+                    del self._differ_sequence_used[digit]
+                    logger.info(f"🔄 Rollback: dígito {digit} removido de _differ_sequence_used (aposta falhou/cancelada)")
+        except Exception as e:
+            logger.error(f"Erro em rollback_differ_digit: {e}")
+
     def _check_pending_bets(self):
         parity_ready = False
         differ_ready = False
@@ -476,7 +500,6 @@ class StrategyManager:
                     logger.info("⚖️ Conflito Paridade/Differ no mesmo tick — Differ tem prioridade, paridade cancelada")
                     self._pending_parity_bet = None
                     parity_ready = False
-                    # FIX CRÍTICO: Envia erro para a UI destravar o botão
                     self.set_execution_error("Paridade cancelada — Differ tinha prioridade no mesmo tick")
         except Exception as e:
             logger.error(f"Erro em _check_pending_bets: {e}")
@@ -555,9 +578,9 @@ class StrategyManager:
             if self._zscore_sequence_used or time.time() < self._zscore_cooldown_until: return None
             z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
             if z_diff is not None and digit_diff is not None and abs(z_diff) >= self.MIN_ABS_ZSCORE:
-                return {'recommendation': digit_diff, 'action': 'DIFFER', 'digits': [], 'reason': f"Z-Score +{z_diff:.2f} → DIFFER {digit_diff}", 'mode': 'zscore'}
+                return {'recommendation': digit_diff, 'action': 'DIFFER', 'digits': [], 'reason': f"Z-Score {z_diff:+.2f} → DIFFER {digit_diff}", 'mode': 'zscore'}
             if z_match is not None and digit_match is not None and abs(z_match) >= self.MIN_ABS_ZSCORE:
-                return {'recommendation': digit_match, 'action': 'MATCHES', 'digits': [], 'reason': f"Z-Score {z_match:.2f} → MATCHES {digit_match}", 'mode': 'zscore'}
+                return {'recommendation': digit_match, 'action': 'MATCHES', 'digits': [], 'reason': f"Z-Score {z_match:+.2f} → MATCHES {digit_match}", 'mode': 'zscore'}
             return None
         except Exception:
             return None
@@ -597,7 +620,10 @@ class StrategyManager:
         try:
             signal = self._active_signals.get('zscore')
             if signal and self._is_signal_still_valid(signal):
-                action = 'DIFFER' if self._last_zscore_action == 'Z_DIFFER' else 'MATCHES'
+                # FIX: Lê a ação diretamente do sinal
+                action = signal.get('action')
+                if not action:
+                    action = 'DIFFER' if '→ DIFFER' in signal['reason'] else 'MATCHES'
                 return True, action, signal['recommendation'], signal['reason']
             preview = self._preview_zscore_signal()
             if preview:
@@ -665,7 +691,8 @@ class StrategyManager:
                         return None, None, f"Sinal expirou"
                     self._zscore_sequence_used = True
                     self._zscore_cooldown_until = time.time() + 300
-                    action = self._last_zscore_action or ('DIFFER' if signal['reason'].startswith('Z-Score +') else 'MATCHES')
+                    # FIX: Lê a ação do sinal
+                    action = signal.get('action', 'DIFFER')
                     return action, signal['recommendation'], signal['reason']
                 return self._generate_zscore_signal()
         except Exception:
@@ -675,14 +702,10 @@ class StrategyManager:
         try:
             z_diff, digit_diff, z_match, digit_match = self.analyzer.get_zscore_digit()
             if z_diff is not None and digit_diff is not None and abs(z_diff) >= self.MIN_ABS_ZSCORE:
-                self._last_zscore_action = 'Z_DIFFER'
-                self._last_zscore_digit = digit_diff
-                signal = self._create_signal('zscore', digit_diff, [], f"Z-Score +{z_diff:.2f} → DIFFER {digit_diff}", mode='zscore')
+                signal = self._create_signal('zscore', digit_diff, [], f"Z-Score {z_diff:+.2f} → DIFFER {digit_diff}", mode='zscore', action='DIFFER')
                 return 'DIFFER', digit_diff, signal['reason'] if signal else 'Erro'
             if z_match is not None and digit_match is not None and abs(z_match) >= self.MIN_ABS_ZSCORE:
-                self._last_zscore_action = 'Z_MATCH'
-                self._last_zscore_digit = digit_match
-                signal = self._create_signal('zscore', digit_match, [], f"Z-Score {z_match:.2f} → MATCHES {digit_match}", mode='zscore')
+                signal = self._create_signal('zscore', digit_match, [], f"Z-Score {z_match:+.2f} → MATCHES {digit_match}", mode='zscore', action='MATCHES')
                 return 'MATCHES', digit_match, signal['reason'] if signal else 'Erro'
             return None, None, f"Nenhum desvio |z| ≥ {self.MIN_ABS_ZSCORE}"
         except Exception:
@@ -710,15 +733,18 @@ class StrategyManager:
     # -----------------------------------------------------------------
     # notify_result
     # -----------------------------------------------------------------
-    def notify_result(self, action, is_win):
+    def notify_result(self, action, is_win, profit=0.0):
         try:
             with self._lock:
                 action_upper = str(action).upper() if action else ''
 
                 if not is_win:
+                    # Registo de perda diária para o limite
+                    loss_val = abs(profit) if profit != 0 else 1.0 # fallback
+                    self._daily_loss += loss_val
+                    
                     self._consecutive_losses += 1
                     if self._consecutive_losses >= 3:
-                        # STOP GLOBAL DESATIVADO: Apenas regista e reseta contadores
                         logger.warning("⚠️ 3 perdas consecutivas (STOP GLOBAL DESATIVADO)")
                         self._consecutive_losses = 0
                         self._consecutive_losses_differ = 0
