@@ -120,6 +120,11 @@ class ForexIndicators:
         """
         ADX (Average Directional Index) — suavizado com média móvel de Wilder.
         Exige `period * 2` velas para produzir um ADX verdadeiro.
+
+        NOTA (P2 Claude): O método de suavização dos DI é recursivo (média de DM/ATR instantâneos)
+        e não o padrão de Wilder original (que suaviza DM e TR separadamente). É matematicamente
+        equivalente na maioria dos casos, mas tem ligeiras diferenças. O limiar min_adx=20
+        do forex_risk foi pensado para o padrão e pode necessitar de ajuste futuro.
         """
         candles = self._data.get_recent_candles(symbol, count=period * 3, granularity=granularity, only_closed=True)
         if not candles or len(candles) < period * 2:
@@ -189,7 +194,7 @@ class ForexIndicators:
     def momentum(self, symbol, period=10, granularity=900):
         """Momentum (diferença entre o fecho atual e o fecho de `period` velas atrás)."""
         candles = self._data.get_recent_candles(symbol, count=period + 5, granularity=granularity, only_closed=True)
-        if not candles or len(candles) < period + 1:   # <-- CORRIGIDO: era `period`
+        if not candles or len(candles) < period + 1:
             return None
         return candles[-1]['close'] - candles[-period-1]['close']
 
