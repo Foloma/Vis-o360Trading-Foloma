@@ -9,9 +9,12 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY é obrigatória. Defina a variável de ambiente.")
 
-DATA_PATH = os.environ.get('DATA_PATH', '/var/data')
+# BLINDAGEM: Remove espaços, aspas e caracteres invisíveis que possam vir do Render
+raw_data_path = os.environ.get('DATA_PATH', '/var/data')
+DATA_PATH = raw_data_path.strip().strip("'\"")
+
 DATABASE_PATH = os.path.join(DATA_PATH, 'foloma.db')
-BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
+BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000').strip().strip("'\"")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
