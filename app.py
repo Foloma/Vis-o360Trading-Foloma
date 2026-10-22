@@ -1,5 +1,5 @@
 import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid, urllib.parse, urllib.request
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, abort, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -140,10 +140,41 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, digit INTEGER,
             tick_count INTEGER, timestamp REAL)''')
 
+        # NOVO: Tabela candles para persistir histórico
         c.execute('''CREATE TABLE IF NOT EXISTS candles (
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, granularity INTEGER, 
             epoch REAL, open REAL, high REAL, low REAL, close REAL,
             UNIQUE(symbol, granularity, epoch))''')
+
+        # NOVO: Tabela OOS Events
+        c.execute('''CREATE TABLE IF NOT EXISTS forex_oos_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            episode_id TEXT,
+            threshold INTEGER,
+            ts_cross REAL,
+            symbol TEXT,
+            direction TEXT,
+            confidence_at_cross REAL,
+            price_at_signal REAL,
+            tick_age_s REAL,
+            payout REAL,
+            code_version TEXT,
+            evaluated INTEGER DEFAULT 0,
+            outcome TEXT,
+            price_after REAL,
+            delay_s REAL,
+            evaluated_at REAL,
+            UNIQUE(episode_id, threshold)
+        )''')
+
+        # NOVO: Tabela Pipeline Heartbeat
+        c.execute('''CREATE TABLE IF NOT EXISTS pipeline_heartbeat (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            last_beat REAL,
+            active_pairs INTEGER,
+            buffer_m15 INTEGER,
+            buffer_h1 INTEGER
+        )''')
 
         for col in ['entry_digit', 'exit_digit', 'entry_spot', 'exit_spot',
                     'entry_tick_time', 'exit_tick_time', 'click_tick', 'latency_ms']:
@@ -154,7 +185,7 @@ def init_db():
 
         conn.commit()
 
-        # P1.8: Criar admin padrão
+        # Criar admin padrão
         admin_check = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
         if admin_check == 0:
             logger.info("Nenhum admin encontrado. A criar admin@foloma.com com password 'admin123'")
@@ -303,6 +334,128 @@ def _generate_forex_signals_loop():
             logger.error(f"Erro no loop de geração de sinais Forex: {e}")
 
 threading.Thread(target=_generate_forex_signals_loop, daemon=True).start()
+
+def _heartbeat_loop():
+    while True:
+        time.sleep(60)
+        try:
+            conn = sqlite3.connect(DATABASE_PATH, timeout=5)
+            with sessions_lock:
+                active_pairs = 0
+                buf_m15 = 0
+                buf_h1 = 0
+                for sess in sessions.values():
+                    if sess.get('client') and sess['client'].authorized:
+                        active_pairs += 1
+                        if sess.get('forex_data'):
+                            status = sess['forex_data'].get_status()
+                            if status.get('pairs'):
+                                buf_m15 = status['pairs'].get('frxEURUSD', {}).get('candles_m15', 0)
+                                buf_h1 = status['pairs'].get('frxEURUSD', {}).get('candles_h1', 0)
+                            break
+            
+            conn.execute(
+                "INSERT OR REPLACE INTO pipeline_heartbeat (id, last_beat, active_pairs, buffer_m15, buffer_h1) "
+                "VALUES (1, ?, ?, ?, ?)",
+                (time.time(), active_pairs, buf_m15, buf_h1)
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Erro no heartbeat: {e}")
+
+threading.Thread(target=_heartbeat_loop, daemon=True).start()
+
+def _evaluate_oos_events_loop():
+    """Avalia os eventos OOS 15 minutos após o cruzamento do limiar."""
+    while True:
+        time.sleep(60)
+        try:
+            conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+            rows = conn.execute(
+                "SELECT id, symbol, direction, ts_cross, price_at_signal FROM forex_oos_events "
+                "WHERE evaluated = 0 AND ts_cross <= ?", 
+                (time.time() - 900,)
+            ).fetchall()
+            
+            if not rows:
+                conn.close()
+                continue
+
+            client = None
+            with sessions_lock:
+                for sess in sessions.values():
+                    if sess.get('client') and sess['client'].authorized:
+                        client = sess['client']
+                        break
+            
+            if not client:
+                conn.close()
+                continue
+
+            for eid, sym, direction, ts_cross, price_entry in rows:
+                target_ts = ts_cross + 900
+                import threading as _th
+                event = _th.Event()
+                holder = {'ticks': []}
+                req_id = client._next_req()
+                orig = client.on_candles_callback # Usando o mesmo callback para apanhar ticks e candles
+
+                def wrapper(data, req_id_in=None):
+                    # Se for ticks_history com style="ticks"
+                    if req_id_in == req_id and not event.is_set():
+                        if 'history' in data:
+                            holder['ticks'] = data['history']
+                            event.set()
+                        elif 'candles' in data:
+                            holder['ticks'] = [{'epoch': c['epoch'], 'quote': c['close']} for c in data['candles']]
+                            event.set()
+                    if orig:
+                        try:
+                            orig(data, req_id=req_id_in)
+                        except Exception:
+                            pass
+
+                client.on_candles_callback = wrapper
+                try:
+                    client._ws_send({
+                        "ticks_history": sym, "style": "ticks",
+                        "start": target_ts, "count": 1, "end": target_ts + 60,
+                        "req_id": req_id
+                    })
+                    if event.wait(timeout=10) and holder['ticks']:
+                        # Encontrar o tick mais próximo do target
+                        t = holder['ticks'][0]
+                        tick_epoch = t['epoch']
+                        pa = t['quote']
+                        delay = tick_epoch - target_ts
+                        
+                        if delay > 60 or delay < 0:
+                            outcome = 'void'
+                        else:
+                            if pa == price_entry:
+                                outcome = 'loss' # Empate = loss
+                            else:
+                                up = pa > price_entry
+                                outcome = 'win' if ((direction == 'BUY') == up) else 'loss'
+                        
+                        conn.execute(
+                            "UPDATE forex_oos_events SET evaluated=1, outcome=?, price_after=?, delay_s=?, evaluated_at=? WHERE id=?",
+                            (outcome, pa, delay, time.time(), eid)
+                        )
+                    else:
+                        conn.execute("UPDATE forex_oos_events SET evaluated=1, outcome='void', evaluated_at=? WHERE id=?", (time.time(), eid))
+                except Exception as e:
+                    logger.error(f"Erro no job OOS {eid}: {e}")
+                finally:
+                    client.on_candles_callback = orig
+            
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Erro no job de avaliação OOS: {e}")
+
+threading.Thread(target=_evaluate_oos_events_loop, daemon=True).start()
 
 def load_markup_from_db():
     try:
@@ -860,7 +1013,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                     forex_mgr.request_candles(symbol, granularity=300, count=200)
                     forex_mgr.request_candles(symbol, granularity=900, count=250)
                     forex_mgr.request_candles(symbol, granularity=1800, count=100)
-                    forex_mgr.request_candles(symbol, granularity=3600, count=200) # P0.5: 200 velas H1
+                    forex_mgr.request_candles(symbol, granularity=3600, count=200)
             else:
                 auth_err = getattr(client, 'auth_error', None)
                 if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
@@ -1061,7 +1214,6 @@ def reset_password():
     email = request.json.get('email','').strip().lower()
     user = UserStore.get(email)
     if not user:
-        # P2: Prevenção de enumeração
         return jsonify({'status': 'ok', 'message': 'Se o email existir, receberá um link.'}), 200
     
     token = secrets.token_urlsafe(64)
@@ -1305,107 +1457,19 @@ def debug():
         'last_reconnect_ago': round(time.time() - getattr(c, '_last_reconnect_time', time.time()), 1)
     })
 
-@app.route('/api/debug/evaluate_oos')
+@app.route('/api/debug/oos_status')
 @require_admin
-def debug_evaluate_oos():
-    import json, time
-    sess = get_session(session['user_id'])
-    if not sess or not sess.get('client'):
-        return jsonify({'error': 'sem sessao'}), 400
-    client = sess['client']
-    if not client.authorized:
-        return jsonify({'error': 'cliente nao autorizado'}), 400
-
+def debug_oos_status():
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    rows = conn.execute(
-        "SELECT id, symbol, direction, timestamp, price_at_signal "
-        "FROM forex_signal_log WHERE strategy_used='ensemble' AND confidence >= 80 "
-        "AND evaluated=0"
-    ).fetchall()
-
-    if not rows:
-        conn.close()
-        return jsonify({'msg': 'Nenhum sinal pendente para avaliar.'})
-
-    symbols = sorted(list(set(r[1] for r in rows)))
-    cache = {}
-    import threading as _th
-
-    for sym in symbols:
-        event = _th.Event()
-        holder = {'candles': []}
-        req_id = client._next_req()
-        orig = client.on_candles_callback
-
-        def wrapper(candles, req_id_in=None):
-            if req_id_in == req_id and not event.is_set():
-                holder['candles'] = candles
-                event.set()
-            if orig:
-                try:
-                    orig(candles, req_id=req_id_in)
-                except Exception:
-                    pass
-
-        client.on_candles_callback = wrapper
-        try:
-            client._ws_send({
-                "ticks_history": sym, "style": "candles",
-                "granularity": 60, # M1
-                "count": 3000, "end": "latest",
-                "req_id": req_id
-            })
-            if event.wait(timeout=30):
-                cache[sym] = {c['epoch']: c for c in holder['candles']}
-        except Exception as e:
-            logger.error(f"Erro ao buscar {sym}: {e}")
-        finally:
-            client.on_candles_callback = orig
-
-    updates = []
-    for sid, sym, direction, ts, price_then in rows:
-        cs = cache.get(sym, {})
-        if not cs or price_then is None:
-            updates.append((sid, 'nodata', None))
-            continue
-
-        target_ts = ts + 900
-        closest_epoch = max((e for e in cs if e <= target_ts), default=None)
-        if not closest_epoch:
-            updates.append((sid, 'nodata', None))
-            continue
-
-        pa = cs[closest_epoch]['close']
-        if pa == price_then:
-            outcome = 'tie'
-        else:
-            up = pa > price_then
-            outcome = 'win' if ((direction == 'BUY') == up) else 'loss'
-
-        updates.append((sid, outcome, pa))
-
-    now = time.time()
-    for sid, o, pa in updates:
-        conn.execute(
-            "UPDATE forex_signal_log SET evaluated=1, outcome=?, price_after=?, "
-            "evaluated_at=? WHERE id=?",
-            (o, pa, now, sid)
-        )
-    conn.commit()
+    hb = conn.execute("SELECT * FROM pipeline_heartbeat WHERE id=1").fetchone()
+    counts = conn.execute("SELECT threshold, outcome, COUNT(*) FROM forex_oos_events GROUP BY threshold, outcome").fetchall()
     conn.close()
-
-    wins = sum(1 for _, o, _ in updates if o == 'win')
-    losses = sum(1 for _, o, _ in updates if o == 'loss')
-    ties = sum(1 for _, o, _ in updates if o == 'tie')
-    nod = sum(1 for _, o, _ in updates if o == 'nodata')
-    return jsonify({
-        'total': len(updates),
-        'wins': wins,
-        'losses': losses,
-        'ties': ties,
-        'nodata': nod,
-        'win_rate': round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0
-    })
+    
+    heartbeat = {}
+    if hb:
+        heartbeat = {'last_beat_ago_s': round(time.time() - hb[1]), 'active_pairs': hb[2], 'buffer_m15': hb[3], 'buffer_h1': hb[4]}
+        
+    return jsonify({'heartbeat': heartbeat, 'oos_event_counts': counts})
 
 @app.route('/api/debug/dump_candles/<symbol>')
 @require_admin
