@@ -42,6 +42,9 @@ class ForexSignals:
     Filtro de UI:
       get_all_signals() só devolve sinais com confidence >= MIN_UI_CONFIDENCE.
       Todos os sinais continuam a ser gravados em forex_signal_log.
+
+    OOS (Novo):
+      _log_oos_event grava o cruzamento dos limiares 60, 70 e 80 na tabela forex_oos_events.
     """
 
     def __init__(self, data_manager):
@@ -55,6 +58,9 @@ class ForexSignals:
 
         self._active_since = {}
         self._last_logged = {}
+        
+        # Para o registo OOS (não repetir o mesmo limiar no mesmo episódio)
+        self._episode_thresholds_logged = {}
 
         self._last_secondary_log = {}
         self._secondary_log_interval = 900
@@ -66,6 +72,11 @@ class ForexSignals:
         """
         self._active_since = {k: v for k, v in self._active_since.items() if k[0] != symbol}
         self._last_logged = {k: v for k, v in self._last_logged.items() if k[0] != symbol}
+        # Limpar também os thresholds do episódio para este símbolo
+        self._episode_thresholds_logged = {
+            k: v for k, v in self._episode_thresholds_logged.items() 
+            if not k.startswith(symbol + "_")
+        }
 
     def _should_log_secondary(self, symbol, source, direction):
         """Throttle por (symbol, source, direction). Máximo 1 log/900s."""
@@ -126,6 +137,7 @@ class ForexSignals:
     def get_signal_multi_timeframe(self, symbol):
         ema_h1 = self._indicators.ema(symbol, period=20, granularity=3600)
         price = self._data.get_latest_price(symbol)
+        
         if ema_h1 is None or price is None:
             self._clear_active_since(symbol)
             return None, "H1 sem dados (EMA ou preço None)"
@@ -136,7 +148,7 @@ class ForexSignals:
             h1_bias = 'SELL'
         else:
             self._clear_active_since(symbol)
-            return None, f"H1 sem tendência clara (price={price:.5f}, ema_h1={ema_h1:.5f})"
+            return None, f"H1 sem tendência clara"
 
         self._data.request_candles(symbol, granularity=900, count=50)
         ind_15 = self._indicators.get_all_indicators(symbol, granularity=900)
@@ -170,6 +182,26 @@ class ForexSignals:
         active_duration_seconds = round(now - active_since)
         is_new_signal = active_duration_seconds < 120
 
+        # --- Registo de Eventos OOS por Limiar ---
+        ep_id = f"{symbol}_{direction}_{int(active_since)}"
+        if ep_id not in self._episode_thresholds_logged:
+            self._episode_thresholds_logged[ep_id] = set()
+            
+        # Calcular idade do tick (P0.2)
+        tick_age = 0.0
+        ticks = self._data.get_recent_ticks(symbol, 1)
+        if ticks:
+            tick_age = now - ticks[0]['timestamp']
+        else:
+            # Se não há ticks, usamos a vela mais recente (pode ser o fim de semana)
+            tick_age = 9999.0
+
+        for thresh in [60, 70, 80]:
+            if adjusted_confidence >= thresh and thresh not in self._episode_thresholds_logged[ep_id]:
+                self._episode_thresholds_logged[ep_id].add(thresh)
+                self._log_oos_event(ep_id, thresh, now, symbol, direction, adjusted_confidence, price, tick_age)
+        # ------------------------------------------------
+
         log_key = (symbol, direction, active_since)
         last_logged_secs = self._last_logged.get(log_key, -1)
 
@@ -181,7 +213,6 @@ class ForexSignals:
 
         if should_log:
             self._last_logged[log_key] = active_duration_seconds
-
             seconds_into_candle = None
             if candles_check:
                 seconds_into_candle = round(time.time() - candles_check[-1].get('epoch', 0))
@@ -216,6 +247,28 @@ class ForexSignals:
             'active_duration_seconds': active_duration_seconds,
             'is_new_signal': is_new_signal,
         }, None
+
+    def _log_oos_event(self, ep_id, threshold, ts_cross, symbol, direction, conf, price, tick_age):
+        """Grava um evento de cruzamento de limiar para o OOS."""
+        # P0.2: Ignorar se o tick for muito antigo (mercado fechado ou parado)
+        if tick_age > 60:
+            logger.debug(f"Evento OOS {ep_id} descartado: tick_age={tick_age:.0f}s > 60s")
+            return
+            
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self._db_path, timeout=5)
+            conn.execute(
+                "INSERT OR IGNORE INTO forex_oos_events "
+                "(episode_id, threshold, ts_cross, symbol, direction, confidence_at_cross, price_at_signal, tick_age_s, code_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (ep_id, threshold, ts_cross, symbol, direction, conf, price, tick_age, "v_oos_1")
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"🎯 Evento OOS registado: {ep_id} cruzou {threshold}% (tick_age={tick_age:.1f}s)")
+        except Exception as e:
+            logger.error(f"Erro ao gravar evento OOS: {e}")
 
     def get_liquidation_signal(self, symbol, granularity=900):
         ind = self._indicators.get_all_indicators(symbol, use_candles=True, granularity=granularity)
