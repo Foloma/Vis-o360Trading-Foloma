@@ -11,6 +11,7 @@ if not SECRET_KEY:
 
 DATA_PATH = os.environ.get('DATA_PATH', '/var/data')
 DATABASE_PATH = os.path.join(DATA_PATH, 'foloma.db')
+BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -26,8 +27,7 @@ except ImportError:
     EMAIL_ENABLED = False
 
 def send_reset_email(email, reset_token):
-    base_url = os.environ.get('BASE_URL', 'http://localhost:5000')
-    reset_url = f"{base_url}/reset-password?token={reset_token}"
+    reset_url = f"{BASE_URL}/reset-password?token={reset_token}"
     if EMAIL_ENABLED and mail:
         try:
             msg = Message(
@@ -43,7 +43,7 @@ def send_reset_email(email, reset_token):
             logger.error(f"Falha ao enviar email para {email}: {e}")
             return False
     else:
-        logger.warning(f"EMAIL NÃO CONFIGURADO – pedido de reset de senha para {email} foi ignorado.")
+        logger.warning(f"EMAIL NÃO CONFIGURADO – link para {email}: {reset_url}")
         return False
 
 # ==================== ENCRIPTAÇÃO DE TOKENS ====================
@@ -66,93 +66,116 @@ def decrypt_token(encrypted: str) -> str:
         try:
             return _fernet.decrypt(encrypted.encode()).decode()
         except Exception:
-            logger.error("Falha ao desencriptar token.")
-            return encrypted
+            logger.error("Falha ao desencriptar token. A SECRET_KEY pode ter mudado.")
+            return None
     return encrypted
 
 # ==================== INICIALIZAÇÃO DA BASE DE DADOS ====================
 def init_db():
-    os.makedirs(DATA_PATH, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-    conn.execute('PRAGMA journal_mode=WAL')
-    conn.execute('PRAGMA busy_timeout=5000')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        email TEXT PRIMARY KEY, id TEXT NOT NULL, name TEXT, password_hash TEXT NOT NULL,
-        active_account TEXT DEFAULT 'demo', created_at REAL, last_login REAL,
-        referral_code TEXT, active INTEGER DEFAULT 1, role TEXT DEFAULT 'user',
-        affiliate_earnings REAL DEFAULT 0.0, referral_link_code TEXT,
-        daily_stats_json TEXT, plan TEXT DEFAULT 'free')''')
+    logger.info(f"A inicializar a base de dados em {DATABASE_PATH}")
     try:
-        c.execute("ALTER TABLE users ADD COLUMN plan TEXT DEFAULT 'free'")
-    except sqlite3.OperationalError:
-        pass
-    c.execute('''CREATE TABLE IF NOT EXISTS user_tokens (
-        email TEXT, account_type TEXT, token TEXT NOT NULL,
-        PRIMARY KEY (email, account_type), FOREIGN KEY (email) REFERENCES users(email))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS password_resets (
-        email TEXT, token_hash TEXT NOT NULL, expires_at REAL NOT NULL, used INTEGER DEFAULT 0,
-        PRIMARY KEY (email, token_hash))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS referrals (
-        referrer_email TEXT, referred_email TEXT, timestamp REAL,
-        PRIMARY KEY (referrer_email, referred_email))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, contract_id TEXT UNIQUE,
-        symbol TEXT, action TEXT, amount REAL, buy_price REAL, sell_price REAL, profit REAL,
-        result TEXT, timestamp REAL DEFAULT (strftime('%s','now')))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS martingale_state (
-        user_id TEXT PRIMARY KEY, active INTEGER DEFAULT 0, step INTEGER DEFAULT 0,
-        original_amount REAL DEFAULT 0, last_updated REAL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS signals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, timestamp REAL NOT NULL,
-        symbol TEXT, signal TEXT, confidence REAL, tech_confidence REAL, digit_confidence REAL,
-        digit_action TEXT, regime TEXT DEFAULT 'UNKNOWN', executed INTEGER DEFAULT 0,
-        result TEXT, profit REAL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS oauth_states (
-        state_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, account_type TEXT DEFAULT 'demo',
-        created_at REAL NOT NULL, used INTEGER DEFAULT 0, code_verifier TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS forex_signal_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT, direction TEXT, signal_type TEXT, strategy_used TEXT,
-        confidence INTEGER, breakdown_json TEXT, suggested_duration_minutes INTEGER,
-        price_at_signal REAL, timestamp REAL, evaluated INTEGER DEFAULT 0,
-        outcome TEXT, price_after REAL, evaluated_at REAL,
-        was_executed INTEGER DEFAULT 0, actual_profit REAL)''')
-    try:
-        c.execute("ALTER TABLE forex_signal_log ADD COLUMN active_duration_seconds INTEGER")
-    except sqlite3.OperationalError:
-        pass
-    c.execute('''CREATE TABLE IF NOT EXISTS digit_stream_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, digit INTEGER,
-        tick_count INTEGER, timestamp REAL)''')
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN daily_stats_json TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE oauth_states ADD COLUMN code_verifier TEXT")
-    except sqlite3.OperationalError:
-        pass
-    for col in ['entry_digit', 'exit_digit', 'entry_spot', 'exit_spot',
-                'entry_tick_time', 'exit_tick_time', 'click_tick', 'latency_ms']:
+        if os.environ.get('RENDER') and not os.path.ismount(DATA_PATH):
+            logger.error(f"❌ ERRO CRÍTICO: {DATA_PATH} NÃO É UM DISCO PERSISTENTE MONTADO!")
+            raise RuntimeError("Disco persistente não montado.")
+
+        os.makedirs(DATA_PATH, exist_ok=True)
+        conn = sqlite3.connect(DATABASE_PATH, timeout=10)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=5000')
+        c = conn.cursor()
+
+        c.execute('''CREATE TABLE IF NOT EXISTS users (
+            email TEXT PRIMARY KEY, id TEXT NOT NULL, name TEXT, password_hash TEXT NOT NULL,
+            active_account TEXT DEFAULT 'demo', created_at REAL, last_login REAL,
+            referral_code TEXT, active INTEGER DEFAULT 1, role TEXT DEFAULT 'user',
+            affiliate_earnings REAL DEFAULT 0.0, referral_link_code TEXT,
+            daily_stats_json TEXT, plan TEXT DEFAULT 'free')''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS user_tokens (
+            email TEXT, account_type TEXT, token TEXT NOT NULL,
+            PRIMARY KEY (email, account_type), FOREIGN KEY (email) REFERENCES users(email))''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS password_resets (
+            email TEXT, token_hash TEXT NOT NULL, expires_at REAL NOT NULL, used INTEGER DEFAULT 0,
+            PRIMARY KEY (email, token_hash))''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS referrals (
+            referrer_email TEXT, referred_email TEXT, timestamp REAL,
+            PRIMARY KEY (referrer_email, referred_email))''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, contract_id TEXT UNIQUE,
+            symbol TEXT, action TEXT, amount REAL, buy_price REAL, sell_price REAL, profit REAL,
+            result TEXT, timestamp REAL DEFAULT (strftime('%s','now')))''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS martingale_state (
+            user_id TEXT PRIMARY KEY, active INTEGER DEFAULT 0, step INTEGER DEFAULT 0,
+            original_amount REAL DEFAULT 0, last_updated REAL)''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, timestamp REAL NOT NULL,
+            symbol TEXT, signal TEXT, confidence REAL, tech_confidence REAL, digit_confidence REAL,
+            digit_action TEXT, regime TEXT DEFAULT 'UNKNOWN', executed INTEGER DEFAULT 0,
+            result TEXT, profit REAL)''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS oauth_states (
+            state_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, account_type TEXT DEFAULT 'demo',
+            created_at REAL NOT NULL, used INTEGER DEFAULT 0, code_verifier TEXT)''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS forex_signal_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, direction TEXT, signal_type TEXT, 
+            strategy_used TEXT, confidence INTEGER, breakdown_json TEXT, suggested_duration_minutes INTEGER,
+            price_at_signal REAL, timestamp REAL, evaluated INTEGER DEFAULT 0,
+            outcome TEXT, price_after REAL, evaluated_at REAL,
+            was_executed INTEGER DEFAULT 0, actual_profit REAL)''')
+
         try:
-            c.execute(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
+            c.execute("ALTER TABLE forex_signal_log ADD COLUMN active_duration_seconds INTEGER")
         except sqlite3.OperationalError:
             pass
-    c.execute("DELETE FROM password_resets WHERE expires_at < ?", (time.time(),))
-    conn.commit()
-    conn.close()
+
+        c.execute('''CREATE TABLE IF NOT EXISTS digit_stream_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, digit INTEGER,
+            tick_count INTEGER, timestamp REAL)''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS candles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, granularity INTEGER, 
+            epoch REAL, open REAL, high REAL, low REAL, close REAL,
+            UNIQUE(symbol, granularity, epoch))''')
+
+        for col in ['entry_digit', 'exit_digit', 'entry_spot', 'exit_spot',
+                    'entry_tick_time', 'exit_tick_time', 'click_tick', 'latency_ms']:
+            try:
+                c.execute(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
+            except sqlite3.OperationalError:
+                pass
+
+        conn.commit()
+
+        # P1.8: Criar admin padrão
+        admin_check = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
+        if admin_check == 0:
+            logger.info("Nenhum admin encontrado. A criar admin@foloma.com com password 'admin123'")
+            admin_hash = generate_password_hash('admin123')
+            c.execute('''INSERT OR IGNORE INTO users (email, id, name, password_hash, active_account, role, plan) 
+                         VALUES (?, ?, ?, ?, ?, ?, ?)''', 
+                      ('admin@foloma.com', 'admin_001', 'Administrador', admin_hash, 'demo', 'admin', 'pro'))
+            conn.commit()
+
+        conn.close()
+        logger.info("✅ Base de dados inicializada com todas as tabelas.")
+    except Exception as e:
+        logger.error(f"❌ FALHA CRÍTICA AO INICIAR A BASE DE DADOS: {e}")
+        raise e
 
 init_db()
 
 OAUTH_STATE_TTL = 900
-
-# ==================== CACHE DE SINAIS FOREX ====================
 _forex_signals_cache = {'signals': [], 'timestamp': 0}
 _forex_signals_cache_lock = threading.Lock()
 
-# ==================== NOTIFICAÇÕES TELEGRAM ====================
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 _telegram_notified = {}
@@ -181,7 +204,6 @@ def notify_signals(signals):
             key = (s['symbol'], s['direction'], active_since)
             if key in _telegram_notified and now - _telegram_notified[key] < 3600:
                 continue
-            # CORREÇÃO 22.1: alinhar com janela de operabilidade (900s = 15 min), não 300s
             age_secs = (s.get('active_duration_seconds', 0) or 0)
             if age_secs > 900:
                 continue
@@ -193,12 +215,11 @@ def notify_signals(signals):
                 f"Direção: <b>{s['direction']}</b>\n"
                 f"Confiança: <b>{s['confidence']}%</b>\n"
                 f"Ativo há: {age_min} min\n\n"
-                f"Executa em conta demo:\nhttps://sao360-jf.onrender.com"
+                f"Executa em conta demo:\n{BASE_URL}"
             )
             if send_telegram(text):
                 _telegram_notified[key] = now
 
-# ==================== LIMPEZA PERIÓDICA ====================
 def _cleanup_loop():
     while True:
         time.sleep(3600)
@@ -210,7 +231,6 @@ def _cleanup_loop():
             conn.commit()
             conn.close()
             now = time.time()
-            # NOTA (14.4): on_disconnect() corre fora do lock para não bloquear a app
             to_disconnect = []
             with sessions_lock:
                 to_remove = []
@@ -234,7 +254,6 @@ def _cleanup_loop():
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
-# ==================== REFRESCO DE CANDLES FOREX (120s) ====================
 def _refresh_forex_candles_loop():
     while True:
         time.sleep(120)
@@ -260,7 +279,6 @@ def _refresh_forex_candles_loop():
 
 threading.Thread(target=_refresh_forex_candles_loop, daemon=True).start()
 
-# ==================== GERAÇÃO DE SINAIS FOREX (singleton) ====================
 def _generate_forex_signals_loop():
     while True:
         time.sleep(90)
@@ -286,7 +304,6 @@ def _generate_forex_signals_loop():
 
 threading.Thread(target=_generate_forex_signals_loop, daemon=True).start()
 
-# ==================== CONFIGURAÇÃO DE MARKUP ====================
 def load_markup_from_db():
     try:
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
@@ -300,7 +317,6 @@ def load_markup_from_db():
 
 load_markup_from_db()
 
-# ==================== MIGRAÇÃO DE JSON ====================
 def migrate_from_json():
     json_path = os.path.join(DATA_PATH, 'users.json')
     if not os.path.exists(json_path):
@@ -340,20 +356,21 @@ def migrate_from_json():
 
 migrate_from_json()
 
-# ==================== ARMAZENAMENTO DE UTILIZADORES ====================
 class UserStore:
     @staticmethod
     def get(email):
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         try:
-            row = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+            row = conn.execute('''SELECT email, id, name, password_hash, active_account, created_at, last_login,
+                    referral_code, active, role, affiliate_earnings, referral_link_code, daily_stats_json, plan 
+                    FROM users WHERE email = ?''', (email,)).fetchone()
             if not row:
                 return None
             keys = ['email','id','name','password_hash','active_account','created_at','last_login',
                     'referral_code','active','role','affiliate_earnings','referral_link_code','daily_stats_json','plan']
             user = dict(zip(keys, row))
             tokens = conn.execute('SELECT account_type, token FROM user_tokens WHERE email = ?', (email,)).fetchall()
-            user['tokens'] = {acc: decrypt_token(tok) for acc, tok in tokens}
+            user['tokens'] = {acc: decrypt_token(tok) for acc, tok in tokens if tok}
             if user.get('daily_stats_json'):
                 try:
                     user['daily_stats'] = json.loads(user['daily_stats_json'])
@@ -450,7 +467,6 @@ class AuthService:
                 row = conn.execute('SELECT email FROM users WHERE referral_link_code = ?', (ref,)).fetchone()
                 if row:
                     conn.execute('INSERT OR IGNORE INTO referrals (referrer_email, referred_email, timestamp) VALUES (?,?,?)', (row[0], email, time.time()))
-                    conn.execute('UPDATE users SET affiliate_earnings = affiliate_earnings + 1.0 WHERE email = ?', (row[0],))
                     conn.commit()
             except Exception as e:
                 logger.error(f"Erro ao processar referral: {e}")
@@ -458,7 +474,6 @@ class AuthService:
                 conn.close()
         return user
 
-# ==================== GESTOR DE SESSÃO ====================
 sessions = {}
 sessions_lock = threading.RLock()
 connecting_lock = threading.Lock()
@@ -703,7 +718,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                     'latency_ms': getattr(bot, 'last_trade_result', {}).get('latency_total_ms')
                 })
                 _save_martingale_state(user_id, bot)
-                strategy.notify_result(action, is_win)
+                strategy.notify_result(action, is_win, profit)
                 if strategy.is_global_stop:
                     bot.reset_martingale()
                     _save_martingale_state(user_id, bot)
@@ -735,6 +750,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                     ok = client.place_differ_trade(digit, amt)
                     if not ok:
                         strategy.set_execution_error(f"Falha ao executar DIFFER: {digit}")
+                        strategy.rollback_differ_digit(digit)
                     else:
                         strategy.clear_execution_error()
                         credit_referral_commission(user_email, amt)
@@ -844,7 +860,7 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                     forex_mgr.request_candles(symbol, granularity=300, count=200)
                     forex_mgr.request_candles(symbol, granularity=900, count=250)
                     forex_mgr.request_candles(symbol, granularity=1800, count=100)
-                    forex_mgr.request_candles(symbol, granularity=3600, count=30)
+                    forex_mgr.request_candles(symbol, granularity=3600, count=200) # P0.5: 200 velas H1
             else:
                 auth_err = getattr(client, 'auth_error', None)
                 if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
@@ -857,7 +873,6 @@ def get_session(user_id):
     with sessions_lock:
         return sessions.get(user_id)
 
-# ==================== FLASK ====================
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400
@@ -915,7 +930,6 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
-# ==================== ROTAS ====================
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -1047,7 +1061,9 @@ def reset_password():
     email = request.json.get('email','').strip().lower()
     user = UserStore.get(email)
     if not user:
-        return jsonify({'error': 'Email não encontrado'}), 404
+        # P2: Prevenção de enumeração
+        return jsonify({'status': 'ok', 'message': 'Se o email existir, receberá um link.'}), 200
+    
     token = secrets.token_urlsafe(64)
     hashed = hashlib.sha256(token.encode()).hexdigest()
     conn = sqlite3.connect(DATABASE_PATH, timeout=10)
@@ -1196,7 +1212,6 @@ def set_session_goals():
     return jsonify({'status': 'ok', 'session_goals': sess['session_goals']})
 
 def _session_goals_block(sess):
-    # BLOQUEIO DE METAS E STOP-LOSS DESATIVADO A PEDIDO DO UTILIZADOR
     return None
 
 @app.route('/api/status')
@@ -1293,8 +1308,6 @@ def debug():
 @app.route('/api/debug/evaluate_oos')
 @require_admin
 def debug_evaluate_oos():
-    """Reconstrói outcomes dos sinais OOS pós-17/09.
-    CORREÇÃO 23.2: alinhamento exato de 15 min (900s) após o timestamp do sinal."""
     import json, time
     sess = get_session(session['user_id'])
     if not sess or not sess.get('client'):
@@ -1307,7 +1320,7 @@ def debug_evaluate_oos():
     rows = conn.execute(
         "SELECT id, symbol, direction, timestamp, price_at_signal "
         "FROM forex_signal_log WHERE strategy_used='ensemble' AND confidence >= 80 "
-        "AND evaluated=0 AND date(timestamp,'unixepoch') >= '2026-09-17'"
+        "AND evaluated=0"
     ).fetchall()
 
     if not rows:
@@ -1338,7 +1351,8 @@ def debug_evaluate_oos():
         try:
             client._ws_send({
                 "ticks_history": sym, "style": "candles",
-                "granularity": 900, "count": 3000, "end": "latest",
+                "granularity": 60, # M1
+                "count": 3000, "end": "latest",
                 "req_id": req_id
             })
             if event.wait(timeout=30):
@@ -1354,16 +1368,20 @@ def debug_evaluate_oos():
         if not cs or price_then is None:
             updates.append((sid, 'nodata', None))
             continue
-        # CORREÇÃO 23.2: alvo é exatamente 15 min (900s) após o timestamp do sinal
+
         target_ts = ts + 900
-        later = sorted(e for e in cs if e >= target_ts)
-        nc = cs[later[0]] if later else None
-        if not nc:
+        closest_epoch = max((e for e in cs if e <= target_ts), default=None)
+        if not closest_epoch:
             updates.append((sid, 'nodata', None))
             continue
-        pa = nc['close']
-        up = pa > price_then
-        outcome = 'win' if ((direction == 'BUY') == up) else 'loss'
+
+        pa = cs[closest_epoch]['close']
+        if pa == price_then:
+            outcome = 'tie'
+        else:
+            up = pa > price_then
+            outcome = 'win' if ((direction == 'BUY') == up) else 'loss'
+
         updates.append((sid, outcome, pa))
 
     now = time.time()
@@ -1378,17 +1396,19 @@ def debug_evaluate_oos():
 
     wins = sum(1 for _, o, _ in updates if o == 'win')
     losses = sum(1 for _, o, _ in updates if o == 'loss')
+    ties = sum(1 for _, o, _ in updates if o == 'tie')
     nod = sum(1 for _, o, _ in updates if o == 'nodata')
     return jsonify({
         'total': len(updates),
         'wins': wins,
         'losses': losses,
+        'ties': ties,
         'nodata': nod,
         'win_rate': round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0
     })
 
 @app.route('/api/debug/dump_candles/<symbol>')
-@require_auth
+@require_admin
 def debug_dump_candles(symbol):
     sess = get_session(session['user_id'])
     if not sess or not sess.get('client'):
@@ -1430,7 +1450,7 @@ def debug_dump_candles(symbol):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
-        client.on_candles_callback = orig 
+        client.on_candles_callback = orig
 
 @app.route('/api/debug/digits')
 @require_admin
@@ -1576,7 +1596,6 @@ def trade_digit():
     if block_msg:
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
-    # STOP-LOSS DESATIVADO: if bot.stop_loss_active: ...
     strategy = sess.get('strategy')
     if not strategy:
         return jsonify({'error': 'Estratégia indisponível'}), 400
@@ -1615,7 +1634,6 @@ def trade_differ():
     if block_msg:
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
-    # STOP-LOSS DESATIVADO: if bot.stop_loss_active: ...
     strategy = sess.get('strategy')
     if not strategy:
         return jsonify({'error': 'Estratégia indisponível'}), 400
@@ -1653,7 +1671,6 @@ def trade_matches():
     if block_msg:
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
-    # STOP-LOSS DESATIVADO: if bot.stop_loss_active: ...
     strategy = sess.get('strategy')
     if not strategy or strategy._trade_locked:
         return jsonify({'error': 'Trade em curso — aguarde'}), 400
@@ -1691,7 +1708,6 @@ def trade_zscore():
     if block_msg:
         return jsonify({'error': block_msg}), 400
     bot = sess['trading_bot']
-    # STOP-LOSS DESATIVADO: if bot.stop_loss_active: ...
     strategy = sess.get('strategy')
     if not strategy or strategy._trade_locked:
         return jsonify({'error': 'Trade em curso — aguarde'}), 400
@@ -1879,7 +1895,6 @@ def credit_referral_commission(user_email, amount):
     finally:
         conn.close()
 
-# ==================== ROTAS FOREX ====================
 @app.route('/api/forex/signals')
 @require_auth
 def forex_signals():
@@ -1899,8 +1914,6 @@ def forex_signals():
 @app.route('/api/forex/signals/recent', methods=['GET'])
 @require_auth
 def forex_signals_recent():
-    """CORREÇÃO 23.1: agrupamento em Python por proximidade temporal (~1000s), 
-    evitando fundir sinais distintos como acontecia com GROUP BY symbol, direction."""
     try:
         hours = int(request.args.get('hours', 24))
     except (ValueError, TypeError):
@@ -1920,12 +1933,10 @@ def forex_signals_recent():
         logger.error(f"Erro ao ler sinais recentes: {e}")
         return jsonify({'error': 'Erro ao consultar histórico'}), 500
 
-    # Agrupamento manual por proximidade temporal (não fundir sinais distintos)
     grouped = []
     last_key, last_ts = None, None
     for id_, symbol, direction, confidence, price, ts, duration, active_secs in rows:
         key = (symbol, direction)
-        # Novo sinal se mudar de par/direção OU se passaram >1000s desde o último
         if key != last_key or (ts - last_ts) > 1000:
             grouped.append({
                 'id': id_, 'symbol': symbol, 'direction': direction,
@@ -1933,11 +1944,9 @@ def forex_signals_recent():
                 'suggested_duration_minutes': duration, 'active_duration_seconds': active_secs
             })
         else:
-            # Mesmo sinal a persistir — atualiza a confiança para o valor mais recente
             grouped[-1]['confidence'] = confidence
         last_key, last_ts = key, ts
 
-    # Ordenar do mais recente para o mais antigo e limitar
     grouped.sort(key=lambda g: g['timestamp'], reverse=True)
     grouped = grouped[:50]
 
@@ -2059,7 +2068,6 @@ def forex_trade():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado à Deriv'}), 400
-    # BLOQUEIO DE METAS DESATIVADO: block_msg = _session_goals_block(sess) ...
     client = sess['client']
     if client.pending_trade is not None:
         status = client.get_pending_trade_status()
@@ -2106,7 +2114,6 @@ def forex_assertividade():
     wins = sum(1 for r in rows if r[0] == 'win')
     return jsonify({'assertividade': round(wins / len(rows) * 100, 1), 'amostra': len(rows)})
 
-# ==================== ROTAS ADMIN ====================
 @app.route('/api/admin/users')
 @require_admin
 def admin_users():
@@ -2202,7 +2209,6 @@ def set_plan():
         conn.close()
     return jsonify({'status': 'ok', 'message': f'Plano de {email} alterado para {plan}.'})
 
-# ==================== ROTAS AFILIADO / PAGAMENTO ====================
 @app.route('/api/affiliate/stats')
 @require_auth
 def affiliate_stats():
@@ -2218,7 +2224,7 @@ def affiliate_stats():
         total_commission = user.get('affiliate_earnings', 0.0)
     finally:
         conn.close()
-    return jsonify({'total_referrals': referred_count, 'total_commission': total_commission, 'pending_commission': 0.0, 'paid_commission': total_commission})
+    return jsonify({'total_referrals': referred_count, 'total_commission': total_commission, 'pending_commission': total_commission, 'paid_commission': 0.0})
 
 @app.route('/api/affiliate/link')
 @require_auth
@@ -2312,7 +2318,6 @@ def withdraw():
         logger.exception("Erro levantamento")
         return jsonify({'error': 'Erro interno'}), 500
 
-# ==================== INICIALIZAÇÃO ====================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
