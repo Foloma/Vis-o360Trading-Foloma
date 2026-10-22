@@ -74,9 +74,11 @@ def decrypt_token(encrypted: str) -> str:
 def init_db():
     logger.info(f"A inicializar a base de dados em {DATABASE_PATH}")
     try:
-        if os.environ.get('RENDER') and not os.path.ismount(DATA_PATH):
-            logger.error(f"❌ ERRO CRÍTICO: {DATA_PATH} NÃO É UM DISCO PERSISTENTE MONTADO!")
-            raise RuntimeError("Disco persistente não montado.")
+        # VERIFICAÇÃO DESATIVADA: O Render mostra o disco montado via 'df -h', 
+        # mas o Python os.path.ismount() dá falso negativo no container.
+        # if os.environ.get('RENDER') and not os.path.ismount(DATA_PATH):
+        #     logger.error(f"❌ ERRO CRÍTICO: {DATA_PATH} NÃO É UM DISCO PERSISTENTE MONTADO!")
+        #     raise RuntimeError("Disco persistente não montado.")
 
         os.makedirs(DATA_PATH, exist_ok=True)
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
@@ -140,13 +142,13 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, digit INTEGER,
             tick_count INTEGER, timestamp REAL)''')
 
-        # NOVO: Tabela candles para persistir histórico
+        # Tabela candles para persistir histórico
         c.execute('''CREATE TABLE IF NOT EXISTS candles (
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, granularity INTEGER, 
             epoch REAL, open REAL, high REAL, low REAL, close REAL,
             UNIQUE(symbol, granularity, epoch))''')
 
-        # NOVO: Tabela OOS Events
+        # Tabela OOS Events
         c.execute('''CREATE TABLE IF NOT EXISTS forex_oos_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             episode_id TEXT,
@@ -167,7 +169,7 @@ def init_db():
             UNIQUE(episode_id, threshold)
         )''')
 
-        # NOVO: Tabela Pipeline Heartbeat
+        # Tabela Pipeline Heartbeat
         c.execute('''CREATE TABLE IF NOT EXISTS pipeline_heartbeat (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             last_beat REAL,
@@ -399,10 +401,9 @@ def _evaluate_oos_events_loop():
                 event = _th.Event()
                 holder = {'ticks': []}
                 req_id = client._next_req()
-                orig = client.on_candles_callback # Usando o mesmo callback para apanhar ticks e candles
+                orig = client.on_candles_callback
 
                 def wrapper(data, req_id_in=None):
-                    # Se for ticks_history com style="ticks"
                     if req_id_in == req_id and not event.is_set():
                         if 'history' in data:
                             holder['ticks'] = data['history']
@@ -424,7 +425,6 @@ def _evaluate_oos_events_loop():
                         "req_id": req_id
                     })
                     if event.wait(timeout=10) and holder['ticks']:
-                        # Encontrar o tick mais próximo do target
                         t = holder['ticks'][0]
                         tick_epoch = t['epoch']
                         pa = t['quote']
