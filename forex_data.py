@@ -1,7 +1,10 @@
 import json
 import time
+import os
+import sqlite3
 import logging
 import threading
+import datetime
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -21,7 +24,7 @@ for _code, _name in FOREX_SYMBOLS.items():
     SYMBOL_ALIASES[_code.upper()] = _code
 
 MAX_TICKS_PER_SYMBOL = 200
-CANDLE_REQUEST_TIMEOUT = 10
+CANDLE_REQUEST_TIMEOUT = 20  # Aumentado de 10s para 20s para evitar descartes no arranque
 
 
 class ForexDataManager:
@@ -87,6 +90,10 @@ class ForexDataManager:
             return  # Não é um par Forex
 
         price = tick_data.get('price')
+        # P2: Verificar se o preço é válido antes de tentar converter para float
+        if price is None:
+            return
+
         timestamp = tick_data.get('timestamp', time.time())
 
         with self._lock:
@@ -113,6 +120,9 @@ class ForexDataManager:
                 entry = self._pending_candle_requests.pop(req_id, None)
                 if entry:
                     symbol, granularity, _ = entry
+                else:
+                    # P1.5: Log de resposta descartada
+                    logger.warning(f"⚠️ Resposta de velas descartada: req_id {req_id} não encontrado (expirou ou não estava pendente)")
 
         # 2. Se não encontrou, extrair do echo_req (Deriv reenvia o pedido original)
         if symbol is None:
@@ -141,22 +151,41 @@ class ForexDataManager:
             existing = self._candles[symbol][granularity]
             last_epoch = existing[-1]['epoch'] if existing else 0
 
-            # Processar cada vela individualmente, ignorando apenas as já existentes
+            now = time.time()
             for candle in candles:
                 epoch = candle.get('epoch')
                 if epoch is None:
                     continue
-                if epoch <= last_epoch:
-                    # Esta vela (ou uma mais antiga) já está no cache
-                    continue
-                existing.append({
+                
+                candle_data = {
                     'epoch': epoch,
                     'open': float(candle['open']),
                     'high': float(candle['high']),
                     'low': float(candle['low']),
-                    'close': float(candle['close'])
-                })
-                last_epoch = epoch   # atualizar o último epoch conhecido
+                    'close': float(candle['close']),
+                    'fetched_at': now  # P0.1: Guardar o momento do fetch
+                }
+                
+                if existing and epoch == existing[-1]['epoch']:
+                    # P0.1: Atualizar a vela em formação
+                    existing[-1] = candle_data
+                elif epoch > last_epoch:
+                    existing.append(candle_data)
+                    last_epoch = epoch
+                
+                # P0.3: Gravar na tabela candles (se o disco estiver acessível)
+                try:
+                    db_path = os.path.join(os.environ.get('DATA_PATH', '/var/data'), 'foloma.db')
+                    conn = sqlite3.connect(db_path, timeout=5)
+                    conn.execute(
+                        "INSERT OR REPLACE INTO candles (symbol, granularity, epoch, open, high, low, close) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (symbol, granularity, epoch, candle_data['open'], candle_data['high'], candle_data['low'], candle_data['close'])
+                    )
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    logger.error(f"Erro ao persistir vela na DB: {e}")
 
             if existing:
                 logger.info(f"📈 Velas Forex recebidas: {symbol} (granularity={granularity}, {len(candles)} velas)")
@@ -181,21 +210,38 @@ class ForexDataManager:
                 return []
             candles = list(self._candles[symbol][granularity])
             if only_closed:
-                now = time.time()
-                candles = [c for c in candles if c['epoch'] + granularity <= now]
+                # P0.1: Só considerar fechada se já foi atualizada APÓS o fecho (fetched_at >= epoch + granularity)
+                candles = [c for c in candles if c.get('fetched_at', 0) >= c['epoch'] + granularity]
             return candles[-count:] if count else candles
 
     def get_latest_price(self, symbol):
         """Retorna o preço mais recente de um par, com fallback para o último fecho das velas."""
         symbol = self._normalize_symbol(symbol)
+        
+        # P0.2: Verificar se o mercado está fechado (Sexta 22h a Domingo 22h UTC)
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        is_weekend = False
+        if now_utc.weekday() == 4 and now_utc.hour >= 22:  # Sexta >= 22h
+            is_weekend = True
+        elif now_utc.weekday() == 5:  # Sábado
+            is_weekend = True
+        elif now_utc.weekday() == 6 and now_utc.hour < 22:  # Domingo < 22h
+            is_weekend = True
+
+        if is_weekend:
+            return None
+
         with self._lock:
             # 1. Tentar tick mais recente
             ticks = self._ticks.get(symbol, [])
             if ticks:
-                return ticks[-1]['price']
+                last_tick = ticks[-1]
+                # P0.2: Verificar se o último tick tem mais de 60s
+                if time.time() - last_tick['timestamp'] > 60:
+                    return None
+                return last_tick['price']
 
             # 2. Fallback: último fecho das velas M1 → M5 → M15 → M30 → H1
-            # FIX: incluir 1800 (M30) e 3600 (H1) no fallback
             for granularity in [60, 300, 900, 1800, 3600]:
                 candles = self._candles.get(symbol, {}).get(granularity, [])
                 if candles:
