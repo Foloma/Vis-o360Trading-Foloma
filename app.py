@@ -9,9 +9,13 @@ SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY é obrigatória. Defina a variável de ambiente.")
 
-# BLINDAGEM: Remove espaços, aspas e caracteres invisíveis que possam vir do Render
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+# [FIX P3] Limpeza agressiva de espaços no DATA_PATH
 raw_data_path = os.environ.get('DATA_PATH', '/var/data')
-DATA_PATH = raw_data_path.strip().strip("'\"")
+DATA_PATH = raw_data_path.replace(" ", "").strip().strip("'\"") or '/var/data'
+logger.info(f"📂 DATA_PATH final: {repr(DATA_PATH)}")
 
 DATABASE_PATH = os.path.join(DATA_PATH, 'foloma.db')
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000').strip().strip("'\"")
@@ -21,9 +25,6 @@ ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
 FEED_USER_EMAIL = os.environ.get('FEED_USER_EMAIL', '').strip().lower()
 ALLOW_REAL_TRADING = os.environ.get('ALLOW_REAL_TRADING', 'false').lower() == 'true'
 MIN_UI_CONFIDENCE = int(os.environ.get('MIN_UI_CONFIDENCE', '80'))
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-logger = logging.getLogger(__name__)
 
 # ==================== ENVIO DE EMAIL (opcional) ====================
 mail = None
@@ -83,11 +84,6 @@ def decrypt_token(encrypted: str) -> str:
 def init_db():
     logger.info(f"A inicializar a base de dados em {DATABASE_PATH}")
     try:
-        # Verificação de montagem desativada - O Render reporta o mount via df -h
-        # if os.environ.get('RENDER') and not os.path.ismount(DATA_PATH):
-        #     logger.error(f"❌ ERRO CRÍTICO: {DATA_PATH} NÃO É UM DISCO PERSISTENTE MONTADO!")
-        #     raise RuntimeError("Disco persistente não montado.")
-
         os.makedirs(DATA_PATH, exist_ok=True)
         conn = sqlite3.connect(DATABASE_PATH, timeout=10)
         conn.execute('PRAGMA journal_mode=WAL')
@@ -157,42 +153,32 @@ def init_db():
 
         c.execute('''CREATE TABLE IF NOT EXISTS forex_oos_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            episode_id TEXT,
-            threshold INTEGER,
-            ts_cross REAL,
-            symbol TEXT,
-            direction TEXT,
-            confidence_at_cross REAL,
-            price_at_signal REAL,
-            tick_epoch REAL,
-            tick_age_s REAL,
-            payout REAL,
-            code_version TEXT,
-            attempts INTEGER DEFAULT 0,
-            evaluated INTEGER DEFAULT 0,
-            outcome TEXT,
-            price_after REAL,
-            delay_s REAL,
-            void_reason TEXT,
-            evaluated_at REAL,
+            episode_id TEXT, threshold INTEGER, ts_cross REAL, symbol TEXT, direction TEXT,
+            confidence_at_cross REAL, price_at_signal REAL, tick_epoch REAL, tick_age_s REAL,
+            payout REAL, code_version TEXT, attempts INTEGER DEFAULT 0, evaluated INTEGER DEFAULT 0,
+            outcome TEXT, price_after REAL, delay_s REAL, void_reason TEXT, evaluated_at REAL,
             UNIQUE(episode_id, threshold)
         )''')
+        
+        for col in ['attempts', 'void_reason', 'tick_epoch']:
+            try:
+                c.execute(f"ALTER TABLE forex_oos_events ADD COLUMN {col} { 'INTEGER DEFAULT 0' if col == 'attempts' else 'TEXT' if col == 'void_reason' else 'REAL' }")
+            except sqlite3.OperationalError:
+                pass
 
         c.execute('''CREATE TABLE IF NOT EXISTS pipeline_heartbeat (
             id INTEGER PRIMARY KEY CHECK (id = 1),
-            last_beat REAL,
-            active_pairs INTEGER,
-            buffer_m15 INTEGER,
-            buffer_h1 INTEGER
+            last_beat REAL, active_pairs INTEGER, buffer_m15 INTEGER, buffer_h1 INTEGER
         )''')
 
-        # Marcadores de persistência
+        # [FIX P3] Marcadores de persistência
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('db_created_at', ?)", (str(time.time()),))
         row = c.execute("SELECT value FROM settings WHERE key='boot_count'").fetchone()
         if row:
             c.execute("UPDATE settings SET value = ? WHERE key='boot_count'", (str(int(row[0]) + 1),))
         else:
             c.execute("INSERT INTO settings (key, value) VALUES ('boot_count', '1')")
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_boot_at', ?)", (str(time.time()),))
 
         for col in ['entry_digit', 'exit_digit', 'entry_spot', 'exit_spot',
                     'entry_tick_time', 'exit_tick_time', 'click_tick', 'latency_ms']:
@@ -201,9 +187,10 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-        conn.commit()
+        # [FIX P1] Promover o utilizador do Jacob a admin
+        c.execute("UPDATE users SET role='admin' WHERE email='jacobfoloma8@gmail.com'")
 
-        # Criar admin de forma segura
+        # [FIX P1] Criar admin de forma segura apenas se as variáveis existirem
         if ADMIN_EMAIL and ADMIN_PASSWORD:
             admin_check = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
             if admin_check == 0:
@@ -212,12 +199,12 @@ def init_db():
                 c.execute('''INSERT OR IGNORE INTO users (email, id, name, password_hash, active_account, role, plan) 
                              VALUES (?, ?, ?, ?, ?, ?, ?)''', 
                           (ADMIN_EMAIL, 'admin_001', 'Administrador', admin_hash, 'demo', 'admin', 'pro'))
-                conn.commit()
         elif not ADMIN_EMAIL and not ADMIN_PASSWORD:
-            logger.warning("Variáveis ADMIN_EMAIL e ADMIN_PASSWORD não definidas. Nenhum admin será criado.")
+            logger.warning("Variáveis ADMIN_EMAIL e ADMIN_PASSWORD não definidas. Nenhum admin padrão será criado.")
         else:
-            logger.warning("Apenas uma das variáveis de admin foi definida. Nenhum admin será criado.")
+            logger.warning("Apenas uma das variáveis de admin foi definida. Nenhum admin padrão será criado.")
 
+        conn.commit()
         conn.close()
         logger.info("✅ Base de dados inicializada com todas as tabelas.")
     except Exception as e:
@@ -289,7 +276,7 @@ def _cleanup_loop():
             with sessions_lock:
                 to_remove = []
                 for uid, sess in sessions.items():
-                    if FEED_USER_EMAIL and uid == _feed_user_id: continue # P0.1: não limpar feed
+                    if FEED_USER_EMAIL and uid == _feed_user_id: continue
                     client = sess.get('client')
                     last_tick = getattr(client, '_last_tick_time', 0)
                     if last_tick and (now - last_tick) > 1800:
@@ -309,7 +296,6 @@ def _cleanup_loop():
 
 threading.Thread(target=_cleanup_loop, daemon=True).start()
 
-# ==================== WATCHDOG DO FEED (P0.1) ====================
 _feed_user_id = None
 def _feed_watchdog_loop():
     global _feed_user_id
@@ -345,7 +331,6 @@ def _feed_watchdog_loop():
 threading.Thread(target=_feed_watchdog_loop, daemon=True).start()
 
 def _get_active_session():
-    """Retorna a sessão do Feed (se existir) ou a primeira autorizada."""
     with sessions_lock:
         if _feed_user_id and _feed_user_id in sessions:
             return sessions[_feed_user_id]
@@ -353,6 +338,35 @@ def _get_active_session():
             if sess.get('client') and sess['client'].authorized:
                 return sess
     return None
+
+def _repair_candles_loop():
+    """[FIX P4] Loop de reparação de velas em falta."""
+    while True:
+        time.sleep(60)
+        try:
+            sess = _get_active_session()
+            if not sess: continue
+            forex_mgr = sess.get('forex_data')
+            if not forex_mgr: continue
+            
+            status = forex_mgr.get_status()
+            for sym, data in status.get('pairs', {}).items():
+                if data['candles_m15'] < 100:
+                    logger.warning(f"🛠️ Reparação: {sym} M15={data['candles_m15']}. A pedir novamente...")
+                    forex_mgr.request_candles(sym, granularity=900, count=250)
+                    time.sleep(0.3)
+                if data['candles_h1'] < 70:
+                    logger.warning(f"🛠️ Reparação: {sym} H1={data['candles_h1']}. A pedir novamente...")
+                    forex_mgr.request_candles(sym, granularity=3600, count=200)
+                    time.sleep(0.3)
+                if data['candles_m5'] < 50:
+                    logger.warning(f"🛠️ Reparação: {sym} M5={data['candles_m5']}. A pedir novamente...")
+                    forex_mgr.request_candles(sym, granularity=300, count=200)
+                    time.sleep(0.3)
+        except Exception as e:
+            logger.error(f"Erro na reparação de velas: {e}")
+
+threading.Thread(target=_repair_candles_loop, daemon=True).start()
 
 def _refresh_forex_candles_loop():
     while True:
@@ -384,14 +398,30 @@ def _generate_forex_signals_loop():
         try:
             sess = _get_active_session()
             if not sess: continue
+            
+            forex_mgr = sess.get('forex_data')
+            status = forex_mgr.get_status() if forex_mgr else {}
+            
             forex_signals = sess.get('forex_signals')
             if forex_signals:
                 signals = forex_signals.get_all_signals()
+                
+                # [FIX P4] Filtrar sinais se as velas estiverem incompletas
+                valid_signals = []
+                for s in signals:
+                    sym = s['symbol']
+                    if status and 'pairs' in status:
+                        p = status['pairs'].get(sym, {})
+                        if p.get('candles_m15', 0) < 100 or p.get('candles_h1', 0) < 70:
+                            logger.warning(f"⏳ Sinal ignorado para {sym}: velas insuficientes (M15={p.get('candles_m15')}, H1={p.get('candles_h1')})")
+                            continue
+                    valid_signals.append(s)
+
                 with _forex_signals_cache_lock:
-                    _forex_signals_cache['signals'] = signals
+                    _forex_signals_cache['signals'] = valid_signals
                     _forex_signals_cache['timestamp'] = time.time()
                 try:
-                    notify_signals(signals)
+                    notify_signals(valid_signals)
                 except Exception as e:
                     logger.error(f"Erro ao notificar Telegram: {e}")
         except Exception as e:
@@ -427,12 +457,10 @@ def _heartbeat_loop():
 threading.Thread(target=_heartbeat_loop, daemon=True).start()
 
 def _evaluate_oos_events_loop():
-    """Avalia os eventos OOS 15 minutos após o cruzamento do limiar."""
     while True:
         time.sleep(60)
         try:
             conn = sqlite3.connect(DATABASE_PATH, timeout=10)
-            # P0.2: Só busca eventos com ts_cross <= now-900 e attempts < 3
             rows = conn.execute(
                 "SELECT id, symbol, direction, ts_cross, price_at_signal, tick_epoch, attempts FROM forex_oos_events "
                 "WHERE evaluated = 0 AND ts_cross <= ? AND attempts < 3", 
@@ -455,7 +483,6 @@ def _evaluate_oos_events_loop():
                 continue
 
             for eid, sym, direction, ts_cross, price_entry, tick_epoch, attempts in rows:
-                # P0.2: Usar o epoch do tick se disponível, senão o ts_cross
                 target_ts = (tick_epoch if tick_epoch else ts_cross) + 900
                 
                 import threading as _th
@@ -466,14 +493,13 @@ def _evaluate_oos_events_loop():
                 orig = client.on_candles_callback
                 def wrapper(data, req_id_in=None):
                     if req_id_in == req_id and not event.is_set():
-                        # P0.2: Tratar o formato {"prices": [...], "times": [...]}
                         history = data.get('history', {})
                         if isinstance(history, dict) and 'times' in history:
                             times = history['times']
                             prices = history['prices']
                             holder['ticks'] = [{'epoch': times[i], 'quote': prices[i]} for i in range(len(times))]
                             event.set()
-                        elif 'candles' in data: # Fallback
+                        elif 'candles' in data:
                             holder['ticks'] = [{'epoch': c['epoch'], 'quote': c['close']} for c in data['candles']]
                             event.set()
                     if orig:
@@ -484,7 +510,6 @@ def _evaluate_oos_events_loop():
 
                 client.on_candles_callback = wrapper
                 try:
-                    # P0.2: Pedir start=target, end=target+120, count >= 100
                     client._ws_send({
                         "ticks_history": sym, "style": "ticks",
                         "start": target_ts, "end": target_ts + 120, "count": 100,
@@ -492,7 +517,6 @@ def _evaluate_oos_events_loop():
                     })
                     
                     if event.wait(timeout=10) and holder['ticks']:
-                        # Encontrar o primeiro tick com epoch >= target_ts
                         valid_ticks = [t for t in holder['ticks'] if t['epoch'] >= target_ts]
                         if valid_ticks:
                             t = valid_ticks[0]
@@ -505,7 +529,7 @@ def _evaluate_oos_events_loop():
                             else:
                                 void_reason = None
                                 if pa == price_entry:
-                                    outcome = 'loss' # Empate = loss
+                                    outcome = 'loss'
                                 else:
                                     up = pa > price_entry
                                     outcome = 'win' if ((direction == 'BUY') == up) else 'loss'
@@ -523,7 +547,7 @@ def _evaluate_oos_events_loop():
                     conn.execute("UPDATE forex_oos_events SET attempts=attempts+1, void_reason='erro_excecao' WHERE id=?", (eid,))
                 finally:
                     client.on_candles_callback = orig
-                conn.commit() # P0.2: Commit por evento
+                conn.commit()
             
             conn.close()
         except Exception as e:
@@ -1084,10 +1108,15 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 forex_mgr.subscribe_all()
                 for symbol in FOREX_SYMBOLS:
                     forex_mgr.request_candles(symbol, granularity=60, count=250)
+                    time.sleep(0.3)
                     forex_mgr.request_candles(symbol, granularity=300, count=200)
+                    time.sleep(0.3)
                     forex_mgr.request_candles(symbol, granularity=900, count=250)
+                    time.sleep(0.3)
                     forex_mgr.request_candles(symbol, granularity=1800, count=100)
+                    time.sleep(0.3)
                     forex_mgr.request_candles(symbol, granularity=3600, count=200)
+                    time.sleep(0.3)
             else:
                 auth_err = getattr(client, 'auth_error', None)
                 if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
@@ -1539,6 +1568,7 @@ def debug_oos_status():
     counts = conn.execute("SELECT threshold, outcome, COUNT(*) FROM forex_oos_events GROUP BY threshold, outcome").fetchall()
     db_created = conn.execute("SELECT value FROM settings WHERE key='db_created_at'").fetchone()
     boot_count = conn.execute("SELECT value FROM settings WHERE key='boot_count'").fetchone()
+    last_boot = conn.execute("SELECT value FROM settings WHERE key='last_boot_at'").fetchone()
     conn.close()
     
     heartbeat = {}
@@ -1549,7 +1579,8 @@ def debug_oos_status():
         'heartbeat': heartbeat, 
         'oos_event_counts': counts,
         'db_created_at': db_created[0] if db_created else None,
-        'boot_count': boot_count[0] if boot_count else None
+        'boot_count': boot_count[0] if boot_count else None,
+        'last_boot_at': last_boot[0] if last_boot else None
     })
 
 @app.route('/api/debug/dump_candles/<symbol>')
@@ -1731,9 +1762,10 @@ def _validate_amount(amount):
     return amt, None
 
 def _check_real_trading():
-    """Bloqueia trades em conta real se ALLOW_REAL_TRADING for False."""
     if not ALLOW_REAL_TRADING:
-        return "Trading em conta real desativado pelo administrador."
+        user = UserStore.get(session.get('user_email'))
+        if user and user.get('active_account') == 'real':
+            return "Trading em conta real desativado pelo administrador."
     return None
 
 @app.route('/api/trade/digit', methods=['POST'])
@@ -1743,9 +1775,8 @@ def trade_digit():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado'}), 400
-    if not sess['client'].loginid.startswith('VR'):
-        err = _check_real_trading()
-        if err: return jsonify({'error': err}), 403
+    err = _check_real_trading()
+    if err: return jsonify({'error': err}), 403
     block_msg = _session_goals_block(sess)
     if block_msg:
         return jsonify({'error': block_msg}), 400
@@ -1784,9 +1815,8 @@ def trade_differ():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado'}), 400
-    if not sess['client'].loginid.startswith('VR'):
-        err = _check_real_trading()
-        if err: return jsonify({'error': err}), 403
+    err = _check_real_trading()
+    if err: return jsonify({'error': err}), 403
     block_msg = _session_goals_block(sess)
     if block_msg:
         return jsonify({'error': block_msg}), 400
@@ -1824,9 +1854,8 @@ def trade_matches():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado'}), 400
-    if not sess['client'].loginid.startswith('VR'):
-        err = _check_real_trading()
-        if err: return jsonify({'error': err}), 403
+    err = _check_real_trading()
+    if err: return jsonify({'error': err}), 403
     block_msg = _session_goals_block(sess)
     if block_msg:
         return jsonify({'error': block_msg}), 400
@@ -1864,9 +1893,8 @@ def trade_zscore():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado'}), 400
-    if not sess['client'].loginid.startswith('VR'):
-        err = _check_real_trading()
-        if err: return jsonify({'error': err}), 403
+    err = _check_real_trading()
+    if err: return jsonify({'error': err}), 403
     block_msg = _session_goals_block(sess)
     if block_msg:
         return jsonify({'error': block_msg}), 400
@@ -2160,7 +2188,6 @@ def forex_candles(symbol):
     if not sess or not sess.get('forex_data'):
         return jsonify({'error': 'Módulo Forex indisponível'}), 503
     
-    # P2: validar count e granularity
     granularity = request.args.get('granularity', 60, type=int)
     count = min(int(request.args.get('count', 50)), 500)
     
@@ -2220,9 +2247,8 @@ def forex_trade():
     sess = get_session(session['user_id'])
     if not sess or not sess['client'].authorized:
         return jsonify({'error': 'Não conectado à Deriv'}), 400
-    if not sess['client'].loginid.startswith('VR'):
-        err = _check_real_trading()
-        if err: return jsonify({'error': err}), 403
+    err = _check_real_trading()
+    if err: return jsonify({'error': err}), 403
     
     d = request.json
     symbol = d.get('symbol', '').strip()
