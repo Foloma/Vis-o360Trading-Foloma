@@ -368,6 +368,7 @@ class DerivWebSocketClient:
                 'proposal_open_contract': self._on_poc,
                 'error':                  self._on_api_error,
                 'candles':                self._on_candles,
+                'history':                self._on_history, # P0.2: Adicionado handler
                 'pong':                   self._on_pong,
                 'contracts_for':          self._on_contracts_for,
             }
@@ -885,9 +886,6 @@ class DerivWebSocketClient:
                 logger.error(f"Falha ao reassinar {cid}: {e}")
 
     def _extract_last_digit(self, value, symbol=None):
-        """P0.1: extrai último dígito respeitando o nº de decimais do símbolo.
-        Para R_100 usa 2 decimais; para R_50/R_75 usa 4; etc. Sem isto, o dígito
-        extraído de R_50/R_75 estava errado (cortava no 3º decimal)."""
         if value is None:
             return None
         try:
@@ -929,7 +927,6 @@ class DerivWebSocketClient:
         entry_tick_time = c.get('entry_tick_time')
         exit_tick_time = c.get('exit_tick_time')
 
-        # P0.1: usar o símbolo do próprio contrato para escolher os decimais corretos
         contract_symbol = c.get('underlying_symbol') or self.current_symbol
         entry_digit = self._extract_last_digit(entry_spot, contract_symbol)
         exit_digit = self._extract_last_digit(exit_spot, contract_symbol)
@@ -1034,7 +1031,13 @@ class DerivWebSocketClient:
                 }
         if self.on_candles_callback:
             req_id = data.get('req_id')
-            self.on_candles_callback(candles, req_id)
+            self.on_candles_callback(data, req_id) # Passa o dicionário completo
+
+    def _on_history(self, data):
+        """P0.2: Handler para respostas de history (ticks exatos para o OOS)."""
+        if self.on_candles_callback:
+            req_id = data.get('req_id')
+            self.on_candles_callback(data, req_id)
 
     def get_cached_candles(self, symbol=None, max_age=None):
         if max_age is None:
