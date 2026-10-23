@@ -23,6 +23,7 @@ class TradingBot:
     score, risk, martingale, Forex ou Parity/DIFFER.
     Usa INSERT OR IGNORE + índice UNIQUE em (symbol, slow_number) para
     resistir a execuções concorrentes sem poluir logs com exceções.
+    Gate por env var ENABLE_DIGIT_RESEARCH_LOG (default: off).
     """
 
     def __init__(self):
@@ -39,7 +40,8 @@ class TradingBot:
         self.stats = {
             'total': 0, 'wins': 0, 'losses': 0,
             'win_rate': 0, 'profit_loss': 0,
-            'total_invested': 0, 'total_return': 0,
+            'total_invested': 0, 'total_invested_resolved': 0,
+            'total_return': 0,
             'expired_trades': 0
         }
 
@@ -91,10 +93,18 @@ class TradingBot:
         logger.info("▶️ Resumido")
 
     def on_disconnect(self):
+        """
+        FIX #5: reset do martingale e do estado de clique para evitar
+        'martingale fantasma' após reconexão.
+        """
         self._client_connected = False
         self._client_authorized = False
         self.client = None
-        logger.info("🔌 Bot: sessão desconectada, flags resetadas")
+        with self._state_lock:
+            self.reset_martingale()
+            self._last_click_time = None
+            self._last_click_tick = None
+        logger.info("🔌 Bot: sessão desconectada, flags resetadas, martingale resetado")
 
     def check_risk_limits(self):
         max_loss_pct = config.RISK_LIMITS.get('max_daily_loss_percent', 5)
@@ -148,17 +158,22 @@ class TradingBot:
             if self.daily_stats['date'] != today:
                 self.reset_daily_stats()
 
+        # FIX #4: se start_balance ficou a 0 (arranque precoce antes do
+        # primeiro saldo), corrige assim que o saldo real chegar. Sem isto,
+        # stop-loss e take-profit ficam inertes o dia inteiro.
+        if self.daily_stats['start_balance'] == 0 and self.balance > 0:
+            with self._state_lock:
+                self.daily_stats['start_balance'] = self.balance
+                self._daily_stats_dirty = True
+            logger.info(f"💰 start_balance fixado em ${self.balance:.2f}")
+
         self.check_risk_limits()
         self.check_take_profit()
 
     def _maybe_record_slow_digit(self, symbol):
         """
-        Coleta paralela — grava cada novo slow_digit em digit_research_log.
-        Só grava quando o slow_number avança (evita duplicação por callback).
-        Usa INSERT OR IGNORE + índice UNIQUE (symbol, slow_number) para
-        resistir a execuções concorrentes sem poluir logs com exceções.
-        Não interfere com trading, score, risk, martingale nem Forex.
-        Falha silenciosamente (log) para não interromper ticks.
+        Coleta paralela — decide se há um novo slow_digit para gravar.
+        Só avança quando o slow_number avança (evita duplicação por callback).
         """
         try:
             getter = getattr(self.digit_analyzer, 'get_last_slow_digit_info', None)
@@ -169,13 +184,28 @@ class TradingBot:
                 return
             if slow_number <= self._last_research_slow_number:
                 return
+            self._log_research_digit(symbol, slow_digit, slow_number)
+        except Exception as e:
+            logger.error(f"Erro em _maybe_record_slow_digit: {e}")
 
+    def _log_research_digit(self, symbol, digit, slow_number):
+        """
+        Grava um novo slow_digit em digit_research_log.
+        Gate por env var ENABLE_DIGIT_RESEARCH_LOG (default: off).
+        Resiste a execuções concorrentes via INSERT OR IGNORE + índice UNIQUE.
+        Não interfere com trading, score, risk, martingale nem Forex.
+        """
+        # INÍCIO DO BLOCO
+        if os.environ.get('ENABLE_DIGIT_RESEARCH_LOG', 'false').lower() != 'true':
+            return
+        # FIM DO BLOCO
+        try:
             conn = sqlite3.connect(self._db_path, timeout=5)
             try:
                 conn.execute(
                     "INSERT OR IGNORE INTO digit_research_log (symbol, digit, slow_number, timestamp) "
                     "VALUES (?, ?, ?, ?)",
-                    (symbol, int(slow_digit), int(slow_number), time.time())
+                    (symbol, int(digit), int(slow_number), time.time())
                 )
                 conn.commit()
                 self._last_research_slow_number = slow_number
@@ -183,6 +213,10 @@ class TradingBot:
                 conn.close()
         except Exception as e:
             logger.error(f"Erro ao registrar digit_research_log: {e}")
+            # FIX #2: avança o marcador mesmo em erro, para não spammar
+            # uma linha de log por tick quando a tabela não existe ou a BD
+            # está bloqueada.
+            self._last_research_slow_number = slow_number
 
     def get_status(self):
         self.check_pending_trades()
@@ -309,8 +343,8 @@ class TradingBot:
             return s
 
     def register_trade(self, trade_data):
-        trade_data['timestamp'] = datetime.now()
         with self._state_lock:
+            trade_data['timestamp'] = datetime.now()
             self.trades.append(trade_data)
             self.stats['total'] += 1
             self.stats['total_invested'] += trade_data['amount']
@@ -320,40 +354,53 @@ class TradingBot:
 
     def update_stats(self):
         """
-        FIX: usa contadores acumulados — nunca recalcula a partir do deque.
+        FIX #1: win_rate só conta trades efetivamente resolvidos
+        (wins + losses), excluindo expirados e pendentes.
+        total_return usa apenas o capital investido em trades já resolvidos.
         """
         with self._state_lock:
-            total = self.stats['total']
             wins = self.stats['wins']
             losses = self.stats['losses']
-            invested = self.stats['total_invested']
+            resolved = wins + losses
+            invested_resolved = self.stats['total_invested_resolved']
             pl = self.stats['profit_loss']
 
-            self.stats['win_rate'] = (wins / total) * 100 if total > 0 else 0
-            self.stats['total_return'] = (pl / invested) * 100 if invested > 0 else 0
+            self.stats['win_rate'] = (wins / resolved) * 100 if resolved > 0 else 0
+            self.stats['total_return'] = (pl / invested_resolved) * 100 if invested_resolved > 0 else 0
 
     def check_pending_trades(self):
         now = datetime.now()
         updated = False
-        for trade in list(self.trades):
-            if trade.get('result') == 'pending':
+        with self._state_lock:
+            for trade in list(self.trades):
+                if trade.get('result') != 'pending':
+                    continue
+
                 elapsed = (now - trade['timestamp']).total_seconds()
                 is_digit = trade.get('is_digit', False)
-                timeout = 15 if is_digit else 60
-                if elapsed > timeout:
-                    with self._state_lock:
-                        if trade.get('result') != 'pending':
-                            logger.info(f"Trade {trade.get('contract_id')} já resolvido como '{trade.get('result')}' — a ignorar expiração")
-                            continue
-                        trade['result'] = 'expired'
-                        trade['profit'] = 0
-                        self.daily_stats['losses'] += 1
-                        self.daily_stats['profit_loss'] -= trade.get('amount', 0)
-                        self.stats['expired_trades'] += 1
-                        self.daily_stats['expired_trades'] += 1
-                        self._daily_stats_dirty = True
-                        updated = True
-                    logger.warning(f"⚠️ Trade pendente expirado: {trade.get('action')} ${trade.get('amount')} (ID: {trade.get('contract_id')})")
+
+                # FIX #6: respeita a duração real do contrato, se o caller
+                # a passar em trade_data['duration']; senão usa fallback.
+                base = trade.get('duration') or (15 if is_digit else 60)
+                timeout = base + (5 if is_digit else 10)
+
+                if elapsed <= timeout:
+                    continue
+
+                trade['result'] = 'expired'
+                trade['profit'] = 0
+                self.daily_stats['losses'] += 1
+                self.daily_stats['profit_loss'] -= trade.get('amount', 0)
+                self.stats['expired_trades'] += 1
+                self.stats['total_invested_resolved'] += trade.get('amount', 0)
+                self.daily_stats['expired_trades'] += 1
+                self._daily_stats_dirty = True
+                updated = True
+                logger.warning(
+                    f"⚠️ Trade pendente expirado: {trade.get('action')} "
+                    f"${trade.get('amount')} (ID: {trade.get('contract_id')}, "
+                    f"timeout={timeout:.0f}s)"
+                )
         if updated:
             self.update_stats()
 
@@ -400,6 +447,12 @@ class TradingBot:
                     self.daily_stats['profit_loss'] += target_trade.get('amount', 0)
                     self.stats['expired_trades'] -= 1
                     self.daily_stats['expired_trades'] -= 1
+                    # NÃO incrementar total_invested_resolved: já foi contado
+                    # quando o trade foi marcado como 'expired'.
+                else:
+                    # FIX #1: trade pendente a resolver agora — conta como
+                    # resolvido para a base do total_return.
+                    self.stats['total_invested_resolved'] += target_trade.get('amount', 0)
 
                 if is_win:
                     target_trade['result'] = 'win'
@@ -517,14 +570,34 @@ class TradingBot:
             }
 
     def reset_stats(self):
+        """
+        FIX #3: reset completo — stats, histórico, martingale, daily_stats,
+        resultado do último trade e estado de clique.
+        """
         with self._state_lock:
             self.stats = {
                 'total': 0, 'wins': 0, 'losses': 0,
                 'win_rate': 0, 'profit_loss': 0,
-                'total_invested': 0, 'total_return': 0,
+                'total_invested': 0, 'total_invested_resolved': 0,
+                'total_return': 0,
                 'expired_trades': 0
             }
             self.trades.clear()
             self.consecutive_losses = 0
             self.consecutive_wins = 0
-        logger.info("📊 Estatísticas e histórico resetados")
+            self.martingale = {
+                'active': False, 'step': 0,
+                'original_amount': 0, 'last_result': None
+            }
+            self.daily_stats = {
+                'date': datetime.now().date(), 'trades': 0,
+                'wins': 0, 'losses': 0, 'profit_loss': 0,
+                'start_balance': self.balance, 'expired_trades': 0
+            }
+            self.stop_loss_active = False
+            self.last_trade_result = None
+            self._last_signal_id = None
+            self._last_click_time = None
+            self._last_click_tick = None
+            self._daily_stats_dirty = True
+        logger.info("📊 Reset completo: stats, histórico, martingale, daily_stats")
