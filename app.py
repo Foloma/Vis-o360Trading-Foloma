@@ -171,7 +171,7 @@ def init_db():
             last_beat REAL, active_pairs INTEGER, buffer_m15 INTEGER, buffer_h1 INTEGER
         )''')
 
-        # [FIX P3] Marcadores de persistência
+        # Marcadores de persistência
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('db_created_at', ?)", (str(time.time()),))
         row = c.execute("SELECT value FROM settings WHERE key='boot_count'").fetchone()
         if row:
@@ -187,10 +187,10 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-        # [FIX P1] Promover o utilizador do Jacob a admin
+        # Promover o utilizador do Jacob a admin
         c.execute("UPDATE users SET role='admin' WHERE email='jacobfoloma8@gmail.com'")
 
-        # [FIX P1] Criar admin de forma segura apenas se as variáveis existirem
+        # Criar admin de forma segura apenas se as variáveis existirem
         if ADMIN_EMAIL and ADMIN_PASSWORD:
             admin_check = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
             if admin_check == 0:
@@ -340,7 +340,6 @@ def _get_active_session():
     return None
 
 def _repair_candles_loop():
-    """[FIX P4] Loop de reparação de velas em falta."""
     while True:
         time.sleep(60)
         try:
@@ -406,7 +405,6 @@ def _generate_forex_signals_loop():
             if forex_signals:
                 signals = forex_signals.get_all_signals()
                 
-                # [FIX P4] Filtrar sinais se as velas estiverem incompletas
                 valid_signals = []
                 for s in signals:
                     sym = s['symbol']
@@ -1071,9 +1069,17 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             'forex_data': forex_mgr, 'forex_signals': forex_signals, 'forex_indicators': forex_indicators
         })
 
-        def on_candles(candles, req_id=None):
-            new_sess['candles'] = candles
-            forex_mgr.on_candles({'candles': candles}, req_id=req_id)
+        # ==========================================
+        # [FIX] FUNÇÃO ON_CANDLES CORRIGIDA AQUI
+        # ==========================================
+        def on_candles(data, req_id=None):
+            if isinstance(data, dict):
+                new_sess['candles'] = data.get('candles', [])
+                forex_mgr.on_candles(data, req_id=req_id)
+            else:
+                new_sess['candles'] = data
+                forex_mgr.on_candles({'candles': data}, req_id=req_id)
+        # ==========================================
 
         client.on_candles_callback = on_candles
         sessions[user_id] = new_sess
