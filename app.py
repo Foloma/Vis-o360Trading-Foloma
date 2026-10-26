@@ -1,4 +1,6 @@
 import os, sqlite3, hashlib, base64, json, secrets, time, threading, logging, uuid, urllib.parse, urllib.request
+import sys
+import traceback
 from datetime import datetime, date, timezone
 from functools import wraps
 from flask import Flask, render_template, jsonify, request, session, redirect, abort, make_response
@@ -280,6 +282,7 @@ def _cleanup_loop():
                     client = sess.get('client')
                     last_tick = getattr(client, '_last_tick_time', 0)
                     if last_tick and (now - last_tick) > 1800:
+                        logger.info(f"🧹 Cleanup: Removendo sessão | UID: {uid} | Último tick: há {now - last_tick:.1f}s | Motivo: idle_timeout")
                         to_disconnect.append(sess)
                         to_remove.append(uid)
                 for uid in to_remove:
@@ -311,8 +314,20 @@ def _feed_watchdog_loop():
             with sessions_lock:
                 sess = sessions.get(feed_user['id'])
             
-            if not sess or not sess.get('client') or not sess['client'].authorized:
-                logger.warning("⚠️ Feed User sem sessão. A recriar...")
+            if sess and sess.get('client') and sess['client']._connecting:
+                logger.info("⏳ Feed Watchdog: Conexão em andamento (_connecting=True). Aguardando...")
+                continue
+            
+            force = False
+            if sess and sess.get('client') and sess['client'].authorized:
+                last_tick = sess['client'].get_last_tick_seconds_ago()
+                forex_empty = sum(sess['client']._forex_tick_counts.values()) == 0
+                if last_tick > 30 or forex_empty:
+                    logger.warning(f"🔄 Feed Watchdog: Sessão zombie (R_100 há {last_tick}s, Forex vazio={forex_empty}). A recriar...")
+                    force = True
+            
+            if not sess or force or not sess.get('client') or not sess['client'].authorized:
+                logger.warning("⚠️ Feed User sem sessão saudável. A recriar...")
                 ws_url, balance, currency = get_otp_ws_url(FEED_USER_EMAIL, feed_user.get('active_account', 'demo'))
                 if ws_url:
                     sess = create_session(feed_user['id'], feed_user, force=True, ws_url_override=ws_url)
@@ -1069,9 +1084,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             'forex_data': forex_mgr, 'forex_signals': forex_signals, 'forex_indicators': forex_indicators
         })
 
-        # ==========================================
-        # [FIX] FUNÇÃO ON_CANDLES CORRIGIDA AQUI
-        # ==========================================
         def on_candles(data, req_id=None):
             if isinstance(data, dict):
                 new_sess['candles'] = data.get('candles', [])
@@ -1079,7 +1091,6 @@ def create_session(user_id, user, force=False, ws_url_override=None):
             else:
                 new_sess['candles'] = data
                 forex_mgr.on_candles({'candles': data}, req_id=req_id)
-        # ==========================================
 
         client.on_candles_callback = on_candles
         sessions[user_id] = new_sess
@@ -1094,7 +1105,8 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 client._connecting = True
             try:
                 client.connect()
-                deadline = time.time() + 10
+                # Ponto 3: Esperar até 30s pela autorização
+                deadline = time.time() + 30
                 while not client.authorized and time.time() < deadline:
                     time.sleep(0.2)
             finally:
@@ -1382,16 +1394,27 @@ def api_connect():
         token = UserStore.get_active_token(user)
         if not token:
             return jsonify({'error': 'Token não configurado'}), 400
+        
+        # Ponto 4: Verificar se a sessão está zombie para forçar reconexão
+        sess = get_session(user_id)
+        force = False
+        if sess:
+            last_tick = sess['client'].get_last_tick_seconds_ago()
+            forex_empty = sum(sess['client']._forex_tick_counts.values()) == 0
+            if last_tick > 30 or forex_empty:
+                logger.warning(f"🔄 /api/connect: Sessão zombie (R_100 há {last_tick}s, Forex vazio={forex_empty}). A forçar...")
+                force = True
+
         ws_url, balance, currency = _get_otp_with_retry(email, user.get('active_account', 'demo'))
         if not ws_url:
             return jsonify({'error': 'Sessão expirada. Clique em Reconectar.'}), 400
-        sess = create_session(user_id, user, ws_url_override=ws_url)
+        sess = create_session(user_id, user, force=force, ws_url_override=ws_url)
         if sess and balance > 0:
             sess['client'].balance = balance
             sess['client'].currency = currency
             sess['trading_bot'].balance = balance
             sess['trading_bot'].currency = currency
-        return jsonify({'status': 'connecting', 'account_type': user.get('active_account')})
+        return jsonify({'status': 'connecting', 'account_type': user.get('active_account'), 'forced': force})
     finally:
         with connecting_lock:
             connecting_users.discard(user_id)
@@ -1403,19 +1426,29 @@ def auto_connect():
     user = UserStore.get(email)
     if not UserStore.get_active_token(user):
         return jsonify({'status': 'no_token'})
+    
     sess = get_session(session['user_id'])
+    force = False
     if sess and sess['client'].connected and sess['client'].authorized:
-        return jsonify({'status': 'already_connected', 'balance': sess['client'].balance})
+        # Ponto 4: Verificar se a sessão está zombie no auto-connect
+        last_tick = sess['client'].get_last_tick_seconds_ago()
+        forex_empty = sum(sess['client']._forex_tick_counts.values()) == 0
+        if last_tick > 30 or forex_empty:
+            logger.warning(f"🔄 auto-connect: Sessão zombie detetada. A forçar...")
+            force = True
+        else:
+            return jsonify({'status': 'already_connected', 'balance': sess['client'].balance})
+            
     ws_url, balance, currency = _get_otp_with_retry(email, user.get('active_account', 'demo'))
     if not ws_url:
         return jsonify({'status': 'token_expired', 'message': 'Sessão expirada. Clique em Reconectar.'})
-    sess = create_session(session['user_id'], user, ws_url_override=ws_url)
+    sess = create_session(session['user_id'], user, force=force, ws_url_override=ws_url)
     if sess and balance > 0:
         sess['client'].balance = balance
         sess['client'].currency = currency
         sess['trading_bot'].balance = balance
         sess['trading_bot'].currency = currency
-    return jsonify({'status': 'connecting'})
+    return jsonify({'status': 'connecting', 'forced': force})
 
 @app.route('/api/auth/switch-account', methods=['POST'])
 @require_auth
@@ -1542,6 +1575,24 @@ def sync_daily_stats():
         _save_daily_stats_to_db(session.get('user_email'), sess['trading_bot'])
         return jsonify({'status': 'ok'})
     return jsonify({'error': 'Sem sessão'}), 400
+
+@app.route('/api/debug/threads')
+@require_admin
+def debug_threads():
+    """Ponto 1: Rota de debug para ver o estado de todas as threads."""
+    frames = sys._current_frames()
+    threads_data = []
+    
+    for thread in threading.enumerate():
+        frame = frames.get(thread.ident)
+        stack = traceback.format_stack(frame) if frame else ["Sem pilha disponível"]
+        threads_data.append({
+            "name": thread.name,
+            "ident": thread.ident,
+            "alive": thread.is_alive(),
+            "stack": stack
+        })
+    return jsonify({"threads": threads_data})
 
 @app.route('/api/debug')
 @require_admin
