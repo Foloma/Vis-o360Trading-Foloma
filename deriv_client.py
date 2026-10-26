@@ -18,7 +18,6 @@ SYMBOL_PIPS = {
 
 FOREX_SYMBOLS = ['frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxAUDUSD', 'frxUSDCAD', 'frxUSDCHF']
 
-
 class DerivWebSocketClient:
     ST_DISCONNECTED = 'DISCONNECTED'
     ST_CONNECTING   = 'CONNECTING'
@@ -141,9 +140,6 @@ class DerivWebSocketClient:
             return 999
         return round(time.time() - self._last_tick_time, 1)
 
-    # ==========================================
-    # PONTO 4: force=True para reconexões forçadas
-    # ==========================================
     def connect(self, force=False):
         with self._connect_lock:
             if self._connecting and not force:
@@ -195,11 +191,18 @@ class DerivWebSocketClient:
             try:
                 ws_url = self._get_ws_url()
                 logger.info(f"🔌 A ligar à Deriv em {ws_url}...")
-                self.ws = websocket.create_connection(ws_url, timeout=5)
+                
+                # CORREÇÃO CRÍTICA: Desativar proxy para não interferir com o Render
+                self.ws = websocket.create_connection(
+                    ws_url, 
+                    timeout=15, 
+                    http_proxy_host=None, 
+                    http_proxy_port=None
+                )
                 self.ws.settimeout(3.0)
                 self.connected = True
                 
-                # PONTO 3: Timeout de auth aumentado para 30s no método interno
+                # PONTO 3: Timeout de auth aumentado para 30s
                 if not self._authorize_and_wait():
                     logger.error("Falha na autorização")
                     self._consecutive_failures += 1
@@ -212,7 +215,7 @@ class DerivWebSocketClient:
                 if not self._is_otp_ws():
                     self._subscribe_balance()
 
-                # PONTO 3 e ACEITAÇÃO: Subscrever tudo e pedir velas
+                # Subscrever tudo e pedir velas
                 self._subscribe_all()
                 self._request_all_candles()
 
@@ -228,12 +231,13 @@ class DerivWebSocketClient:
                 self._had_gap = False
                 self._first_connect = False
 
-                logger.info("🟢 Conectado e autorizado")
+                logger.info("🟢 Conectado e autorizado. A iniciar loops de leitura.")
                 self._start_keep_alive()
                 self._start_watchdog()
                 self._read_loop()
             except Exception as e:
-                logger.error(f"Erro no loop principal: {e}")
+                # Adicionado exc_info para vermos a linha exata do erro
+                logger.error(f"Erro no loop principal: {e}", exc_info=True)
                 self._consecutive_failures += 1
             finally:
                 self._stop_poller()
@@ -250,23 +254,16 @@ class DerivWebSocketClient:
             if self._stop_event.wait(timeout=total_wait):
                 break
 
-    # ==========================================
-    # PONTO 3: Subscrever TUDO e pedir velas
-    # ==========================================
     def _subscribe_all(self):
-        # R_100
         self._subscribe_ticks(self.current_symbol)
-        # Forex
         for sym in FOREX_SYMBOLS:
             self._subscribe_ticks(sym)
 
     def _request_all_candles(self):
-        # R_100
         self.request_candles(self.current_symbol, granularity=900, count=120)
-        # Forex (M15 e H1)
         for sym in FOREX_SYMBOLS:
-            self.request_candles(sym, granularity=900, count=120) # M15 >= 100
-            self.request_candles(sym, granularity=3600, count=80) # H1 >= 70
+            self.request_candles(sym, granularity=900, count=120)
+            self.request_candles(sym, granularity=3600, count=80)
 
     def _start_poller(self):
         self._stop_poller()
@@ -319,9 +316,6 @@ class DerivWebSocketClient:
         self._tick_subscription_ids.clear()
         self._forex_tick_counts = {sym: 0 for sym in FOREX_SYMBOLS}
 
-    # ==========================================
-    # PONTO 3: Timeout de 30s
-    # ==========================================
     def _authorize_and_wait(self, timeout=30):
         if self._is_otp_ws():
             self.authorized = True
@@ -393,11 +387,13 @@ class DerivWebSocketClient:
             try:
                 msg = self.ws.recv()
                 if not msg:
+                    logger.warning("Socket devolveu mensagem vazia (fechado)")
                     break
                 self._on_message(msg)
             except websocket.WebSocketTimeoutException:
                 continue
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Leitura do socket interrompida: {e}")
                 break
 
     def _on_message(self, message):
@@ -464,7 +460,7 @@ class DerivWebSocketClient:
 
     def _start_ping_timer(self):
         self._cancel_ping_timer()
-        self._ping_timer = threading.Timer(10.0, self._ping_timeout) # Aumentado ligeiramente para segurança
+        self._ping_timer = threading.Timer(10.0, self._ping_timeout)
         self._ping_timer.daemon = True
         self._ping_timer.start()
 
@@ -473,15 +469,12 @@ class DerivWebSocketClient:
             self._ping_timer.cancel()
             self._ping_timer = None
 
-    # ==========================================
-    # PONTO 4: Fechar a ligação se o pong falhar
-    # ==========================================
     def _ping_timeout(self):
         if self._ping_pending:
             self._ping_ms = 9999
             self._ping_pending = False
             logger.warning("🏓 Pong não recebido — a forçar fecho do socket para reconectar")
-            self._close_connection() # Isto força o _read_loop a falhar e o _run_forever a reconectar
+            self._close_connection()
 
     def _on_pong(self, data):
         self._cancel_ping_timer()
@@ -502,9 +495,6 @@ class DerivWebSocketClient:
         if self._watchdog_thread and self._watchdog_thread.is_alive():
             self._watchdog_thread.join(timeout=2)
 
-    # ==========================================
-    # PONTO 5: Vigilante do feed (Auto-recuperação < 60s)
-    # ==========================================
     def _watchdog_loop(self):
         while not self._stop_event.is_set() and not self._watchdog_stop.is_set():
             if self._watchdog_stop.wait(timeout=10):
@@ -515,7 +505,6 @@ class DerivWebSocketClient:
             now = time.time()
             r100_age = self.get_last_tick_seconds_ago()
             
-            # Se já passaram 30s desde a auth e ainda não há ticks, ou se parou há mais de 30s
             if self._auth_time and (now - self._auth_time > 30):
                 if self.streaming and self._last_tick_time is not None:
                     if r100_age > 30:
@@ -526,7 +515,6 @@ class DerivWebSocketClient:
                         self._close_connection()
                         break
                 
-                # Verifica se o Forex recebeu ticks (Aceitação: tick_count > 0)
                 total_forex = sum(self._forex_tick_counts.values())
                 if total_forex == 0:
                     logger.warning(f"🛑 Watchdog [{self._feed_session_id}]: Forex sem dados há {now - self._auth_time:.1f}s. A forçar reconexão.")
@@ -596,7 +584,6 @@ class DerivWebSocketClient:
         if sub_id and symbol not in self._tick_subscription_ids:
             self._tick_subscription_ids[symbol] = sub_id
             
-        # PONTO 5: Contar ticks Forex para o watchdog
         if symbol in FOREX_SYMBOLS:
             self._forex_tick_counts[symbol] += 1
 
