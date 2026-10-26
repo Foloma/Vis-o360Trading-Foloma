@@ -1098,20 +1098,21 @@ def create_session(user_id, user, force=False, ws_url_override=None):
     token = UserStore.get_active_token(user)
     if token:
         client.set_user_token(token)
+        
+        # [FIX APLICADO AQUI]
         def connect_and_validate():
-            with client._connect_lock:
-                if client._connecting:
-                    return
-                client._connecting = True
             try:
-                client.connect()
+                # O client gere o seu próprio lock e _connecting internamente.
+                # Usamos force=True para garantir que arranca uma thread nova.
+                client.connect(force=True)
+                
                 # Ponto 3: Esperar até 30s pela autorização
                 deadline = time.time() + 30
                 while not client.authorized and time.time() < deadline:
                     time.sleep(0.2)
-            finally:
-                with client._connect_lock:
-                    client._connecting = False
+            except Exception as e:
+                logger.error(f"Erro em connect_and_validate: {e}")
+            
             if client.authorized:
                 if client.loginid != 'OTP_AUTH':
                     if not validate_account_type(client.loginid, user.get('active_account', 'demo')):
@@ -1140,6 +1141,8 @@ def create_session(user_id, user, force=False, ws_url_override=None):
                 if auth_err and isinstance(auth_err, dict) and auth_err.get('code') == 'InvalidToken':
                     UserStore.add_token(user['email'], user.get('active_account', 'demo'), '')
                 bot.on_disconnect()
+                logger.error("❌ Falha na autorização do WebSocket após 30s.")
+                
         threading.Thread(target=connect_and_validate, daemon=True).start()
     return new_sess
 
