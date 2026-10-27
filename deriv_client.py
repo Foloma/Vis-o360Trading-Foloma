@@ -53,6 +53,7 @@ class DerivWebSocketClient:
         self._poller_stop = threading.Event()
         self._last_tick_time = None
         self._last_tick_epoch = None
+        self._last_msg_time = time.time() # <-- NOVO: Rastreio de qualquer mensagem
         self._last_trade_time = 0
         self._processed_contracts = deque(maxlen=1000)
         self._processed_lock = threading.Lock()
@@ -95,7 +96,6 @@ class DerivWebSocketClient:
         self._contracts_for_lock = threading.Lock()
         self._pending_contracts_for = {}
         
-        # PONTO 5: ID da sessão do vigilante
         self._feed_session_id = '__feed__'
 
     def set_digit_analyzer(self, a):
@@ -138,9 +138,6 @@ class DerivWebSocketClient:
             return 999
         return round(time.time() - self._last_tick_time, 1)
 
-    # ==========================================
-    # PONTO 4: force=True para reconexões forçadas
-    # ==========================================
     def connect(self, force=False):
         with self._connect_lock:
             if self._connecting and not force:
@@ -196,7 +193,6 @@ class DerivWebSocketClient:
                 self.ws.settimeout(3.0)
                 self.connected = True
                 
-                # PONTO 3: Timeout de auth aumentado para 30s no método interno
                 if not self._authorize_and_wait():
                     logger.error("Falha na autorização")
                     self._consecutive_failures += 1
@@ -209,7 +205,6 @@ class DerivWebSocketClient:
                 if not self._is_otp_ws():
                     self._subscribe_balance()
 
-                # Subscreve apenas o R_100 (o Forex é gerido pelo forex_data via app.py)
                 self._subscribe_all()
                 self._request_all_candles()
 
@@ -228,7 +223,15 @@ class DerivWebSocketClient:
                 logger.info("🟢 Conectado e autorizado. A iniciar loops de leitura.")
                 self._start_keep_alive()
                 self._start_watchdog()
+                
+                # FIX 3: Marca o inicio do loop para ver se a ligação é saudável
+                conn_start = time.time()
                 self._read_loop()
+                
+                if time.time() - conn_start >= 60:
+                    backoff = 1
+                    logger.info("⏱️ Ligação saudável durante >60s. Backoff reiniciado para 1.")
+                    
             except Exception as e:
                 logger.error(f"Erro no loop principal: {e}")
                 self._consecutive_failures += 1
@@ -247,16 +250,10 @@ class DerivWebSocketClient:
             if self._stop_event.wait(timeout=total_wait):
                 break
 
-    # ==========================================
-    # FIX 1 & 2: Apenas o R_100. Sem Forex.
-    # O Forex é subscrevido/gerido EXCLUSIVAMENTE pelo forex_data.py via app.py.
-    # ==========================================
     def _subscribe_all(self):
-        """Subscreve apenas o símbolo principal (R_100). Forex é do forex_data."""
         self._subscribe_ticks(self.current_symbol)
 
     def _request_all_candles(self):
-        """Pede apenas velas do R_100. Forex é do forex_data."""
         self.request_candles(self.current_symbol, granularity=900, count=120)
 
     def _start_poller(self):
@@ -304,14 +301,12 @@ class DerivWebSocketClient:
         self.streaming = False
         self._last_tick_time = None
         self._last_tick_epoch = None
+        self._last_msg_time = time.time() # <-- Reset ao iniciar ligação
         self.state = self.ST_DISCONNECTED
         self.loginid = None
         self.auth_error = None
         self._tick_subscription_ids.clear()
 
-    # ==========================================
-    # PONTO 3: Timeout de 30s
-    # ==========================================
     def _authorize_and_wait(self, timeout=30):
         if self._is_otp_ws():
             self.authorized = True
@@ -334,7 +329,11 @@ class DerivWebSocketClient:
         while time.time() < deadline and not self._stop_event.is_set():
             try:
                 msg = self.ws.recv()
+                if not msg:
+                    continue
                 data = json.loads(msg)
+                self._last_msg_time = time.time() # <-- Atualiza
+                
                 if data.get('msg_type') == 'authorize':
                     if data.get('error'):
                         err = data['error']
@@ -393,9 +392,12 @@ class DerivWebSocketClient:
     def _on_message(self, message):
         try:
             data = json.loads(message)
+            self._last_msg_time = time.time() # <-- ATUALIZA A CADA MENSAGEM
+            
             msg_type = data.get('msg_type', '')
             if msg_type not in ['tick', 'balance', 'time', 'ping', 'pong']:
                 logger.debug(f"📨 [{msg_type}]")
+                
             handlers = {
                 'tick':                   self._on_tick,
                 'balance':                self._on_balance,
@@ -406,6 +408,7 @@ class DerivWebSocketClient:
                 'candles':                self._on_candles,
                 'history':                self._on_history,
                 'pong':                   self._on_pong,
+                'ping':                   self._on_pong, # <-- FIX 1: Mapear 'ping' para _on_pong
                 'contracts_for':          self._on_contracts_for,
             }
             handler = handlers.get(msg_type)
@@ -447,10 +450,7 @@ class DerivWebSocketClient:
             except Exception as e:
                 consecutive_failures += 1
                 logger.error(f"Erro ao enviar ping ({consecutive_failures} falha(s)): {e}")
-                if consecutive_failures >= 3:
-                    logger.warning("🛑 Keep‑alive falhou 3x — a forçar reconexão")
-                    self._close_connection()
-                    break
+                # FIX 2: Removido o _close_connection(). Deixa o watchdog decidir.
 
     def _start_ping_timer(self):
         self._cancel_ping_timer()
@@ -463,15 +463,12 @@ class DerivWebSocketClient:
             self._ping_timer.cancel()
             self._ping_timer = None
 
-    # ==========================================
-    # PONTO 4: Fechar a ligação se o pong falhar
-    # ==========================================
     def _ping_timeout(self):
         if self._ping_pending:
             self._ping_ms = 9999
             self._ping_pending = False
-            logger.warning("🏓 Pong não recebido — a forçar fecho do socket para reconectar")
-            self._close_connection()
+            # FIX 2: Não fecha o socket à primeira falha. Deixa o watchdog agir.
+            logger.warning("🏓 Pong não recebido em 10s — mas a aguardar o Watchdog (60s sem mensagens) para decidir.")
 
     def _on_pong(self, data):
         self._cancel_ping_timer()
@@ -492,10 +489,6 @@ class DerivWebSocketClient:
         if self._watchdog_thread and self._watchdog_thread.is_alive():
             self._watchdog_thread.join(timeout=2)
 
-    # ==========================================
-    # PONTO 5: Vigilante do feed (Auto-recuperação < 60s)
-    # Verifica apenas R_100. A verificação de Forex vazio vive no app.py.
-    # ==========================================
     def _watchdog_loop(self):
         while not self._stop_event.is_set() and not self._watchdog_stop.is_set():
             if self._watchdog_stop.wait(timeout=10):
@@ -504,18 +497,16 @@ class DerivWebSocketClient:
                 break
             
             now = time.time()
-            r100_age = self.get_last_tick_seconds_ago()
+            msg_age = now - self._last_msg_time
             
-            # Só verifica o R_100. Forex é responsabilidade do app.py/forex_data.py
-            if self._auth_time and (now - self._auth_time > 30):
-                if self.streaming and self._last_tick_time is not None:
-                    if r100_age > 30:
-                        if self.active_trades:
-                            logger.warning(f"🛑 Watchdog [{self._feed_session_id}]: >30s sem ticks R_100, mas há trades ativos — a aguardar")
-                            continue
-                        logger.warning(f"🛑 Watchdog [{self._feed_session_id}]: >30s sem ticks R_100. Último tick há {r100_age}s. A forçar reconexão.")
-                        self._close_connection()
-                        break
+            # FIX 2: Reconectar APENAS se NENHUMA mensagem chegar em 60s
+            if msg_age > 60:
+                if self.active_trades:
+                    logger.warning(f"🛑 Watchdog [{self._feed_session_id}]: >60s sem NENHUMA mensagem, mas há trades ativos — a aguardar")
+                    continue
+                logger.warning(f"🛑 Watchdog [{self._feed_session_id}]: >60s sem NENHUMA mensagem (última há {msg_age:.1f}s). A forçar reconexão.")
+                self._close_connection()
+                break
 
     def change_symbol(self, symbol):
         old_symbol = self.current_symbol
